@@ -14,8 +14,15 @@ const lookPadEl = document.getElementById("look-pad");
 const jumpButtonEl = document.getElementById("btn-jump");
 const shootButtonEl = document.getElementById("btn-shoot");
 const buildButtonEl = document.getElementById("btn-build");
+const buildMortarButtonEl = document.getElementById("btn-build-mortar");
 const placeButtonEl = document.getElementById("btn-place");
 const cancelButtonEl = document.getElementById("btn-cancel");
+const waveCounterEl = document.getElementById("wave-counter");
+const towersAvailableEl = document.getElementById("towers-available");
+const upgradeMenuEl = document.getElementById("upgrade-menu");
+const upgradeOptionsEl = document.getElementById("upgrade-options");
+const virtualCursorEl = document.getElementById("virtual-cursor");
+const crosshairEl = document.getElementById("crosshair");
 
 const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
 if (isTouchDevice) {
@@ -23,7 +30,23 @@ if (isTouchDevice) {
 }
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05070f);
+scene.background = new THREE.Color(0x020205);
+
+const starsGeometry = new THREE.BufferGeometry();
+const starsCount = 2000;
+const posArray = new Float32Array(starsCount * 3);
+for (let i = 0; i < starsCount * 3; i++) {
+  posArray[i] = (Math.random() - 0.5) * 400;
+}
+starsGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+const starsMaterial = new THREE.PointsMaterial({
+  size: 0.8,
+  color: 0xffffff,
+  transparent: true,
+  opacity: 0.8
+});
+const starMesh = new THREE.Points(starsGeometry, starsMaterial);
+scene.add(starMesh);
 
 const camera = new THREE.PerspectiveCamera(
   75,
@@ -96,12 +119,62 @@ window.addEventListener("blur", updatePauseState);
 window.addEventListener("focus", updatePauseState);
 updatePauseState();
 
-renderer.domElement.addEventListener("contextmenu", (event) => {
+document.addEventListener("contextmenu", (event) => {
   event.preventDefault();
 });
 
-renderer.domElement.addEventListener("mousedown", (event) => {
+let isPrimaryDown = false;
+let vCursorX = window.innerWidth / 2;
+let vCursorY = window.innerHeight / 2;
+
+function updateVirtualCursor() {
+  virtualCursorEl.style.left = `${vCursorX}px`;
+  virtualCursorEl.style.top = `${vCursorY}px`;
+}
+
+let hoveredBtn = null;
+
+window.addEventListener("mousemove", (event) => {
+  if (waveState === "MENU" && player.controls.isLocked) {
+    vCursorX += event.movementX;
+    vCursorY += event.movementY;
+    vCursorX = Math.max(0, Math.min(window.innerWidth, vCursorX));
+    vCursorY = Math.max(0, Math.min(window.innerHeight, vCursorY));
+    updateVirtualCursor();
+
+    virtualCursorEl.classList.remove("visible");
+    const el = document.elementFromPoint(vCursorX, vCursorY);
+    virtualCursorEl.classList.add("visible");
+
+    if (hoveredBtn && hoveredBtn !== el) {
+      hoveredBtn.classList.remove("hover");
+      hoveredBtn = null;
+    }
+
+    if (el && el.classList.contains("upgrade-btn")) {
+      el.classList.add("hover");
+      hoveredBtn = el;
+    }
+  }
+}, true);
+
+window.addEventListener("mousedown", (event) => {
   if (isPaused) {
+    return;
+  }
+
+  if (waveState === "MENU" && player.controls.isLocked) {
+    virtualCursorEl.classList.remove("visible"); // temporarily hide to check what's underneath
+    const hitEl = document.elementFromPoint(vCursorX, vCursorY);
+    virtualCursorEl.classList.add("visible");
+
+    if (hitEl && hitEl.classList.contains("upgrade-btn")) {
+      hitEl.click();
+    }
+    return;
+  }
+
+  if (waveState === "MENU") {
     return;
   }
 
@@ -119,12 +192,25 @@ renderer.domElement.addEventListener("mousedown", (event) => {
     return;
   }
 
-  handlePrimaryAction();
+  isPrimaryDown = true;
+}, true);
+
+document.addEventListener("mouseup", (event) => {
+  if (event.button === 0) {
+    isPrimaryDown = false;
+  }
 });
+
 
 window.addEventListener("keydown", (event) => {
   if (event.code === "Digit1") {
     towerSystem.selectTower("basic");
+    refreshBuildStatus();
+    return;
+  }
+
+  if (event.code === "Digit2") {
+    towerSystem.selectTower("mortar");
     refreshBuildStatus();
     return;
   }
@@ -268,6 +354,13 @@ bindActionButton(
   true
 );
 bindActionButton(
+  buildMortarButtonEl,
+  () => {
+    towerSystem.selectTower("mortar");
+  },
+  true
+);
+bindActionButton(
   placeButtonEl,
   () => {
     towerSystem.placeSelectedTower();
@@ -282,18 +375,97 @@ bindActionButton(
   true
 );
 
+const ALL_UPGRADES = [
+  { label: "Extra tower to place", apply: () => towerSystem.upgradeMaxTowers() },
+  { label: "Tower does more damage", apply: () => towerSystem.upgradeTowerDamage() },
+  { label: "I do more damage", apply: () => player.upgradePlayerDamage() },
+  { label: "Enemies move slower", apply: () => enemySystem.upgradeSlowEnemies() },
+  { label: "Tower shoots faster", apply: () => towerSystem.upgradeTowerFireRate() },
+  { label: "I shoot faster", apply: () => player.upgradePlayerFireRate() },
+];
+
+let waveState = "PLAYING";
+let currentWave = 1;
+let waveDelay = 0;
+
+function startWave(wave) {
+  currentWave = wave;
+  waveState = "PLAYING";
+
+  const enemyCount = 4 + Math.floor(wave * 1.5);
+  const fastCount = wave > 2 ? Math.floor(wave * 1.2) : 0;
+
+  enemySystem.startWave({ basic: enemyCount, fast: fastCount });
+}
+
+function showUpgradeMenu() {
+  if (player.controls.isLocked) {
+    player.setMenuMode(true);
+    crosshairEl.style.display = "none";
+    virtualCursorEl.classList.add("visible");
+    vCursorX = window.innerWidth / 2;
+    vCursorY = window.innerHeight / 2;
+    updateVirtualCursor();
+  }
+
+  upgradeMenuEl.classList.remove("hidden");
+  upgradeOptionsEl.innerHTML = "";
+
+  const shuffled = [...ALL_UPGRADES].sort(() => 0.5 - Math.random());
+  const selected = shuffled.slice(0, 3);
+
+  selected.forEach(upgrade => {
+    const btn = document.createElement("button");
+    btn.className = "upgrade-btn";
+    btn.textContent = upgrade.label;
+    btn.onclick = () => {
+      upgrade.apply();
+      upgradeMenuEl.classList.add("hidden");
+      player.setMenuMode(false);
+      crosshairEl.style.display = "";
+      virtualCursorEl.classList.remove("visible");
+      startWave(currentWave + 1);
+    };
+    upgradeOptionsEl.appendChild(btn);
+  });
+}
+
 function animate() {
   const deltaSeconds = clock.getDelta();
   if (!isPaused) {
-    player.update(deltaSeconds, enemySystem);
-    enemySystem.update(deltaSeconds, camera);
-    towerSystem.update(deltaSeconds, enemySystem);
+    if (waveState === "PLAYING") {
+      if (enemySystem.isWaveClear()) {
+        waveState = "DELAY";
+        waveDelay = 2.0;
+      }
+    } else if (waveState === "DELAY") {
+      waveDelay -= deltaSeconds;
+      if (waveDelay <= 0) {
+        waveState = "MENU";
+        showUpgradeMenu();
+      }
+    }
+
+    if (waveState === "PLAYING" || waveState === "DELAY") {
+      if (isPrimaryDown) {
+        handlePrimaryAction();
+      }
+      player.update(deltaSeconds, enemySystem);
+      enemySystem.update(deltaSeconds, camera);
+      towerSystem.update(deltaSeconds, enemySystem);
+    }
   }
   refreshBuildStatus();
+
+  waveCounterEl.textContent = currentWave;
+  towersAvailableEl.textContent = towerSystem.getAvailableTowers();
+
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
 
+// Start game
+startWave(1);
 animate();
 
 window.addEventListener("resize", () => {

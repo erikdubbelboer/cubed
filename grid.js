@@ -1,9 +1,9 @@
 import * as THREE from "https://esm.sh/three@0.161.0";
 
 const GRID_SIZE = 12;
-const CELL_SIZE = 2;
-const PLATFORM_HEIGHT = 0.5;
-const TILE_HEIGHT = 0.2;
+const CELL_SIZE = 4;
+const PLATFORM_HEIGHT = 1.0;
+const TILE_HEIGHT = 0.4;
 
 const PATH_CELLS = [
   [0, 1],
@@ -57,14 +57,14 @@ export function createGrid(scene) {
   const pathSet = new Set(PATH_CELLS.map(([x, z]) => `${x},${z}`));
   const tileGeo = new THREE.BoxGeometry(CELL_SIZE * 0.94, TILE_HEIGHT, CELL_SIZE * 0.94);
   const baseTileMat = new THREE.MeshStandardMaterial({
-    color: 0x4d5a74,
-    roughness: 0.88,
-    metalness: 0.03,
+    color: 0x5d739b,
+    roughness: 0.8,
+    metalness: 0.2,
   });
   const pathTileMat = new THREE.MeshStandardMaterial({
     color: 0xe1b463,
-    roughness: 0.78,
-    metalness: 0.03,
+    roughness: 0.5,
+    metalness: 0.4,
   });
 
   const half = (GRID_SIZE * CELL_SIZE) / 2;
