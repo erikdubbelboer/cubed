@@ -3,6 +3,7 @@ import { createGrid } from "./grid.js";
 import { createPlayer } from "./player.js";
 import { createEnemySystem } from "./enemies.js";
 import { createTowerSystem } from "./towers.js";
+import { loadModels, getModel } from "./models.js";
 
 const app = document.getElementById("app");
 const overlayEl = document.getElementById("overlay");
@@ -48,6 +49,8 @@ const starsMaterial = new THREE.PointsMaterial({
 const starMesh = new THREE.Points(starsGeometry, starsMaterial);
 scene.add(starMesh);
 
+let gameTime = 0;
+
 const camera = new THREE.PerspectiveCamera(
   75,
   window.innerWidth / window.innerHeight,
@@ -71,17 +74,9 @@ const grid = createGrid(scene);
 camera.position.set(0, grid.eyeHeight, grid.moveBounds.maxZ - 3);
 camera.lookAt(0, grid.eyeHeight, 0);
 
-const player = createPlayer({
-  scene,
-  camera,
-  domElement: renderer.domElement,
-  moveBounds: grid.moveBounds,
-  eyeHeight: grid.eyeHeight,
-  ui: { overlayEl },
-});
-
-const enemySystem = createEnemySystem(scene, grid.pathWaypoints);
-const towerSystem = createTowerSystem({ scene, camera, grid });
+let player;
+let enemySystem;
+let towerSystem;
 
 const clock = new THREE.Clock();
 let isPaused = false;
@@ -91,19 +86,24 @@ function refreshBuildStatus() {
 }
 
 function updatePauseState() {
-  const shouldPause = document.hidden || !document.hasFocus();
-  if (shouldPause !== isPaused) {
-    isPaused = shouldPause;
-    if (isPaused) {
-      player.resetMovement();
-      if (player.controls.isLocked) {
-        player.controls.unlock();
+  // Use a small timeout to ensure Three.js has updated the internal isLocked state
+  // and browser has updated pointerLockElement.
+  setTimeout(() => {
+    const isLocked = !!document.pointerLockElement;
+    const shouldPause = document.hidden || !document.hasFocus() || !isLocked;
+
+    if (shouldPause !== isPaused) {
+      isPaused = shouldPause;
+      if (isPaused) {
+        player.resetMovement();
+      } else {
+        clock.getDelta();
       }
-    } else {
-      clock.getDelta();
     }
-  }
+  }, 0);
 }
+
+// Listeners for player lock moved into initGame after player is created
 
 function handlePrimaryAction() {
   if (towerSystem.isBuildMode()) {
@@ -135,6 +135,7 @@ function updateVirtualCursor() {
 let hoveredBtn = null;
 
 window.addEventListener("mousemove", (event) => {
+  if (!player) return;
   if (waveState === "MENU" && player.controls.isLocked) {
     vCursorX += event.movementX;
     vCursorY += event.movementY;
@@ -159,7 +160,7 @@ window.addEventListener("mousemove", (event) => {
 }, true);
 
 window.addEventListener("mousedown", (event) => {
-  if (isPaused) {
+  if (isPaused || !player || !towerSystem) {
     return;
   }
 
@@ -203,6 +204,7 @@ document.addEventListener("mouseup", (event) => {
 
 
 window.addEventListener("keydown", (event) => {
+  if (!player || !towerSystem) return;
   if (event.code === "Digit1") {
     towerSystem.selectTower("basic");
     refreshBuildStatus();
@@ -432,6 +434,8 @@ function showUpgradeMenu() {
 
 function animate() {
   const deltaSeconds = clock.getDelta();
+  gameTime += deltaSeconds;
+
   if (!isPaused) {
     if (waveState === "PLAYING") {
       if (enemySystem.isWaveClear()) {
@@ -465,8 +469,52 @@ function animate() {
 }
 
 // Start game
-startWave(1);
-animate();
+async function initGame() {
+  await loadModels();
+
+  player = createPlayer({
+    scene,
+    camera,
+    domElement: renderer.domElement,
+    moveBounds: grid.moveBounds,
+    eyeHeight: grid.eyeHeight,
+    ui: { overlayEl },
+  });
+
+  enemySystem = createEnemySystem(scene, grid.pathWaypoints);
+  towerSystem = createTowerSystem({ scene, camera, grid });
+
+  player.controls.addEventListener("unlock", updatePauseState);
+  player.controls.addEventListener("lock", updatePauseState);
+
+  // Debug API to let browser scripts skip UI
+  window.gameDebug = {
+    setPlayerPos: (x, z) => {
+      if (player) player.controls.getObject().position.set(x, player.eyeHeight, z);
+    },
+    placeBasicTower: (x, z) => {
+      if (towerSystem) towerSystem.forcePlaceTower(x, z, "basic");
+    },
+    placeMortarTower: (x, z) => {
+      if (towerSystem) towerSystem.forcePlaceTower(x, z, "mortar");
+    },
+    spawnEnemy: (type = "basic") => {
+      if (enemySystem) {
+        const spawner = grid.pathWaypoints[0];
+        enemySystem.forceSpawnEnemy(type, spawner);
+      }
+    },
+    hideOverlay: () => {
+      document.getElementById("overlay").style.display = "none";
+      if (player && player.controls) player.controls.lock();
+    }
+  };
+
+  startWave(1);
+  animate();
+}
+
+initGame();
 
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;

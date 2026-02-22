@@ -1,5 +1,6 @@
 import { PointerLockControls } from "https://esm.sh/three@0.161.0/examples/jsm/controls/PointerLockControls.js";
 import * as THREE from "https://esm.sh/three@0.161.0";
+import { getModel } from "./models.js";
 
 const MAX_PITCH = Math.PI * 0.5 - 0.05;
 
@@ -12,25 +13,28 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
 
   // Create Player Gun
   const gunGroup = new THREE.Group();
-  const gunMaterial = new THREE.MeshStandardMaterial({ color: 0x4a505b, roughness: 0.6, metalness: 0.4 });
-  const gunBarrelMat = new THREE.MeshStandardMaterial({ color: 0x24272c, roughness: 0.8, metalness: 0.6 });
-  const gunGripMat = new THREE.MeshStandardMaterial({ color: 0x1f1917, roughness: 0.9 });
+  const gunModel = getModel("weapon_gun");
 
-  const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.4), gunMaterial);
-  gunBody.position.set(0, 0, -0.1);
-  const gunBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 8), gunBarrelMat);
-  gunBarrel.rotation.x = Math.PI * 0.5;
-  gunBarrel.position.set(0, 0.02, -0.4);
-  const gunGrip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.2, 0.1), gunGripMat);
-  gunGrip.position.set(0, -0.15, 0.05);
-  gunGrip.rotation.x = -Math.PI * 0.1;
+  const gunBarrel = new THREE.Object3D();
 
-  gunGroup.add(gunBody);
-  gunGroup.add(gunBarrel);
-  gunGroup.add(gunGrip);
+  if (gunModel) {
+    // Rotating to face forward correctly
+    gunModel.rotation.y = Math.PI;
+    gunModel.scale.set(1.2, 1.2, 1.2);
+    gunGroup.add(gunModel);
+
+    // muzzle end at the front of the model after 180 rotation
+    gunBarrel.position.set(0, 0.02, -0.3);
+    gunGroup.add(gunBarrel);
+  }
+
+  // Add a light specifically for the gun model, attached to camera
+  const gunLight = new THREE.PointLight(0xffffff, 5, 2);
+  gunLight.position.set(0.1, 0, -0.1);
+  gunGroup.add(gunLight);
 
   // Attach to camera
-  gunGroup.position.set(0.3, -0.3, -0.6);
+  gunGroup.position.set(0.35, -0.3, -0.5);
   camera.add(gunGroup);
   scene.add(camera);
 
@@ -125,7 +129,6 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
   controls.addEventListener("unlock", () => {
     yaw = camera.rotation.y;
     pitch = camera.rotation.x;
-    ui.overlayEl.classList.remove("hidden");
   });
 
   domElement.addEventListener("mousedown", (event) => {

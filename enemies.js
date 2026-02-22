@@ -1,4 +1,5 @@
 import * as THREE from "https://esm.sh/three@0.161.0";
+import { getModel } from "./models.js";
 
 const ENEMY_RADIUS = 0.9;
 const FAST_ENEMY_RADIUS = 0.6;
@@ -37,24 +38,35 @@ export function createEnemySystem(scene, pathWaypoints) {
     const isFast = type === "fast";
 
     const enemyMesh = new THREE.Group();
-    const bodySize = isFast ? 1.0 : 1.6;
-    const bodyColor = isFast ? 0xc98282 : 0x82a5c9;
-    const bodyMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(bodySize, bodySize, bodySize),
-      new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.8, metalness: 0.2 })
-    );
+    const model = getModel(isFast ? "craft_speederA" : "alien");
 
-    const eyeW = isFast ? 0.6 : 1.0;
-    const eyeH = isFast ? 0.2 : 0.3;
-    const eyeColor = isFast ? 0xff4d4d : 0x6cd5ff;
-    const eyeMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(eyeW, eyeH, 0.2),
-      new THREE.MeshStandardMaterial({ color: eyeColor, emissive: eyeColor, emissiveIntensity: 2 })
-    );
-    eyeMesh.position.set(0, isFast ? 0.1 : 0.2, isFast ? 0.5 : 0.8);
+    if (model) {
+      model.scale.set(3.0, 3.0, 3.0);
+      // models usually face +X or -Z. Let's adjust to face the velocity direction correctly.
+      // Usually +Z is implicitly forward when using lookAt.
+      model.rotation.y = Math.PI; // often needed for Kenney
+      enemyMesh.add(model);
+    } else {
+      // Fallback
+      const bodySize = isFast ? 1.0 : 1.6;
+      const bodyColor = isFast ? 0xc98282 : 0x82a5c9;
+      const bodyMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(bodySize, bodySize, bodySize),
+        new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.8, metalness: 0.2 })
+      );
 
-    enemyMesh.add(bodyMesh);
-    enemyMesh.add(eyeMesh);
+      const eyeW = isFast ? 0.6 : 1.0;
+      const eyeH = isFast ? 0.2 : 0.3;
+      const eyeColor = isFast ? 0xff4d4d : 0x6cd5ff;
+      const eyeMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(eyeW, eyeH, 0.2),
+        new THREE.MeshStandardMaterial({ color: eyeColor, emissive: eyeColor, emissiveIntensity: 2 })
+      );
+      eyeMesh.position.set(0, isFast ? 0.1 : 0.2, isFast ? 0.5 : 0.8);
+
+      enemyMesh.add(bodyMesh);
+      enemyMesh.add(eyeMesh);
+    }
 
     const healthBarRoot = new THREE.Group();
     const healthBarBg = new THREE.Mesh(
@@ -70,7 +82,7 @@ export function createEnemySystem(scene, pathWaypoints) {
     healthBarFg.position.z = 0.01;
     healthBarRoot.add(healthBarBg);
     healthBarRoot.add(healthBarFg);
-    healthBarRoot.position.set(0, isFast ? 1.2 : 1.9, 0);
+    healthBarRoot.position.set(0, isFast ? 1.2 : 1.8, 0);
     enemyMesh.add(healthBarRoot);
 
     scene.add(enemyMesh);
@@ -78,8 +90,6 @@ export function createEnemySystem(scene, pathWaypoints) {
 
     return {
       mesh: enemyMesh,
-      bodyMesh,
-      eyeMesh,
       healthBarRoot,
       healthBarFg,
       healthBarBgWidth: isFast ? 1.5 : 2.5,
@@ -221,6 +231,28 @@ export function createEnemySystem(scene, pathWaypoints) {
     applyDamageAtPoint,
     startWave,
     isWaveClear,
-    upgradeSlowEnemies
+    isWaveClear,
+    upgradeSlowEnemies,
+    forceSpawnEnemy: (type, spawnPos) => {
+      const spawner = spawnPos || new THREE.Vector3(0, 0, 0);
+      const spawned = createEnemyMesh(type);
+      const enemy = {
+        mesh: spawned.mesh,
+        healthBarFg: spawned.healthBarFg,
+        healthBarBgWidth: spawned.healthBarBgWidth,
+        healthBarFgWidth: spawned.healthBarFgWidth,
+        health: spawned.health,
+        maxHealth: spawned.maxHealth,
+        type: type,
+        speed: spawned.speed * enemySpeedMultiplier,
+        waypoints: pathWaypoints,
+        waypointIndex: 0,
+        radius: spawned.radius,
+        alive: true,
+      };
+      enemy.mesh.position.copy(spawner);
+      scene.add(enemy.mesh);
+      activeEnemies.push(enemy);
+    }
   };
 }

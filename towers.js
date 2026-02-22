@@ -1,4 +1,5 @@
 import * as THREE from "https://esm.sh/three@0.161.0";
+import { getModel } from "./models.js";
 
 const TOWER_RANGE = 18;
 const TOWER_FIRE_INTERVAL = 0.75;
@@ -49,6 +50,31 @@ export function createTowerSystem({ scene, camera, grid }) {
 
   function createMortarMesh({ baseColor, accentColor, opacity = 1, transparent = false }) {
     const root = new THREE.Group();
+    const model = getModel("turret_double");
+
+    const turretGroup = new THREE.Group();
+
+    if (model) {
+      model.scale.set(4.5, 4.5, 4.5);
+      turretGroup.add(model);
+      root.add(turretGroup);
+      root.userData.turret = turretGroup;
+      root.userData.muzzleLocal = new THREE.Vector3(0, 3.5, 1.5);
+      root.userData.materials = [];
+
+      if (transparent) {
+        model.traverse(child => {
+          if (child.isMesh) {
+            child.material = child.material.clone();
+            child.material.transparent = true;
+            child.material.opacity = opacity;
+          }
+        });
+      }
+      return root;
+    }
+
+    // Fallback procedural
     const baseMaterial = new THREE.MeshStandardMaterial({
       color: baseColor, roughness: 0.75, metalness: 0.1, opacity, transparent,
     });
@@ -60,7 +86,6 @@ export function createTowerSystem({ scene, camera, grid }) {
     const body = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.4, 1.6, 12), topMaterial);
     body.position.y = 1.6;
 
-    const turretGroup = new THREE.Group();
     turretGroup.position.set(0, 2.4, 0);
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 1.8, 8), topMaterial);
     barrel.rotation.x = Math.PI * 0.5;
@@ -79,6 +104,32 @@ export function createTowerSystem({ scene, camera, grid }) {
 
   function createTowerMesh({ baseColor, accentColor, opacity = 1, transparent = false }) {
     const root = new THREE.Group();
+    const model = getModel("turret_single");
+
+    const turretGroup = new THREE.Group();
+
+    if (model) {
+      model.scale.set(4.5, 4.5, 4.5);
+      turretGroup.add(model);
+
+      root.add(turretGroup);
+      root.userData.turret = turretGroup;
+      root.userData.muzzleLocal = new THREE.Vector3(0, 3.0, 1.5);
+      root.userData.materials = [];
+
+      if (transparent) {
+        model.traverse(child => {
+          if (child.isMesh) {
+            child.material = child.material.clone();
+            child.material.transparent = true;
+            child.material.opacity = opacity;
+          }
+        });
+      }
+      return root;
+    }
+
+    // Fallback procedural
     const baseMaterial = new THREE.MeshStandardMaterial({
       color: baseColor,
       roughness: 0.75,
@@ -100,7 +151,6 @@ export function createTowerSystem({ scene, camera, grid }) {
     const column = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.2, 1.6), topMaterial);
     column.position.y = 1.4;
 
-    const turretGroup = new THREE.Group();
     turretGroup.position.y = 2.2;
 
     const turret = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 1.2, 16), topMaterial);
@@ -123,13 +173,24 @@ export function createTowerSystem({ scene, camera, grid }) {
   }
 
   function setPreviewValidityVisual(isValid) {
-    const [baseMaterial, topMaterial] = preview.userData.materials;
-    if (isValid) {
-      baseMaterial.color.setHex(0x58c89a);
-      topMaterial.color.setHex(0xa9fff9);
+    if (preview.userData.materials && preview.userData.materials.length > 0) {
+      // Procedural fallback
+      const [baseMaterial, topMaterial] = preview.userData.materials;
+      if (isValid) {
+        baseMaterial.color.setHex(0x58c89a);
+        topMaterial.color.setHex(0xa9fff9);
+      } else {
+        baseMaterial.color.setHex(0xc86666);
+        topMaterial.color.setHex(0xff9f9f);
+      }
     } else {
-      baseMaterial.color.setHex(0xc86666);
-      topMaterial.color.setHex(0xff9f9f);
+      // GLTF model preview 
+      const colorHex = isValid ? 0x58c89a : 0xc86666;
+      preview.traverse(child => {
+        if (child.isMesh && child.material) {
+          child.material.color.setHex(colorHex);
+        }
+      });
     }
   }
 
@@ -366,6 +427,23 @@ export function createTowerSystem({ scene, camera, grid }) {
     getAvailableTowers,
     upgradeMaxTowers,
     upgradeTowerDamage,
+    upgradeTowerDamage,
     upgradeTowerFireRate,
+    forcePlaceTower: (x, z, type) => {
+
+      const newTower = {
+        type: type,
+        mesh: type === "mortar"
+          ? createMortarMesh({ baseColor: 0x82a5c9, accentColor: 0x6ca3e6 })
+          : createTowerMesh({ baseColor: 0x82a5c9, accentColor: 0x6ca3e6 }),
+        cellX: Math.round(x / grid.tileSize),
+        cellZ: Math.round(z / grid.tileSize),
+        fireCooldown: 0,
+      };
+
+      newTower.mesh.position.set(x, grid.tileTopY, z);
+      scene.add(newTower.mesh);
+      towers.push(newTower);
+    }
   };
 }

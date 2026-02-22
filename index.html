@@ -210,6 +210,64 @@
     <div>Towers Available: <span id="towers-available">0</span></div>
   </div>
 
+  <style>
+    .inv-item {
+      width: 90px;
+      height: 90px;
+      background: rgba(14, 23, 38, 0.8);
+      border: 2px solid rgba(155, 202, 255, 0.2);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+    }
+
+    .inv-item:hover {
+      background: rgba(28, 46, 76, 0.9);
+      border-color: #5085c8;
+      transform: scale(1.08);
+      box-shadow: 0 0 20px rgba(80, 133, 200, 0.4);
+    }
+
+    .inv-item.active {
+      border-color: #6bf4ad;
+      box-shadow: 0 0 15px rgba(107, 244, 173, 0.3);
+    }
+
+    .inv-item img {
+      width: 120%;
+      height: 120%;
+      object-fit: contain;
+      filter: drop-shadow(0 0 6px rgba(107, 244, 173, 0.5));
+      transition: transform 0.3s ease;
+    }
+
+    .inv-item:hover img {
+      transform: scale(1.1) rotate(2deg);
+    }
+  </style>
+
+  <div id="inventory-ui"
+    style="position: fixed; left: 30px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 15px; z-index: 4;">
+    <div id="inv-basic" class="inv-item">
+      <img src="./kenney_space-kit/Isometric/turret_single_SE.png" />
+      <div
+        style="position: absolute; bottom: 6px; right: 10px; font-weight: bold; font-size: 14px; color: #6bf4ad; text-shadow: 0 0 4px rgba(0,0,0,0.8);">
+        [1]</div>
+    </div>
+    <div id="inv-mortar" class="inv-item">
+      <img src="./kenney_space-kit/Isometric/turret_double_SE.png" />
+      <div
+        style="position: absolute; bottom: 6px; right: 10px; font-weight: bold; font-size: 14px; color: #6bf4ad; text-shadow: 0 0 4px rgba(0,0,0,0.8);">
+        [2]</div>
+    </div>
+  </div>
+
   <div id="upgrade-menu" class="hidden"
     style="position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(4,8,20,0.85); z-index: 10; pointer-events: auto;">
     <div
