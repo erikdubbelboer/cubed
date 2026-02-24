@@ -7,6 +7,16 @@ const TOWER_PROJECTILE_SPEED = 40;
 const TOWER_PROJECTILE_LIFE = 3;
 const TOWER_PROJECTILE_DAMAGE = 20;
 const TOWER_PROJECTILE_HIT_RADIUS = 0.4;
+const MORTAR_UPWARD_SPEED = 12;
+const MORTAR_GRAVITY = 20;
+const MORTAR_INITIAL_LATERAL_SPEED = 3;
+const MORTAR_HOMING_TURN_RATE = 7;
+const MORTAR_MIN_LATERAL_SPEED = 7;
+const MORTAR_MAX_LATERAL_SPEED = 20;
+const MORTAR_DIRECT_HIT_RADIUS = 0.7;
+const MORTAR_EXPLOSION_DURATION = 0.42;
+const MORTAR_EXPLOSION_RADIUS = 13.2;
+const MORTAR_EXPLOSION_SPARK_COUNT = 10;
 
 export function createTowerSystem({ scene, camera, grid }) {
   const raycaster = new THREE.Raycaster();
@@ -24,6 +34,10 @@ export function createTowerSystem({ scene, camera, grid }) {
     metalness: 0.05,
   });
   const towerProjectiles = [];
+  const mortarExplosions = [];
+  const explosionFlashGeometry = new THREE.SphereGeometry(0.24, 12, 12);
+  const explosionRingGeometry = new THREE.RingGeometry(0.2, 0.3, 24);
+  const explosionSparkGeometry = new THREE.SphereGeometry(0.05, 6, 6);
 
   let selectedTowerType = null;
   let buildMode = false;
@@ -50,16 +64,14 @@ export function createTowerSystem({ scene, camera, grid }) {
 
   function createMortarMesh({ baseColor, accentColor, opacity = 1, transparent = false }) {
     const root = new THREE.Group();
-    const model = getModel("turret_double");
-
-    const turretGroup = new THREE.Group();
+    const model = getModel("machine_barrelLarge");
 
     if (model) {
-      model.scale.set(4.5, 4.5, 4.5);
-      turretGroup.add(model);
-      root.add(turretGroup);
-      root.userData.turret = turretGroup;
-      root.userData.muzzleLocal = new THREE.Vector3(0, 3.5, 1.5);
+      model.scale.set(3.5, 3.5, 3.5);
+      root.add(model);
+      root.userData.turret = null;
+      root.userData.muzzleNode = root;
+      root.userData.muzzleLocal = new THREE.Vector3(0, 1.95, 0);
       root.userData.materials = [];
 
       if (transparent) {
@@ -86,19 +98,17 @@ export function createTowerSystem({ scene, camera, grid }) {
     const body = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.4, 1.6, 12), topMaterial);
     body.position.y = 1.6;
 
-    turretGroup.position.set(0, 2.4, 0);
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 1.8, 8), topMaterial);
-    barrel.rotation.x = Math.PI * 0.5;
-    barrel.position.set(0, 0, 0.9);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.7, 1.8, 12), topMaterial);
+    barrel.position.y = 3.1;
 
-    turretGroup.add(barrel);
     root.add(base);
     root.add(body);
-    root.add(turretGroup);
+    root.add(barrel);
 
     root.userData.materials = [baseMaterial, topMaterial];
-    root.userData.turret = turretGroup;
-    root.userData.muzzleLocal = new THREE.Vector3(0, 0, 1.8);
+    root.userData.turret = null;
+    root.userData.muzzleNode = root;
+    root.userData.muzzleLocal = new THREE.Vector3(0, 4.0, 0);
     return root;
   }
 
@@ -109,11 +119,13 @@ export function createTowerSystem({ scene, camera, grid }) {
     const turretGroup = new THREE.Group();
 
     if (model) {
+      model.rotation.y = Math.PI;
       model.scale.set(4.5, 4.5, 4.5);
       turretGroup.add(model);
 
       root.add(turretGroup);
       root.userData.turret = turretGroup;
+      root.userData.muzzleNode = turretGroup;
       root.userData.muzzleLocal = new THREE.Vector3(0, 3.0, 1.5);
       root.userData.materials = [];
 
@@ -168,6 +180,7 @@ export function createTowerSystem({ scene, camera, grid }) {
 
     root.userData.materials = [baseMaterial, topMaterial];
     root.userData.turret = turretGroup;
+    root.userData.muzzleNode = turretGroup;
     root.userData.muzzleLocal = new THREE.Vector3(0, 0, 2.4);
     return root;
   }
@@ -295,15 +308,16 @@ export function createTowerSystem({ scene, camera, grid }) {
     projectile.position.copy(origin);
     scene.add(projectile);
 
-    const velocity = target.position
-      .clone()
-      .sub(origin)
-      .normalize()
-      .multiplyScalar(isMortar ? TOWER_PROJECTILE_SPEED * 0.6 : TOWER_PROJECTILE_SPEED);
-
+    const velocity = target.position.clone().sub(origin).normalize().multiplyScalar(TOWER_PROJECTILE_SPEED);
     if (isMortar) {
-      // parabolic arc for mortar
-      velocity.y = 8;
+      velocity.set(0, MORTAR_UPWARD_SPEED, 0);
+      const lateralToTarget = target.position.clone().sub(origin);
+      lateralToTarget.y = 0;
+      if (lateralToTarget.lengthSq() > 0.0001) {
+        lateralToTarget.normalize().multiplyScalar(MORTAR_INITIAL_LATERAL_SPEED);
+        velocity.x = lateralToTarget.x;
+        velocity.z = lateralToTarget.z;
+      }
     }
 
     towerProjectiles.push({
@@ -311,9 +325,107 @@ export function createTowerSystem({ scene, camera, grid }) {
       velocity,
       life: isMortar ? 5 : TOWER_PROJECTILE_LIFE,
       damage: TOWER_PROJECTILE_DAMAGE * towerDamageMultiplier * (isMortar ? 2.5 : 1),
-      target: isMortar ? null : target,
+      target,
       isMortar,
+      homingTurnRate: MORTAR_HOMING_TURN_RATE,
+      hitRadius: isMortar ? MORTAR_DIRECT_HIT_RADIUS : TOWER_PROJECTILE_HIT_RADIUS,
     });
+  }
+
+  function spawnMortarExplosion(position) {
+    const root = new THREE.Group();
+    root.position.copy(position);
+    root.position.y = Math.max(root.position.y, grid.tileTopY + 0.05);
+
+    const flashMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffb25a,
+      transparent: true,
+      opacity: 0.92,
+      depthWrite: false,
+    });
+    const flash = new THREE.Mesh(explosionFlashGeometry, flashMaterial);
+    root.add(flash);
+
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff6f2c,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const ring = new THREE.Mesh(explosionRingGeometry, ringMaterial);
+    ring.rotation.x = -Math.PI * 0.5;
+    ring.position.y = 0.04;
+    root.add(ring);
+
+    const light = new THREE.PointLight(0xff7d33, 2.6, 6.5);
+    light.position.set(0, 0.5, 0);
+    root.add(light);
+
+    const sparks = [];
+    for (let i = 0; i < MORTAR_EXPLOSION_SPARK_COUNT; i += 1) {
+      const sparkMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffd08a,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+      });
+      const spark = new THREE.Mesh(explosionSparkGeometry, sparkMaterial);
+      const dir = new THREE.Vector3(
+        Math.random() * 2 - 1,
+        0.25 + Math.random() * 0.95,
+        Math.random() * 2 - 1
+      ).normalize();
+      const speed = 2.6 + Math.random() * 2.2;
+      sparks.push({ mesh: spark, velocity: dir.multiplyScalar(speed) });
+      root.add(spark);
+    }
+
+    scene.add(root);
+    mortarExplosions.push({
+      root,
+      flash,
+      ring,
+      light,
+      sparks,
+      life: 0,
+      duration: MORTAR_EXPLOSION_DURATION,
+    });
+  }
+
+  function updateMortarExplosions(deltaSeconds) {
+    for (let i = mortarExplosions.length - 1; i >= 0; i -= 1) {
+      const explosion = mortarExplosions[i];
+      explosion.life += deltaSeconds;
+      const t = Math.min(1, explosion.life / explosion.duration);
+      const easeOut = 1 - Math.pow(1 - t, 2);
+
+      const flashScale = 1 + easeOut * MORTAR_EXPLOSION_RADIUS;
+      explosion.flash.scale.setScalar(flashScale);
+      explosion.flash.material.opacity = 0.92 * (1 - t);
+
+      const ringScale = 1 + easeOut * (MORTAR_EXPLOSION_RADIUS * 1.15);
+      explosion.ring.scale.setScalar(ringScale);
+      explosion.ring.material.opacity = 0.8 * (1 - t);
+
+      explosion.light.intensity = 2.6 * (1 - t);
+
+      for (const spark of explosion.sparks) {
+        spark.velocity.y -= 8.5 * deltaSeconds;
+        spark.mesh.position.addScaledVector(spark.velocity, deltaSeconds);
+        spark.mesh.material.opacity = Math.max(0, 0.95 * (1 - t));
+      }
+
+      if (t >= 1) {
+        scene.remove(explosion.root);
+        explosion.flash.material.dispose();
+        explosion.ring.material.dispose();
+        for (const spark of explosion.sparks) {
+          spark.mesh.material.dispose();
+        }
+        mortarExplosions.splice(i, 1);
+      }
+    }
   }
 
   function updateTowerCombat(deltaSeconds, enemySystem) {
@@ -323,16 +435,15 @@ export function createTowerSystem({ scene, camera, grid }) {
       const range = t.type === "mortar" ? TOWER_RANGE * 1.5 : TOWER_RANGE;
       const target = enemySystem.getTargetInRange(t.mesh.position, range);
       if (target) {
-        const targetPos = target.position.clone();
-        if (t.type === "mortar") {
-          targetPos.y = t.mesh.position.y + t.mesh.userData.turret.position.y + 4; // aim high
-        } else {
+        if (t.type !== "mortar" && t.mesh.userData.turret) {
+          const targetPos = target.position.clone();
           targetPos.y = t.mesh.position.y + t.mesh.userData.turret.position.y;
+          t.mesh.userData.turret.lookAt(targetPos);
         }
-        t.mesh.userData.turret.lookAt(targetPos);
 
         if (t.cooldown <= 0) {
-          const muzzleWorld = t.mesh.userData.turret.localToWorld(t.mesh.userData.muzzleLocal.clone());
+          const muzzleNode = t.mesh.userData.muzzleNode || t.mesh.userData.turret || t.mesh;
+          const muzzleWorld = muzzleNode.localToWorld(t.mesh.userData.muzzleLocal.clone());
           spawnTowerProjectile(muzzleWorld, target, t.type);
           t.cooldown = TOWER_FIRE_INTERVAL * towerFireRateMultiplier * (t.type === "mortar" ? 3 : 1);
         }
@@ -343,22 +454,49 @@ export function createTowerSystem({ scene, camera, grid }) {
   function updateTowerProjectiles(deltaSeconds, enemySystem) {
     for (let i = towerProjectiles.length - 1; i >= 0; i -= 1) {
       const projectile = towerProjectiles[i];
+      let impact = false;
+      let impactPoint = null;
 
       if (!projectile.isMortar && projectile.target && projectile.target.mesh.visible) {
         const dir = projectile.target.mesh.position.clone().sub(projectile.mesh.position).normalize();
         projectile.velocity.copy(dir).multiplyScalar(TOWER_PROJECTILE_SPEED);
+      } else if (projectile.isMortar && projectile.target && projectile.target.mesh && projectile.target.mesh.visible) {
+        const toTarget = projectile.target.mesh.position.clone().sub(projectile.mesh.position);
+        const horizontalDistance = Math.hypot(toTarget.x, toTarget.z);
+        if (horizontalDistance > 0.0001) {
+          const lateralSpeed = Math.min(
+            MORTAR_MAX_LATERAL_SPEED,
+            Math.max(MORTAR_MIN_LATERAL_SPEED, horizontalDistance * 2.4)
+          );
+          const desiredVx = (toTarget.x / horizontalDistance) * lateralSpeed;
+          const desiredVz = (toTarget.z / horizontalDistance) * lateralSpeed;
+          const blend = Math.min(1, projectile.homingTurnRate * deltaSeconds);
+          projectile.velocity.x += (desiredVx - projectile.velocity.x) * blend;
+          projectile.velocity.z += (desiredVz - projectile.velocity.z) * blend;
+        }
       }
 
-      const gravityToApply = projectile.isMortar ? 20 : projectileGravity;
+      const gravityToApply = projectile.isMortar ? MORTAR_GRAVITY : projectileGravity;
       projectile.velocity.y -= gravityToApply * deltaSeconds;
       projectile.mesh.position.addScaledVector(projectile.velocity, deltaSeconds);
       projectile.life -= deltaSeconds;
 
       let hit = false;
-      let impact = false;
       if (projectile.isMortar) {
-        if (projectile.mesh.position.y <= grid.tileTopY) {
+        if (projectile.target && projectile.target.mesh && projectile.target.mesh.visible) {
+          const tPos = projectile.target.mesh.position;
+          const horizontalDistance = Math.hypot(
+            projectile.mesh.position.x - tPos.x,
+            projectile.mesh.position.z - tPos.z
+          );
+          if (projectile.velocity.y <= 0 && horizontalDistance <= projectile.hitRadius) {
+            impact = true;
+            impactPoint = new THREE.Vector3(tPos.x, grid.tileTopY, tPos.z);
+          }
+        }
+        if (!impact && projectile.mesh.position.y <= grid.tileTopY) {
           impact = true; // hit ground
+          impactPoint = projectile.mesh.position.clone();
         }
       } else {
         hit = enemySystem.applyDamageAtPoint(
@@ -380,12 +518,10 @@ export function createTowerSystem({ scene, camera, grid }) {
         if (impact) {
           // Mortar splash damage
           const splashRadius = 3.5;
-          const enemies = enemySystem.getEnemies();
-          for (const eMesh of enemies) {
-            if (eMesh.position.distanceTo(projectile.mesh.position) <= splashRadius) {
-              enemySystem.applyDamageAtPoint(eMesh.position, splashRadius, projectile.damage);
-            }
-          }
+          const splashCenter = impactPoint || projectile.mesh.position;
+          projectile.mesh.position.copy(splashCenter);
+          enemySystem.applyDamageAtPoint(splashCenter, splashRadius, projectile.damage);
+          spawnMortarExplosion(splashCenter);
         }
         scene.remove(projectile.mesh);
         towerProjectiles.splice(i, 1);
@@ -397,6 +533,7 @@ export function createTowerSystem({ scene, camera, grid }) {
     updatePreviewFromCamera();
     updateTowerCombat(deltaSeconds, enemySystem);
     updateTowerProjectiles(deltaSeconds, enemySystem);
+    updateMortarExplosions(deltaSeconds);
   }
 
   function isBuildMode() {

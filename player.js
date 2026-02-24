@@ -34,7 +34,7 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
   gunGroup.add(gunLight);
 
   // Attach to camera
-  gunGroup.position.set(0.35, -0.3, -0.5);
+  gunGroup.position.set(0.35, -0.3, -0.42);
   camera.add(gunGroup);
   scene.add(camera);
 
@@ -50,6 +50,7 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     backward: false,
     left: false,
     right: false,
+    sprint: false,
   };
   const virtualState = {
     strafe: 0,
@@ -57,8 +58,9 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
   };
 
   const moveSpeed = 6;
+  const sprintMultiplier = 1.6;
   const gravity = 24;
-  const jumpVelocity = 9;
+  const jumpVelocity = 10.8;
   let verticalVelocity = 0;
   let jumpQueued = false;
 
@@ -102,6 +104,10 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
         break;
       case "KeyD":
         moveState.right = isDown;
+        break;
+      case "ShiftLeft":
+      case "ShiftRight":
+        moveState.sprint = isDown;
         break;
       default:
         break;
@@ -269,10 +275,11 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
       const forwardAxis = (controls.isLocked ? keyboardForward : 0) + virtualState.forward;
       const strafeAxis = (controls.isLocked ? keyboardStrafe : 0) + virtualState.strafe;
       const length = Math.hypot(forwardAxis, strafeAxis);
+      const activeMoveSpeed = moveSpeed * (controls.isLocked && moveState.sprint ? sprintMultiplier : 1);
 
       if (length > 0) {
-        controls.moveForward((forwardAxis / length) * moveSpeed * deltaSeconds);
-        controls.moveRight((strafeAxis / length) * moveSpeed * deltaSeconds);
+        controls.moveForward((forwardAxis / length) * activeMoveSpeed * deltaSeconds);
+        controls.moveRight((strafeAxis / length) * activeMoveSpeed * deltaSeconds);
       }
     }
 
@@ -306,6 +313,7 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     moveState.backward = false;
     moveState.left = false;
     moveState.right = false;
+    moveState.sprint = false;
     virtualState.forward = 0;
     virtualState.strafe = 0;
     jumpQueued = false;

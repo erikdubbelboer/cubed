@@ -36,8 +36,26 @@ scene.background = new THREE.Color(0x020205);
 const starsGeometry = new THREE.BufferGeometry();
 const starsCount = 2000;
 const posArray = new Float32Array(starsCount * 3);
-for (let i = 0; i < starsCount * 3; i++) {
-  posArray[i] = (Math.random() - 0.5) * 400;
+const STAR_FIELD_SIZE = 400;
+const STAR_MIN_LEVEL_DISTANCE = 70;
+for (let i = 0; i < starsCount; i++) {
+  let x = 0;
+  let y = 0;
+  let z = 0;
+  let attempts = 0;
+  do {
+    x = (Math.random() - 0.5) * STAR_FIELD_SIZE;
+    y = (Math.random() - 0.5) * STAR_FIELD_SIZE;
+    z = (Math.random() - 0.5) * STAR_FIELD_SIZE;
+    attempts += 1;
+  } while (
+    x * x + y * y + z * z < STAR_MIN_LEVEL_DISTANCE * STAR_MIN_LEVEL_DISTANCE &&
+    attempts < 20
+  );
+  const baseIndex = i * 3;
+  posArray[baseIndex] = x;
+  posArray[baseIndex + 1] = y;
+  posArray[baseIndex + 2] = z;
 }
 starsGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
 const starsMaterial = new THREE.PointsMaterial({
@@ -94,9 +112,9 @@ function updatePauseState() {
 
     if (shouldPause !== isPaused) {
       isPaused = shouldPause;
-      if (isPaused) {
+      if (isPaused && player) {
         player.resetMovement();
-      } else {
+      } else if (!isPaused) {
         clock.getDelta();
       }
     }
@@ -107,8 +125,11 @@ function updatePauseState() {
 
 function handlePrimaryAction() {
   if (towerSystem.isBuildMode()) {
-    towerSystem.placeSelectedTower();
+    const didPlaceTower = towerSystem.placeSelectedTower();
     refreshBuildStatus();
+    if (didPlaceTower) {
+      isPrimaryDown = false;
+    }
     return;
   }
   player.tryShoot();
@@ -190,6 +211,12 @@ window.addEventListener("mousedown", (event) => {
   }
 
   if (!player.controls.isLocked && !isTouchDevice) {
+    return;
+  }
+
+  if (towerSystem.isBuildMode()) {
+    towerSystem.placeSelectedTower();
+    refreshBuildStatus();
     return;
   }
 
