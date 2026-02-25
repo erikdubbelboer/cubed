@@ -1,19 +1,27 @@
 import * as THREE from "three";
-import { getModel } from "./models.js";
 
-const ENEMY_RADIUS = 0.9;
-const FAST_ENEMY_RADIUS = 0.6;
 const BASE_SPEED = 2.5;
-const ALIEN_MODEL_GROUND_OFFSET = -0.36;
-const ALIEN_SWAY_AMPLITUDE = 0.34;
-const ALIEN_SWAY_SPEED = 9.5;
-const ALIEN_SWAY_ROLL = 0.2;
-const ALIEN_BOB_HEIGHT = 0.1;
 const DISSOLVE_DEATH_DURATION = 0.65;
 const DISSOLVE_EDGE_WIDTH = 0.16;
 const DISSOLVE_NOISE_SCALE = 5.4;
-const ALIEN_MODEL_SCALE = 3.0;
-const FAST_CRAFT_MODEL_SCALE = ALIEN_MODEL_SCALE * 0.6;
+const ENEMY_TYPES = {
+  basic: {
+    health: 100,
+    speedMultiplier: 1,
+    radius: 0.9,
+    size: 1.6,
+    color: 0x4fb6ff,
+    emissive: 0x102a3f,
+  },
+  fast: {
+    health: 60,
+    speedMultiplier: 1.8,
+    radius: 0.6,
+    size: 1.0,
+    color: 0xff6f6f,
+    emissive: 0x3d1010,
+  },
+};
 
 export function createEnemySystem(scene, pathWaypoints) {
   if (!Array.isArray(pathWaypoints) || pathWaypoints.length < 2) {
@@ -45,81 +53,37 @@ export function createEnemySystem(scene, pathWaypoints) {
   }
 
   function createEnemyMesh(type) {
-    const isFast = type === "fast";
+    const enemyType = ENEMY_TYPES[type] ?? ENEMY_TYPES.basic;
 
     const enemyMesh = new THREE.Group();
     const visualRoot = new THREE.Group();
     enemyMesh.add(visualRoot);
 
-    const model = getModel(isFast ? "craft_speederA" : "alien");
-    let animationMixer = null;
-    let alienWalkBob = null;
+    const bodyMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(enemyType.size, enemyType.size, enemyType.size),
+      new THREE.MeshStandardMaterial({
+        color: enemyType.color,
+        emissive: enemyType.emissive,
+        emissiveIntensity: 0.45,
+        roughness: 0.65,
+        metalness: 0.15,
+      })
+    );
+    bodyMesh.castShadow = true;
+    bodyMesh.receiveShadow = true;
+    bodyMesh.position.y = enemyType.size * 0.5 - 0.65;
+    visualRoot.add(bodyMesh);
 
-    if (model) {
-      const modelScale = isFast ? FAST_CRAFT_MODEL_SCALE : ALIEN_MODEL_SCALE;
-      model.scale.set(modelScale, modelScale, modelScale);
-      // models usually face +X or -Z. Let's adjust to face the velocity direction correctly.
-      // Usually +Z is implicitly forward when using lookAt.
-      model.rotation.y = Math.PI; // often needed for Kenney
-
-      const animationClips = Array.isArray(model.userData.animationClips)
-        ? model.userData.animationClips
-        : [];
-
-      if (!isFast && animationClips.length > 0) {
-        animationMixer = new THREE.AnimationMixer(model);
-        animationMixer.clipAction(animationClips[0]).play();
-      } else if (!isFast) {
-        model.position.y = ALIEN_MODEL_GROUND_OFFSET;
-        alienWalkBob = {
-          phase: Math.random() * Math.PI * 2,
-          amplitude: ALIEN_SWAY_AMPLITUDE,
-          speed: ALIEN_SWAY_SPEED,
-          rollAmplitude: ALIEN_SWAY_ROLL,
-          bobHeight: ALIEN_BOB_HEIGHT,
-        };
-      }
-
-      visualRoot.add(model);
-    } else {
-      // Fallback
-      const bodySize = isFast ? 1.0 : 1.6;
-      const bodyColor = isFast ? 0xc98282 : 0x82a5c9;
-      const bodyMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(bodySize, bodySize, bodySize),
-        new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.8, metalness: 0.2 })
-      );
-
-      const eyeW = isFast ? 0.6 : 1.0;
-      const eyeH = isFast ? 0.2 : 0.3;
-      const eyeColor = isFast ? 0xff4d4d : 0x6cd5ff;
-      const eyeMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(eyeW, eyeH, 0.2),
-        new THREE.MeshStandardMaterial({ color: eyeColor, emissive: eyeColor, emissiveIntensity: 2 })
-      );
-      eyeMesh.position.set(0, isFast ? 0.1 : 0.2, isFast ? 0.5 : 0.8);
-
-      visualRoot.add(bodyMesh);
-      visualRoot.add(eyeMesh);
-
-      if (!isFast) {
-        alienWalkBob = {
-          phase: Math.random() * Math.PI * 2,
-          amplitude: ALIEN_SWAY_AMPLITUDE,
-          speed: ALIEN_SWAY_SPEED,
-          rollAmplitude: ALIEN_SWAY_ROLL,
-          bobHeight: ALIEN_BOB_HEIGHT,
-        };
-      }
-    }
+    const healthBarBgWidth = Math.max(1.2, enemyType.size * 1.5);
+    const healthBarFgWidth = Math.max(1.0, healthBarBgWidth - 0.2);
 
     const healthBarRoot = new THREE.Group();
     const healthBarBg = new THREE.Mesh(
-      new THREE.PlaneGeometry(isFast ? 1.5 : 2.5, 0.28),
+      new THREE.PlaneGeometry(healthBarBgWidth, 0.28),
       new THREE.MeshBasicMaterial({ color: 0x1f2835, transparent: true, opacity: 0.9, depthTest: false })
     );
     const healthBarFg = new THREE.Mesh(
-      new THREE.PlaneGeometry(isFast ? 1.3 : 2.3, 0.16),
+      new THREE.PlaneGeometry(healthBarFgWidth, 0.16),
       new THREE.MeshBasicMaterial({ color: 0x6bf4ad, transparent: true, depthTest: false })
     );
     healthBarBg.renderOrder = 20;
@@ -127,7 +91,7 @@ export function createEnemySystem(scene, pathWaypoints) {
     healthBarFg.position.z = 0.01;
     healthBarRoot.add(healthBarBg);
     healthBarRoot.add(healthBarFg);
-    healthBarRoot.position.set(0, isFast ? 1.2 : 1.8, 0);
+    healthBarRoot.position.set(0, bodyMesh.position.y + enemyType.size * 0.75 + 0.35, 0);
     enemyMesh.add(healthBarRoot);
 
     scene.add(enemyMesh);
@@ -137,17 +101,15 @@ export function createEnemySystem(scene, pathWaypoints) {
       mesh: enemyMesh,
       healthBarRoot,
       healthBarFg,
-      healthBarBgWidth: isFast ? 1.5 : 2.5,
-      healthBarFgWidth: isFast ? 1.3 : 2.3,
-      health: isFast ? 60 : 100,
-      maxHealth: isFast ? 60 : 100,
-      speed: isFast ? BASE_SPEED * 1.8 : BASE_SPEED,
-      radius: isFast ? FAST_ENEMY_RADIUS : ENEMY_RADIUS,
+      healthBarBgWidth,
+      healthBarFgWidth,
+      health: enemyType.health,
+      maxHealth: enemyType.health,
+      speed: BASE_SPEED * enemyType.speedMultiplier,
+      radius: enemyType.radius,
       segmentIndex: 0,
       segmentProgress: 0,
-      animationMixer,
       visualRoot,
-      alienWalkBob,
       alive: true,
       dying: false,
       deathTimer: 0,
@@ -314,17 +276,6 @@ export function createEnemySystem(scene, pathWaypoints) {
         continue;
       }
 
-      if (enemy.animationMixer) {
-        enemy.animationMixer.update(deltaSeconds);
-      }
-      if (enemy.alienWalkBob && enemy.visualRoot) {
-        enemy.alienWalkBob.phase += deltaSeconds * enemy.alienWalkBob.speed;
-        const sway = Math.sin(enemy.alienWalkBob.phase);
-        const lift = Math.max(0, Math.sin(enemy.alienWalkBob.phase * 2)) * enemy.alienWalkBob.bobHeight;
-        enemy.visualRoot.position.set(sway * enemy.alienWalkBob.amplitude, lift, 0);
-        enemy.visualRoot.rotation.z = sway * enemy.alienWalkBob.rollAmplitude;
-      }
-
       // Move along path
       let remaining = enemy.speed * enemySpeedMultiplier * deltaSeconds;
       while (remaining > 0 && enemy.alive) {
@@ -414,11 +365,10 @@ export function createEnemySystem(scene, pathWaypoints) {
     applyDamageAtPoint,
     startWave,
     isWaveClear,
-    isWaveClear,
     upgradeSlowEnemies,
     forceSpawnEnemy: (type, spawnPos) => {
       const enemy = createEnemyMesh(type);
-      enemy.mesh.position.copy(spawnPos || new THREE.Vector3(0, 0, 0));
+      enemy.mesh.position.copy(spawnPos || pathWaypoints[0]);
       activeEnemies.push(enemy);
     }
   };
