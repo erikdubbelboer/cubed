@@ -548,6 +548,7 @@ async function initGame() {
     moveBounds: grid.moveBounds,
     eyeHeight: grid.eyeHeight,
     ui: { overlayEl },
+    getMovementObstacles: () => (towerSystem ? towerSystem.getMovementObstacles() : []),
   });
 
   enemySystem = createEnemySystem(scene, grid.pathWaypoints);

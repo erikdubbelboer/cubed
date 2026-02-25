@@ -17,12 +17,17 @@ const MORTAR_DIRECT_HIT_RADIUS = 0.7;
 const MORTAR_EXPLOSION_DURATION = 0.42;
 const MORTAR_EXPLOSION_RADIUS = 13.2;
 const MORTAR_EXPLOSION_SPARK_COUNT = 10;
+const BASIC_TOWER_RADIUS = 1.35;
+const MORTAR_TOWER_RADIUS = 1.7;
+const TOWER_PLACEMENT_GAP = 0.25;
 
 export function createTowerSystem({ scene, camera, grid }) {
   const raycaster = new THREE.Raycaster();
   const aimPoint = new THREE.Vector2(0, 0);
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -grid.tileTopY);
   const groundHit = new THREE.Vector3();
+  const pathWaypoints = Array.isArray(grid.pathWaypoints) ? grid.pathWaypoints : [];
+  const pathHalfWidth = grid.cellSize * 0.47;
   const despawnMargin = 4;
   const projectileGravity = 0;
 
@@ -44,7 +49,7 @@ export function createTowerSystem({ scene, camera, grid }) {
   let maxTowers = 1;
   const towers = [];
   let previewValid = false;
-  let previewCell = null;
+  let previewPosition = null;
 
   let towerDamageMultiplier = 1;
   let towerFireRateMultiplier = 1;
@@ -207,15 +212,89 @@ export function createTowerSystem({ scene, camera, grid }) {
     }
   }
 
+  function getTowerRadius(type) {
+    return type === "mortar" ? MORTAR_TOWER_RADIUS : BASIC_TOWER_RADIUS;
+  }
+
+  function distancePointToSegmentXZ(point, segStart, segEnd) {
+    const sx = segStart.x;
+    const sz = segStart.z;
+    const ex = segEnd.x;
+    const ez = segEnd.z;
+    const dx = ex - sx;
+    const dz = ez - sz;
+    const lengthSq = dx * dx + dz * dz;
+
+    if (lengthSq < 1e-6) {
+      return Math.hypot(point.x - sx, point.z - sz);
+    }
+
+    const t = Math.max(0, Math.min(1, ((point.x - sx) * dx + (point.z - sz) * dz) / lengthSq));
+    const closestX = sx + dx * t;
+    const closestZ = sz + dz * t;
+    return Math.hypot(point.x - closestX, point.z - closestZ);
+  }
+
+  function overlapsTrack(position, towerRadius) {
+    if (pathWaypoints.length < 2) {
+      return false;
+    }
+    const minDistanceFromPath = pathHalfWidth + towerRadius;
+    for (let i = 0; i < pathWaypoints.length - 1; i += 1) {
+      const start = pathWaypoints[i];
+      const end = pathWaypoints[i + 1];
+      if (distancePointToSegmentXZ(position, start, end) < minDistanceFromPath) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function overlapsOtherTower(position, towerRadius) {
+    for (const tower of towers) {
+      const otherRadius = tower.radius ?? BASIC_TOWER_RADIUS;
+      const minDistance = towerRadius + otherRadius + TOWER_PLACEMENT_GAP;
+      const dx = position.x - tower.mesh.position.x;
+      const dz = position.z - tower.mesh.position.z;
+      if ((dx * dx + dz * dz) < (minDistance * minDistance)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function isInsideBuildBounds(position, towerRadius) {
+    return (
+      position.x >= grid.moveBounds.minX + towerRadius &&
+      position.x <= grid.moveBounds.maxX - towerRadius &&
+      position.z >= grid.moveBounds.minZ + towerRadius &&
+      position.z <= grid.moveBounds.maxZ - towerRadius
+    );
+  }
+
+  function isPlacementValid(position, type) {
+    const towerRadius = getTowerRadius(type);
+    if (!isInsideBuildBounds(position, towerRadius)) {
+      return false;
+    }
+    if (overlapsTrack(position, towerRadius)) {
+      return false;
+    }
+    if (overlapsOtherTower(position, towerRadius)) {
+      return false;
+    }
+    return true;
+  }
+
   function selectTower(type = "basic") {
     if (towers.length >= maxTowers) {
       return false;
     }
-    selectedTowerType = type;
+    selectedTowerType = type === "mortar" ? "mortar" : "basic";
     buildMode = true;
 
     scene.remove(preview);
-    preview = type === "mortar" ? createMortarMesh({
+    preview = selectedTowerType === "mortar" ? createMortarMesh({
       baseColor: 0x58c89a, accentColor: 0xa9fff9, opacity: 0.55, transparent: true,
     }) : createTowerMesh({
       baseColor: 0x58c89a, accentColor: 0xa9fff9, opacity: 0.55, transparent: true,
@@ -224,7 +303,7 @@ export function createTowerSystem({ scene, camera, grid }) {
 
     preview.visible = true;
     previewValid = false;
-    previewCell = null;
+    previewPosition = null;
     return true;
   }
 
@@ -233,64 +312,67 @@ export function createTowerSystem({ scene, camera, grid }) {
     selectedTowerType = null;
     preview.visible = false;
     previewValid = false;
-    previewCell = null;
+    previewPosition = null;
   }
 
   function updatePreviewFromCamera() {
     if (!buildMode || towers.length >= maxTowers) {
       preview.visible = false;
       previewValid = false;
-      previewCell = null;
+      previewPosition = null;
       return;
     }
 
     raycaster.setFromCamera(aimPoint, camera);
-    const tileHit = raycaster.intersectObjects(grid.tiles, false)[0];
-    let snapped = null;
-
-    if (tileHit) {
-      const { cellX, cellZ } = tileHit.object.userData;
-      snapped = { x: cellX, z: cellZ };
-    } else {
-      const hit = raycaster.ray.intersectPlane(groundPlane, groundHit);
-      if (hit) {
-        snapped = grid.worldToCell(groundHit.x, groundHit.z);
-      }
-    }
-
-    if (!snapped) {
+    const hit = raycaster.ray.intersectPlane(groundPlane, groundHit);
+    if (!hit) {
       preview.visible = false;
       previewValid = false;
-      previewCell = null;
+      previewPosition = null;
       return;
     }
 
+    const towerRadius = getTowerRadius(selectedTowerType);
+    const x = Math.min(
+      grid.moveBounds.maxX - towerRadius,
+      Math.max(grid.moveBounds.minX + towerRadius, groundHit.x)
+    );
+    const z = Math.min(
+      grid.moveBounds.maxZ - towerRadius,
+      Math.max(grid.moveBounds.minZ + towerRadius, groundHit.z)
+    );
+
     preview.visible = true;
-    previewCell = snapped;
-    preview.position.copy(grid.cellToWorldCenter(snapped.x, snapped.z, grid.tileTopY));
-    previewValid = !grid.isPathCell(snapped.x, snapped.z);
+    preview.position.set(x, grid.tileTopY, z);
+    if (!previewPosition) {
+      previewPosition = new THREE.Vector3();
+    }
+    previewPosition.copy(preview.position);
+    previewValid = isPlacementValid(previewPosition, selectedTowerType);
     setPreviewValidityVisual(previewValid);
   }
 
   function placeSelectedTower() {
     updatePreviewFromCamera();
 
-    if (!buildMode || !previewValid || towers.length >= maxTowers || !selectedTowerType || !previewCell) {
+    if (!buildMode || !previewValid || towers.length >= maxTowers || !selectedTowerType || !previewPosition) {
       return false;
     }
 
+    const towerRadius = getTowerRadius(selectedTowerType);
     const towerMesh = selectedTowerType === "mortar" ? createMortarMesh({
       baseColor: 0x506c97, accentColor: 0x9dd9ff, opacity: 1, transparent: false,
     }) : createTowerMesh({
       baseColor: 0x506c97, accentColor: 0x9dd9ff, opacity: 1, transparent: false,
     });
-    towerMesh.position.copy(grid.cellToWorldCenter(previewCell.x, previewCell.z, grid.tileTopY));
+    towerMesh.position.copy(previewPosition);
     scene.add(towerMesh);
 
     towers.push({
       mesh: towerMesh,
       cooldown: 0,
       type: selectedTowerType,
+      radius: towerRadius,
     });
 
     if (towers.length >= maxTowers) {
@@ -545,13 +627,17 @@ export function createTowerSystem({ scene, camera, grid }) {
       if (previewValid) {
         return `Build mode: place ${selectedTowerType} tower`;
       }
-      return "Build mode: invalid tile";
+      return "Build mode: invalid location";
     }
     return `Towers built: ${towers.length} / ${maxTowers}`;
   }
 
   function getAvailableTowers() {
     return Math.max(0, maxTowers - towers.length);
+  }
+
+  function getMovementObstacles() {
+    return towers;
   }
 
   return {
@@ -562,25 +648,34 @@ export function createTowerSystem({ scene, camera, grid }) {
     isBuildMode,
     getStatusText,
     getAvailableTowers,
+    getMovementObstacles,
     upgradeMaxTowers,
     upgradeTowerDamage,
-    upgradeTowerDamage,
     upgradeTowerFireRate,
-    forcePlaceTower: (x, z, type) => {
+    forcePlaceTower: (x, z, type = "basic") => {
+      const towerType = type === "mortar" ? "mortar" : "basic";
+      if (towers.length >= maxTowers) {
+        return false;
+      }
 
-      const newTower = {
-        type: type,
-        mesh: type === "mortar"
-          ? createMortarMesh({ baseColor: 0x82a5c9, accentColor: 0x6ca3e6 })
-          : createTowerMesh({ baseColor: 0x82a5c9, accentColor: 0x6ca3e6 }),
-        cellX: Math.round(x / grid.tileSize),
-        cellZ: Math.round(z / grid.tileSize),
-        fireCooldown: 0,
-      };
+      const towerPosition = new THREE.Vector3(x, grid.tileTopY, z);
+      if (!isPlacementValid(towerPosition, towerType)) {
+        return false;
+      }
 
-      newTower.mesh.position.set(x, grid.tileTopY, z);
-      scene.add(newTower.mesh);
-      towers.push(newTower);
+      const towerMesh = towerType === "mortar"
+        ? createMortarMesh({ baseColor: 0x82a5c9, accentColor: 0x6ca3e6 })
+        : createTowerMesh({ baseColor: 0x82a5c9, accentColor: 0x6ca3e6 });
+
+      towerMesh.position.copy(towerPosition);
+      scene.add(towerMesh);
+      towers.push({
+        mesh: towerMesh,
+        cooldown: 0,
+        type: towerType,
+        radius: getTowerRadius(towerType),
+      });
+      return true;
     }
   };
 }

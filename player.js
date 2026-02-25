@@ -3,8 +3,10 @@ import * as THREE from "three";
 import { getModel } from "./models.js";
 
 const MAX_PITCH = Math.PI * 0.5 - 0.05;
+const PLAYER_COLLISION_RADIUS = 0.55;
+const MIN_COLLISION_DISTANCE_SQ = 1e-6;
 
-export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight, ui }) {
+export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight, ui, getMovementObstacles }) {
   const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
   const controls = new PointerLockControls(camera, document.body);
   controls.pointerSpeed = 0.75;
@@ -299,6 +301,42 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
 
     camera.position.x = Math.min(moveBounds.maxX, Math.max(moveBounds.minX, camera.position.x));
     camera.position.z = Math.min(moveBounds.maxZ, Math.max(moveBounds.minZ, camera.position.z));
+
+    if (typeof getMovementObstacles === "function") {
+      const obstacles = getMovementObstacles();
+      if (Array.isArray(obstacles) && obstacles.length > 0) {
+        for (let pass = 0; pass < 2; pass += 1) {
+          for (const obstacle of obstacles) {
+            const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
+            const obstacleRadius = obstacle?.radius;
+            if (!obstaclePos || typeof obstacleRadius !== "number") {
+              continue;
+            }
+
+            const dx = camera.position.x - obstaclePos.x;
+            const dz = camera.position.z - obstaclePos.z;
+            const minDistance = PLAYER_COLLISION_RADIUS + obstacleRadius;
+            const distSq = (dx * dx) + (dz * dz);
+            if (distSq >= minDistance * minDistance) {
+              continue;
+            }
+
+            if (distSq <= MIN_COLLISION_DISTANCE_SQ) {
+              camera.position.x += minDistance;
+              continue;
+            }
+
+            const dist = Math.sqrt(distSq);
+            const push = (minDistance - dist) / dist;
+            camera.position.x += dx * push;
+            camera.position.z += dz * push;
+          }
+        }
+
+        camera.position.x = Math.min(moveBounds.maxX, Math.max(moveBounds.minX, camera.position.x));
+        camera.position.z = Math.min(moveBounds.maxZ, Math.max(moveBounds.minZ, camera.position.z));
+      }
+    }
   }
 
   function update(deltaSeconds, enemySystem) {
