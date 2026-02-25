@@ -126,12 +126,15 @@ export function createTowerSystem({ scene, camera, grid }) {
     if (model) {
       model.rotation.y = Math.PI;
       model.scale.set(4.5, 4.5, 4.5);
-      turretGroup.add(model);
+      root.add(model);
 
-      root.add(turretGroup);
-      root.userData.turret = turretGroup;
-      root.userData.muzzleNode = turretGroup;
-      root.userData.muzzleLocal = new THREE.Vector3(0, 3.0, 1.5);
+      const turretNode = model.getObjectByName("turret") || model;
+      root.userData.turret = turretNode;
+      root.userData.muzzleNode = turretNode;
+      root.userData.turretYawOffset = Math.PI;
+      root.userData.muzzleLocal = turretNode === model
+        ? new THREE.Vector3(0, 3.0, 1.5)
+        : new THREE.Vector3(0, 0.03, 0.23);
       root.userData.materials = [];
 
       if (transparent) {
@@ -186,6 +189,7 @@ export function createTowerSystem({ scene, camera, grid }) {
     root.userData.materials = [baseMaterial, topMaterial];
     root.userData.turret = turretGroup;
     root.userData.muzzleNode = turretGroup;
+    root.userData.turretYawOffset = 0;
     root.userData.muzzleLocal = new THREE.Vector3(0, 0, 2.4);
     return root;
   }
@@ -518,9 +522,15 @@ export function createTowerSystem({ scene, camera, grid }) {
       const target = enemySystem.getTargetInRange(t.mesh.position, range);
       if (target) {
         if (t.type !== "mortar" && t.mesh.userData.turret) {
+          const turretWorldPos = new THREE.Vector3();
+          t.mesh.userData.turret.getWorldPosition(turretWorldPos);
           const targetPos = target.position.clone();
-          targetPos.y = t.mesh.position.y + t.mesh.userData.turret.position.y;
+          targetPos.y = turretWorldPos.y;
           t.mesh.userData.turret.lookAt(targetPos);
+          const yawOffset = t.mesh.userData.turretYawOffset || 0;
+          if (yawOffset !== 0) {
+            t.mesh.userData.turret.rotateY(yawOffset);
+          }
         }
 
         if (t.cooldown <= 0) {
