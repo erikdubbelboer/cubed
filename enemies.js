@@ -1,4 +1,4 @@
-import * as THREE from "https://esm.sh/three@0.161.0";
+import * as THREE from "three";
 import { getModel } from "./models.js";
 
 const ENEMY_RADIUS = 0.9;

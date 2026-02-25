@@ -1,4 +1,4 @@
-import * as THREE from "https://esm.sh/three@0.161.0";
+import * as THREE from "three";
 import { createGrid } from "./grid.js";
 import { createPlayer } from "./player.js";
 import { createEnemySystem } from "./enemies.js";
@@ -96,8 +96,49 @@ let player;
 let enemySystem;
 let towerSystem;
 
+const GATE_MODEL_SCALE = 3.2;
+const GATE_Y_OFFSET = 0.02;
+
 const clock = new THREE.Clock();
 let isPaused = false;
+
+function getPathDirection(from, to) {
+  const direction = to.clone().sub(from);
+  direction.y = 0;
+  if (direction.lengthSq() < 1e-6) {
+    return new THREE.Vector3(0, 0, 1);
+  }
+  return direction.normalize();
+}
+
+function placePathEndpointGate(position, facingDirection) {
+  const gate = getModel("gate_complex");
+  if (!gate) {
+    return;
+  }
+
+  gate.scale.setScalar(GATE_MODEL_SCALE);
+  gate.position.set(position.x, grid.tileTopY + GATE_Y_OFFSET, position.z);
+
+  const lookTarget = gate.position.clone().add(facingDirection);
+  gate.lookAt(lookTarget);
+  scene.add(gate);
+}
+
+function placePathGates() {
+  const points = grid.pathWaypoints;
+  if (!Array.isArray(points) || points.length < 2) {
+    return;
+  }
+
+  const spawnPoint = points[0];
+  const spawnFacing = getPathDirection(points[0], points[1]);
+  placePathEndpointGate(spawnPoint, spawnFacing);
+
+  const endPoint = points[points.length - 1];
+  const endFacing = getPathDirection(points[points.length - 2], points[points.length - 1]);
+  placePathEndpointGate(endPoint, endFacing);
+}
 
 function refreshBuildStatus() {
   buildStatusEl.textContent = towerSystem.getStatusText();
@@ -498,6 +539,7 @@ function animate() {
 // Start game
 async function initGame() {
   await loadModels();
+  placePathGates();
 
   player = createPlayer({
     scene,

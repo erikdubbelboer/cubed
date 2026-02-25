@@ -1,5 +1,5 @@
-import * as THREE from "https://esm.sh/three@0.161.0";
-import { GLTFLoader } from "https://esm.sh/three@0.161.0/examples/jsm/loaders/GLTFLoader.js";
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 const loader = new GLTFLoader();
 
@@ -11,6 +11,7 @@ const modelPaths = {
     turret_single: "./kenney_space-kit/Models/GLTF format/turret_single.glb",
     turret_double: "./kenney_space-kit/Models/GLTF format/turret_double.glb",
     machine_barrelLarge: "./kenney_space-kit/Models/GLTF format/machine_barrelLarge.glb",
+    gate_complex: "./kenney_space-kit/Models/GLTF format/gate_complex.glb",
     alien: "./kenney_space-kit/Models/GLTF format/alien.glb",
     craft_speederA: "./kenney_space-kit/Models/GLTF format/craft_speederA.glb",
     craft_miner: "./kenney_space-kit/Models/GLTF format/craft_miner.glb",

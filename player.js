@@ -1,5 +1,5 @@
-import { PointerLockControls } from "https://esm.sh/three@0.161.0/examples/jsm/controls/PointerLockControls.js";
-import * as THREE from "https://esm.sh/three@0.161.0";
+import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
+import * as THREE from "three";
 import { getModel } from "./models.js";
 
 const MAX_PITCH = Math.PI * 0.5 - 0.05;
