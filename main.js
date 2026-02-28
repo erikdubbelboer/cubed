@@ -435,9 +435,16 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (event.code === "Digit1") {
-    towerSystem.selectTower("laser");
-    return;
+  if (event.code.startsWith("Digit")) {
+    const rawDigit = Number(event.code.slice(5));
+    if (!Number.isNaN(rawDigit)) {
+      const slotIndex = rawDigit === 0 ? 9 : rawDigit - 1;
+      const towerInventory = towerSystem.getTowerInventory();
+      if (slotIndex >= 0 && slotIndex < towerInventory.length) {
+        towerSystem.selectTower(towerInventory[slotIndex].type);
+        return;
+      }
+    }
   }
 
   if (event.code === "KeyQ") {
@@ -452,20 +459,28 @@ window.addEventListener("keydown", (event) => {
 
 const ALL_UPGRADES = [
   {
+    id: "tower_laser_add",
     label: "+1 Laser Tower",
     iconId: "tower_laser_add",
     apply: () => towerSystem.grantTowerStock("laser", 1)
   },
-  { label: "Tower does more damage", iconId: "tower_damage", apply: () => towerSystem.upgradeTowerDamage() },
-  { label: "I do more damage", iconId: "player_damage", apply: () => player.upgradePlayerDamage() },
-  { label: "Enemies move slower", iconId: "enemy_slow", apply: () => enemySystem.upgradeSlowEnemies() },
-  { label: "Tower shoots faster", iconId: "tower_fire_rate", apply: () => towerSystem.upgradeTowerFireRate() },
-  { label: "I shoot faster", iconId: "player_fire_rate", apply: () => player.upgradePlayerFireRate() },
+  {
+    id: "tower_emp_add",
+    label: "+1 EMP Tower",
+    iconId: "tower_emp_add",
+    apply: () => towerSystem.grantTowerStock("emp", 1)
+  },
+  { id: "tower_damage", label: "Tower does more damage", iconId: "tower_damage", apply: () => towerSystem.upgradeTowerDamage() },
+  { id: "player_damage", label: "I do more damage", iconId: "player_damage", apply: () => player.upgradePlayerDamage() },
+  { id: "enemy_slow", label: "Enemies move slower", iconId: "enemy_slow", apply: () => enemySystem.upgradeSlowEnemies() },
+  { id: "tower_fire_rate", label: "Tower shoots faster", iconId: "tower_fire_rate", apply: () => towerSystem.upgradeTowerFireRate() },
+  { id: "player_fire_rate", label: "I shoot faster", iconId: "player_fire_rate", apply: () => player.upgradePlayerFireRate() },
 ];
 
 let waveState = "PLAYING";
 let currentWave = WAVE_CONFIG.initialWave;
 let waveDelay = 0;
+let hasShownFirstUpgradeMenu = false;
 
 function startWave(wave) {
   currentWave = wave;
@@ -484,8 +499,22 @@ function showUpgradeMenu() {
   vCursorX = window.innerWidth * 0.5;
   vCursorY = window.innerHeight * 0.5;
 
-  const shuffled = [...ALL_UPGRADES].sort(() => 0.5 - Math.random());
-  currentUpgradeOptions = shuffled.slice(0, UI_CONFIG.upgradesShown);
+  const optionCount = Math.max(1, UI_CONFIG.upgradesShown);
+  if (!hasShownFirstUpgradeMenu) {
+    hasShownFirstUpgradeMenu = true;
+    const empUpgrade = ALL_UPGRADES.find((upgrade) => upgrade.id === "tower_emp_add") || null;
+    const pool = [...ALL_UPGRADES]
+      .filter((upgrade) => upgrade !== empUpgrade)
+      .sort(() => 0.5 - Math.random());
+    currentUpgradeOptions = [
+      ...(empUpgrade ? [empUpgrade] : []),
+      ...pool.slice(0, Math.max(0, optionCount - (empUpgrade ? 1 : 0))),
+    ];
+    currentUpgradeOptions.sort(() => 0.5 - Math.random());
+  } else {
+    const shuffled = [...ALL_UPGRADES].sort(() => 0.5 - Math.random());
+    currentUpgradeOptions = shuffled.slice(0, optionCount);
+  }
   hoveredUpgradeIndex = -1;
   updateMenuHoverFromVirtualCursor();
 }
@@ -520,9 +549,10 @@ function animate() {
   }
 
   const towerInventory = towerSystem
-    ? towerSystem.getTowerInventory().map((entry) => ({
+    ? towerSystem.getTowerInventory().map((entry, index) => ({
       ...entry,
-      iconId: entry.type === "laser" ? "tower_laser_add" : "tower_laser_add",
+      iconId: entry.type === "emp" ? "tower_emp" : "tower_laser",
+      hotkey: String((index + 1) % 10 || 0),
     }))
     : [];
 
@@ -540,6 +570,8 @@ function animate() {
     jetpackFuelRatio: player ? player.getJetpackFuelRatio() : 1,
     towerInventory,
     selectedTowerType: towerSystem ? towerSystem.getSelectedTowerType() : null,
+    buildMode: towerSystem ? towerSystem.isBuildMode() : false,
+    showKeyboardHints: !isTouchDevice,
   });
   uiOverlay.draw();
 

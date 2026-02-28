@@ -7,6 +7,14 @@ const DISSOLVE_DEATH_DURATION = ENEMY_CONFIG.dissolveDuration;
 const DISSOLVE_EDGE_WIDTH = ENEMY_CONFIG.dissolveEdgeWidth;
 const DISSOLVE_NOISE_SCALE = ENEMY_CONFIG.dissolveNoiseScale;
 const ENEMY_TYPES = ENEMY_CONFIG.types;
+const HIT_PULSE_DURATION = ENEMY_CONFIG.hitPulseDuration ?? 0.2;
+const HIT_PULSE_EXPONENT = ENEMY_CONFIG.hitPulseExponent ?? 0.4;
+const HIT_PULSE_EMISSIVE_BOOST = ENEMY_CONFIG.hitPulseEmissiveBoost ?? 1.2;
+const HIT_PULSE_SCALE_BOOST = ENEMY_CONFIG.hitPulseScaleBoost ?? 0.08;
+const HIT_PULSE_COLOR = new THREE.Color(ENEMY_CONFIG.hitPulseColor ?? 0xffffff);
+const HIT_PULSE_COLOR_MIX = ENEMY_CONFIG.hitPulseColorMix ?? 0.4;
+const HIT_PULSE_FREQUENCY = ENEMY_CONFIG.hitPulseFrequency ?? 30;
+const HIT_PULSE_STACK_ADD = ENEMY_CONFIG.hitPulseStackAdd ?? 0.75;
 
 function getDirectionOnPlane(from, to) {
   const direction = to.clone().sub(from);
@@ -108,15 +116,16 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     const visualRoot = new THREE.Group();
     enemyMesh.add(visualRoot);
 
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color: enemyType.color,
+      emissive: enemyType.emissive,
+      emissiveIntensity: ENEMY_CONFIG.bodyEmissiveIntensity,
+      roughness: ENEMY_CONFIG.bodyRoughness,
+      metalness: ENEMY_CONFIG.bodyMetalness,
+    });
     const bodyMesh = new THREE.Mesh(
       new THREE.BoxGeometry(enemyType.size, enemyType.size, enemyType.size),
-      new THREE.MeshStandardMaterial({
-        color: enemyType.color,
-        emissive: enemyType.emissive,
-        emissiveIntensity: ENEMY_CONFIG.bodyEmissiveIntensity,
-        roughness: ENEMY_CONFIG.bodyRoughness,
-        metalness: ENEMY_CONFIG.bodyMetalness,
-      })
+      bodyMaterial
     );
     bodyMesh.castShadow = true;
     bodyMesh.receiveShadow = true;
@@ -175,9 +184,19 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       ? spawnPortalPlane.distanceToPoint(enemyMesh.position) < enemyType.radius * ENEMY_CONFIG.portalRevealRadiusFactor
       : false;
     healthBarRoot.visible = !initiallyBehindPortal;
+    enemyMesh.userData.bodyCenterOffsetY = bodyMesh.position.y;
+    enemyMesh.userData.bodyHalfSize = enemyType.size * 0.5;
+    enemyMesh.userData.hitSphereRadius = enemyType.radius;
 
     return {
       mesh: enemyMesh,
+      bodyMesh,
+      bodyMaterial,
+      baseBodyColor: bodyMaterial.color.clone(),
+      baseEmissiveIntensity: bodyMaterial.emissiveIntensity,
+      hitPulseColor: HIT_PULSE_COLOR.clone(),
+      hitPulseTimer: 0,
+      hitPulseClock: 0,
       healthBarRoot,
       healthBarFg,
       healthBarBgWidth,
@@ -281,6 +300,52 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     return { material, dissolveUniform: uniforms.uDissolve };
   }
 
+  function resetHitPulse(enemy) {
+    if (!enemy.bodyMaterial || !enemy.visualRoot) {
+      return;
+    }
+    enemy.bodyMaterial.emissiveIntensity = enemy.baseEmissiveIntensity;
+    enemy.bodyMaterial.color.copy(enemy.baseBodyColor);
+    enemy.visualRoot.scale.set(1, 1, 1);
+    enemy.hitPulseTimer = 0;
+    enemy.hitPulseClock = 0;
+  }
+
+  function triggerHitPulse(enemy) {
+    if (!enemy.bodyMaterial) {
+      return;
+    }
+    enemy.hitPulseTimer = Math.min(
+      HIT_PULSE_DURATION,
+      enemy.hitPulseTimer + (HIT_PULSE_DURATION * HIT_PULSE_STACK_ADD)
+    );
+  }
+
+  function updateHitPulse(enemy, deltaSeconds) {
+    if (!enemy.bodyMaterial || !enemy.visualRoot || enemy.hitPulseTimer <= 0) {
+      return;
+    }
+
+    enemy.hitPulseTimer = Math.max(0, enemy.hitPulseTimer - deltaSeconds);
+    enemy.hitPulseClock += deltaSeconds;
+
+    const t = Math.max(0, enemy.hitPulseTimer / HIT_PULSE_DURATION);
+    const envelope = Math.pow(t, HIT_PULSE_EXPONENT);
+    const oscillation = 0.65 + (0.35 * Math.sin(enemy.hitPulseClock * HIT_PULSE_FREQUENCY));
+    const pulse = envelope * oscillation;
+
+    enemy.bodyMaterial.emissiveIntensity = enemy.baseEmissiveIntensity + (pulse * HIT_PULSE_EMISSIVE_BOOST);
+    enemy.bodyMaterial.color.copy(enemy.baseBodyColor).lerp(enemy.hitPulseColor, pulse * HIT_PULSE_COLOR_MIX);
+
+    const scaleXZ = 1 + (pulse * HIT_PULSE_SCALE_BOOST);
+    const scaleY = 1 + (pulse * HIT_PULSE_SCALE_BOOST * 0.55);
+    enemy.visualRoot.scale.set(scaleXZ, scaleY, scaleXZ);
+
+    if (enemy.hitPulseTimer <= 0) {
+      resetHitPulse(enemy);
+    }
+  }
+
   function startEnemyDissolve(enemy) {
     if (enemy.dying) return;
 
@@ -292,6 +357,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     if (enemy.healthBarRoot) {
       enemy.healthBarRoot.visible = false;
     }
+    resetHitPulse(enemy);
 
     if (!enemy.visualRoot) return;
 
@@ -314,6 +380,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
   function applyDamage(enemy, amount) {
     if (!enemy.alive || enemy.dying) return;
     enemy.health = Math.max(0, enemy.health - amount);
+    triggerHitPulse(enemy);
     updateHealthBar(enemy);
     if (enemy.health <= 0) {
       startEnemyDissolve(enemy);
@@ -399,6 +466,8 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
         }
       }
 
+      updateHitPulse(enemy, deltaSeconds);
+
       if (enemy.alive && enemy.portalClippingActive && enemy.portalPlane) {
         const portalDistance = enemy.portalPlane.distanceToPoint(enemy.mesh.position);
         if (portalDistance > enemy.radius * ENEMY_CONFIG.portalRevealRadiusFactor) {
@@ -430,6 +499,32 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       }
     }
     return hitAny;
+  }
+
+  function getDamageableEnemies() {
+    return activeEnemies
+      .filter((enemy) => enemy.alive && !enemy.dying && !enemy.portalClippingActive)
+      .map((enemy) => enemy.mesh);
+  }
+
+  function applyDamageToEnemyMesh(enemyMesh, damage) {
+    if (!enemyMesh || typeof damage !== "number" || damage <= 0) {
+      return false;
+    }
+
+    for (const enemy of activeEnemies) {
+      if (enemy.mesh !== enemyMesh) {
+        continue;
+      }
+      if (!enemy.alive || enemy.dying || enemy.portalClippingActive) {
+        return false;
+      }
+
+      applyDamage(enemy, damage);
+      return true;
+    }
+
+    return false;
   }
 
   function getTargetInRange(origin, range) {
@@ -465,8 +560,10 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
   return {
     update,
     getEnemies,
+    getDamageableEnemies,
     getTargetInRange,
     applyDamageAtPoint,
+    applyDamageToEnemyMesh,
     startWave,
     isWaveClear,
     upgradeSlowEnemies,

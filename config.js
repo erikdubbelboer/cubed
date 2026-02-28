@@ -239,8 +239,52 @@ export const GAME_CONFIG = {
     placementGap: 0.25,
     // Starting tower cap. Typical range: 1-8.
     baseMaxTowers: 1,
+    // Starting EMP tower stock. Typical range: 0-4.
+    baseEmpTowers: 0,
     // Path half-width estimate based on cell size. Typical range: 0.35-0.55.
     pathHalfWidthCellScale: 0.47,
+
+    // EMP tower combat tuning.
+    // Short-range pulse radius in world units. Typical range: 2.5-8.
+    empRange: 5,
+    // Time to emit one pulse while charging (seconds). Typical range: 0.4-2.5.
+    empPulseInterval: 1.35,
+    // Damage dealt once per enemy per pulse. Typical range: 8-120.
+    empPulseDamage: 34,
+    // Duration of pulse expansion from 0 -> max range (seconds). Typical range: 0.1-0.6.
+    empPulseDuration: 0.24,
+    // Thickness used for wavefront hit tests in world units. Typical range: 0.05-0.5.
+    empShellThickness: 0.16,
+
+    // EMP tower collision/build footprint.
+    empRadius: 1.1,
+    empHalfSize: 0.9,
+    empHeight: 2.0,
+
+    // EMP tower visuals.
+    empCoreRadius: 0.82,
+    empAuraRadius: 1.02,
+    empAuraOpacity: 0.38,
+    empHoverBaseY: 1.05,
+    empBobAmplitude: 0.14,
+    empBobFrequency: 3.4,
+    empIdleColor: 0x5d9bc8,
+    empChargeColor: 0xb9fff4,
+    empEmissiveIdle: 0x1a2d45,
+    empEmissiveCharge: 0x4ce5d8,
+
+    // EMP build preview + placed palette.
+    empPreviewColor: 0x79aed6,
+    empPreviewGlow: 0x6ce7df,
+    empPreviewInvalidColor: 0xb67373,
+    empPreviewInvalidGlow: 0xa04343,
+    empPlacedColor: 0x5386ad,
+    empPlacedGlow: 0x3fd8cb,
+
+    // EMP pulse visual.
+    empPulseColor: 0x8cf9ff,
+    empPulseOpacity: 0.74,
+    empPulseSegments: 20,
 
     // Upgrade increments.
     maxTowerUpgradeStep: 1,
@@ -327,6 +371,33 @@ export const GAME_CONFIG = {
     flashLightBaseIntensity: 2.6,
     flashLightPulseBoost: 2.2,
 
+    // Beam impact FX at enemy contact.
+    impactDuration: 0.2,
+    impactFlashRadius: 0.2,
+    impactFlashSegments: 10,
+    impactFlashColor: 0xb8fffa,
+    impactFlashOpacity: 0.9,
+    impactFlashExpand: 1.3,
+    impactRingInnerRadius: 0.08,
+    impactRingOuterRadius: 0.22,
+    impactRingSegments: 16,
+    impactRingColor: 0x8afffb,
+    impactRingOpacity: 0.85,
+    impactRingExpand: 1.9,
+    impactRingSpin: 9.5,
+    impactParticleCount: 12,
+    impactParticleSize: 0.07,
+    impactParticleOpacity: 0.95,
+    impactParticleLifeMin: 0.09,
+    impactParticleLifeMax: 0.2,
+    impactParticleSpeedMin: 2.8,
+    impactParticleSpeedMax: 6.8,
+    impactParticleDrag: 6.5,
+    impactParticleGravity: 10.0,
+    impactParticleSpread: 1.25,
+    impactPositionJitter: 0.06,
+    impactSurfaceInsetScale: 0.78,
+
     // Line-of-sight and self-intersection tuning.
     segmentEpsilon: 1e-6,
     beamLengthEpsilon: 1e-5,
@@ -360,6 +431,16 @@ export const GAME_CONFIG = {
     bodyRoughness: 0.65,
     bodyMetalness: 0.15,
     bodyYOffset: -0.65,
+
+    // Brief pulse response when taking damage.
+    hitPulseDuration: 0.2,
+    hitPulseExponent: 0.4,
+    hitPulseEmissiveBoost: 1.6,
+    hitPulseScaleBoost: 0.11,
+    hitPulseColor: 0xd2fff9,
+    hitPulseColorMix: 0.5,
+    hitPulseFrequency: 32,
+    hitPulseStackAdd: 0.85,
 
     // Health bar layout.
     healthBarBgMinWidth: 1.2,

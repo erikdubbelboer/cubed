@@ -28,46 +28,110 @@ function drawPanel(ctx, x, y, width, height, radius, fillStyle, strokeStyle, lin
   }
 }
 
-function drawTowerBaseIcon(ctx, x, y, size) {
-  const pad = size * 0.2;
-  const bodySize = size - pad * 2;
-  drawPanel(
-    ctx,
-    x + pad,
-    y + pad,
-    bodySize,
-    bodySize,
-    size * 0.12,
-    "rgba(111, 181, 237, 0.42)",
-    "rgba(186, 240, 255, 0.92)",
-    Math.max(1.5, size * 0.06)
-  );
+function fillPath(ctx, points, fillStyle, strokeStyle = null, lineWidth = 1) {
+  if (!Array.isArray(points) || points.length < 3) {
+    return;
+  }
+
   ctx.beginPath();
-  const ringInset = size * 0.26;
-  ctx.rect(
-    x + ringInset,
-    y + ringInset,
-    size - ringInset * 2,
-    size - ringInset * 2
+  ctx.moveTo(points[0][0], points[0][1]);
+  for (let i = 1; i < points.length; i += 1) {
+    ctx.lineTo(points[i][0], points[i][1]);
+  }
+  ctx.closePath();
+  ctx.fillStyle = fillStyle;
+  ctx.fill();
+
+  if (strokeStyle) {
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+  }
+}
+
+function drawTowerBaseIcon(ctx, x, y, size) {
+  const cx = x + size * 0.5;
+  const top = [cx, y + size * 0.13];
+  const leftTop = [x + size * 0.24, y + size * 0.29];
+  const rightTop = [x + size * 0.76, y + size * 0.29];
+  const center = [cx, y + size * 0.45];
+  const leftBottom = [x + size * 0.24, y + size * 0.67];
+  const rightBottom = [x + size * 0.76, y + size * 0.67];
+  const bottom = [cx, y + size * 0.84];
+
+  fillPath(
+    ctx,
+    [top, rightTop, center, leftTop],
+    "rgba(163, 236, 255, 0.88)",
+    "rgba(193, 246, 255, 0.95)",
+    Math.max(1.2, size * 0.04)
   );
+  fillPath(
+    ctx,
+    [leftTop, center, bottom, leftBottom],
+    "rgba(72, 124, 164, 0.92)",
+    "rgba(161, 220, 255, 0.86)",
+    Math.max(1.1, size * 0.035)
+  );
+  fillPath(
+    ctx,
+    [center, rightTop, rightBottom, bottom],
+    "rgba(56, 100, 137, 0.95)",
+    "rgba(139, 208, 246, 0.84)",
+    Math.max(1.1, size * 0.035)
+  );
+
+  const ringW = size * 0.32;
+  const ringH = size * 0.2;
   ctx.strokeStyle = "rgba(120, 255, 236, 0.95)";
-  ctx.lineWidth = Math.max(1.5, size * 0.05);
+  ctx.lineWidth = Math.max(1.4, size * 0.045);
+  ctx.beginPath();
+  ctx.ellipse(cx, y + size * 0.48, ringW * 0.5, ringH * 0.5, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(194, 247, 255, 0.65)";
+  ctx.lineWidth = Math.max(1, size * 0.03);
+  ctx.beginPath();
+  ctx.moveTo(top[0], top[1]);
+  ctx.lineTo(center[0], center[1]);
+  ctx.lineTo(bottom[0], bottom[1]);
+  ctx.moveTo(leftTop[0], leftTop[1]);
+  ctx.lineTo(leftBottom[0], leftBottom[1]);
+  ctx.moveTo(rightTop[0], rightTop[1]);
+  ctx.lineTo(rightBottom[0], rightBottom[1]);
   ctx.stroke();
 }
 
-function drawIconTowerLaserAdd(ctx, x, y, size) {
+function drawIconTowerLaser(ctx, x, y, size) {
   drawTowerBaseIcon(ctx, x, y, size);
-  const cx = x + size * 0.82;
-  const cy = y + size * 0.2;
-  const plusSize = size * 0.12;
-  ctx.strokeStyle = "rgba(196, 255, 210, 0.98)";
-  ctx.lineWidth = Math.max(1.5, size * 0.07);
-  ctx.lineCap = "round";
+}
+
+function drawIconTowerEmp(ctx, x, y, size) {
+  const cx = x + size * 0.5;
+  const cy = y + size * 0.5;
+  const r = size * 0.25;
+
+  const gradient = ctx.createRadialGradient(
+    cx - r * 0.35, cy - r * 0.35, r * 0.2,
+    cx, cy, r * 1.3
+  );
+  gradient.addColorStop(0, "rgba(186, 249, 255, 0.98)");
+  gradient.addColorStop(1, "rgba(80, 150, 201, 0.92)");
+  ctx.fillStyle = gradient;
   ctx.beginPath();
-  ctx.moveTo(cx - plusSize, cy);
-  ctx.lineTo(cx + plusSize, cy);
-  ctx.moveTo(cx, cy - plusSize);
-  ctx.lineTo(cx, cy + plusSize);
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(118, 255, 236, 0.95)";
+  ctx.lineWidth = Math.max(1.3, size * 0.05);
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, r * 1.58, r * 0.65, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(130, 216, 255, 0.78)";
+  ctx.lineWidth = Math.max(1, size * 0.035);
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, r * 1.1, r * 0.42, Math.PI * 0.5, 0, Math.PI * 2);
   ctx.stroke();
 }
 
@@ -216,7 +280,16 @@ function drawIconDefault(ctx, x, y, size) {
 function drawIconById(ctx, iconId, x, y, size) {
   switch (iconId) {
     case "tower_laser_add":
-      drawIconTowerLaserAdd(ctx, x, y, size);
+      drawIconTowerLaser(ctx, x, y, size);
+      return;
+    case "tower_laser":
+      drawIconTowerLaser(ctx, x, y, size);
+      return;
+    case "tower_emp_add":
+      drawIconTowerEmp(ctx, x, y, size);
+      return;
+    case "tower_emp":
+      drawIconTowerEmp(ctx, x, y, size);
       return;
     case "tower_damage":
       drawIconTowerDamage(ctx, x, y, size);
@@ -246,7 +319,8 @@ function normalizeTowerInventory(inputInventory) {
   return inputInventory.map((entry) => ({
     type: entry?.type || "unknown",
     label: entry?.label || entry?.type || "Tower",
-    iconId: entry?.iconId || "tower_laser_add",
+    iconId: entry?.iconId || "tower_laser",
+    hotkey: entry?.hotkey || "",
     remaining: Math.max(0, Math.floor(entry?.remaining || 0)),
   }));
 }
@@ -289,6 +363,8 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
     jetpackFuelRatio: 1,
     towerInventory: [],
     selectedTowerType: null,
+    buildMode: false,
+    showKeyboardHints: true,
   };
 
   let menuOptionRects = [];
@@ -339,6 +415,12 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
     }
     if (Object.prototype.hasOwnProperty.call(partialState, "selectedTowerType")) {
       state.selectedTowerType = partialState.selectedTowerType || null;
+    }
+    if (typeof partialState.buildMode === "boolean") {
+      state.buildMode = partialState.buildMode;
+    }
+    if (typeof partialState.showKeyboardHints === "boolean") {
+      state.showKeyboardHints = partialState.showKeyboardHints;
     }
   }
 
@@ -451,6 +533,14 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
       const item = visibleInventory[i];
       const x = startX + (slotSize + slotGap) * i;
       const isSelected = item.type === state.selectedTowerType;
+      const isDepleted = item.remaining <= 0;
+      const slotFill = isDepleted
+        ? "rgba(28, 34, 44, 0.78)"
+        : (isSelected ? "rgba(26, 55, 72, 0.92)" : "rgba(14, 23, 38, 0.82)");
+      const slotStroke = isDepleted
+        ? "rgba(128, 140, 156, 0.32)"
+        : (isSelected ? "rgba(110, 244, 173, 0.9)" : "rgba(155, 202, 255, 0.26)");
+      const slotLineWidth = isDepleted ? 1 : (isSelected ? 2 : 1.3);
 
       drawPanel(
         drawCtx,
@@ -459,43 +549,77 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
         slotSize,
         slotSize,
         clamp(slotSize * 0.11, 8, 14),
-        isSelected ? "rgba(26, 55, 72, 0.92)" : "rgba(14, 23, 38, 0.82)",
-        isSelected ? "rgba(110, 244, 173, 0.9)" : "rgba(155, 202, 255, 0.26)",
-        isSelected ? 2 : 1.3
+        slotFill,
+        slotStroke,
+        slotLineWidth
       );
 
       const iconSize = slotSize * 0.52;
       const iconX = x + (slotSize - iconSize) * 0.5;
       const iconY = y + slotSize * 0.1;
+      drawCtx.save();
+      if (isDepleted) {
+        drawCtx.globalAlpha = 0.42;
+      }
       drawIconById(drawCtx, item.iconId, iconX, iconY, iconSize);
+      drawCtx.restore();
 
-      const badgeSize = clamp(slotSize * 0.28, 20, 34);
-      const badgeX = x + slotSize - badgeSize - 6;
-      const badgeY = y + 6;
-      drawPanel(
-        drawCtx,
-        badgeX,
-        badgeY,
-        badgeSize,
-        badgeSize,
-        badgeSize * 0.35,
-        "rgba(8, 19, 30, 0.92)",
-        "rgba(124, 255, 205, 0.82)",
-        1.2
-      );
-      drawCtx.fillStyle = "rgba(122, 255, 215, 0.98)";
-      drawCtx.font = `700 ${clamp(slotSize * 0.19, 12, 18)}px ${FONT_STACK}`;
-      drawCtx.textAlign = "center";
-      drawCtx.textBaseline = "middle";
-      drawCtx.fillText(
-        String(item.remaining),
-        badgeX + badgeSize * 0.5,
-        badgeY + badgeSize * 0.53
-      );
+      if (item.hotkey && state.showKeyboardHints) {
+        const keyBoxW = clamp(slotSize * 0.24, 18, 30);
+        const keyBoxH = clamp(slotSize * 0.2, 16, 24);
+        const keyBoxX = x + 7;
+        const keyBoxY = y + 6;
+        drawPanel(
+          drawCtx,
+          keyBoxX,
+          keyBoxY,
+          keyBoxW,
+          keyBoxH,
+          clamp(keyBoxH * 0.28, 4, 8),
+          isDepleted ? "rgba(28, 34, 42, 0.88)" : "rgba(7, 16, 26, 0.9)",
+          isDepleted ? "rgba(160, 172, 188, 0.4)" : "rgba(191, 239, 255, 0.7)",
+          1
+        );
+        drawCtx.fillStyle = isDepleted ? "rgba(173, 184, 198, 0.82)" : "rgba(233, 246, 255, 0.95)";
+        drawCtx.textAlign = "center";
+        drawCtx.textBaseline = "middle";
+        drawCtx.font = `700 ${clamp(slotSize * 0.14, 10, 14)}px ${FONT_STACK}`;
+        drawCtx.fillText(
+          item.hotkey,
+          keyBoxX + keyBoxW * 0.5,
+          keyBoxY + keyBoxH * 0.54
+        );
+      }
+
+      if (item.remaining > 1) {
+        const badgeSize = clamp(slotSize * 0.28, 20, 34);
+        const badgeX = x + slotSize - badgeSize - 6;
+        const badgeY = y + 6;
+        drawPanel(
+          drawCtx,
+          badgeX,
+          badgeY,
+          badgeSize,
+          badgeSize,
+          badgeSize * 0.35,
+          "rgba(8, 19, 30, 0.92)",
+          "rgba(124, 255, 205, 0.82)",
+          1.2
+        );
+        drawCtx.fillStyle = "rgba(122, 255, 215, 0.98)";
+        drawCtx.font = `700 ${clamp(slotSize * 0.19, 12, 18)}px ${FONT_STACK}`;
+        drawCtx.textAlign = "center";
+        drawCtx.textBaseline = "middle";
+        drawCtx.fillText(
+          String(item.remaining),
+          badgeX + badgeSize * 0.5,
+          badgeY + badgeSize * 0.53
+        );
+      }
 
       drawCtx.textAlign = "center";
       drawCtx.textBaseline = "alphabetic";
-      drawCtx.fillStyle = "rgba(230, 241, 255, 0.92)";
+      drawCtx.fillStyle = isDepleted ? "rgba(155, 166, 180, 0.88)" : "rgba(230, 241, 255, 0.92)";
       drawCtx.font = `600 ${clamp(slotSize * 0.14, 10, 14)}px ${FONT_STACK}`;
       drawCtx.fillText(
         item.label,
@@ -509,9 +633,41 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
         y,
         width: slotSize,
         height: slotSize,
+        disabled: isDepleted,
       });
     }
 
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "alphabetic";
+  }
+
+  function drawBuildModeHint() {
+    if (!state.buildMode || state.menuOpen || !state.showKeyboardHints) {
+      return;
+    }
+
+    const hintWidth = clamp(viewportWidth * 0.24, 190, 320);
+    const hintHeight = clamp(viewportHeight * 0.048, 30, 44);
+    const x = (viewportWidth - hintWidth) * 0.5;
+    const y = viewportHeight - clamp(viewportHeight * 0.2, 112, 165);
+
+    drawPanel(
+      drawCtx,
+      x,
+      y,
+      hintWidth,
+      hintHeight,
+      clamp(hintHeight * 0.3, 8, 12),
+      "rgba(10, 21, 33, 0.84)",
+      "rgba(110, 244, 173, 0.62)",
+      1.2
+    );
+
+    drawCtx.fillStyle = "rgba(229, 245, 255, 0.96)";
+    drawCtx.textAlign = "center";
+    drawCtx.textBaseline = "middle";
+    drawCtx.font = `600 ${clamp(hintHeight * 0.44, 12, 18)}px ${FONT_STACK}`;
+    drawCtx.fillText("Build mode active  |  Q to exit", x + hintWidth * 0.5, y + hintHeight * 0.56);
     drawCtx.textAlign = "left";
     drawCtx.textBaseline = "alphabetic";
   }
@@ -642,6 +798,7 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
 
     drawJetpackHud();
     drawTowerTray();
+    drawBuildModeHint();
     drawCrosshair();
     drawUpgradeMenu();
 
@@ -672,7 +829,12 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
   }
 
   function hitTestTowerSlot(x, y) {
-    const result = hitTestRectList(towerSlotRects, x, y, (rect) => rect.type);
+    const result = hitTestRectList(
+      towerSlotRects,
+      x,
+      y,
+      (rect) => (rect.disabled ? null : rect.type)
+    );
     return result == null ? null : result;
   }
 

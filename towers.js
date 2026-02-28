@@ -10,6 +10,17 @@ const TOWER_BEAM_HIT_RADIUS = TOWER_CONFIG.beamHitRadius;
 const LASER_TOWER_RADIUS = TOWER_CONFIG.radius;
 const LASER_TOWER_HALF_SIZE = TOWER_CONFIG.halfSize;
 const LASER_TOWER_HEIGHT = TOWER_CONFIG.height;
+const EMP_RANGE = TOWER_CONFIG.empRange;
+const EMP_PULSE_INTERVAL = TOWER_CONFIG.empPulseInterval;
+const EMP_PULSE_DAMAGE = TOWER_CONFIG.empPulseDamage;
+const EMP_PULSE_DURATION = TOWER_CONFIG.empPulseDuration;
+const EMP_SHELL_THICKNESS = TOWER_CONFIG.empShellThickness;
+const EMP_TOWER_RADIUS = TOWER_CONFIG.empRadius;
+const EMP_TOWER_HALF_SIZE = TOWER_CONFIG.empHalfSize;
+const EMP_TOWER_HEIGHT = TOWER_CONFIG.empHeight;
+const EMP_HOVER_BASE_Y = TOWER_CONFIG.empHoverBaseY;
+const EMP_BOB_AMPLITUDE = TOWER_CONFIG.empBobAmplitude;
+const EMP_BOB_FREQUENCY = TOWER_CONFIG.empBobFrequency;
 const TOWER_PLACEMENT_GAP = TOWER_CONFIG.placementGap;
 const LASER_RING_HALF_EXTENT = TOWER_CONFIG.ringHalfExtent;
 const LASER_RING_THICKNESS = TOWER_CONFIG.ringThickness;
@@ -23,11 +34,16 @@ const LASER_FLASH_BASE_OPACITY = TOWER_CONFIG.flashBaseOpacity;
 const LASER_FLASH_PULSE_OPACITY_BOOST = TOWER_CONFIG.flashPulseOpacityBoost;
 const LASER_FLASH_BASE_SCALE = TOWER_CONFIG.flashBaseScale;
 const LASER_FLASH_PULSE_SCALE_BOOST = TOWER_CONFIG.flashPulseScaleBoost;
+const LASER_IMPACT_DURATION = TOWER_CONFIG.impactDuration;
+const LASER_IMPACT_PARTICLE_COUNT = TOWER_CONFIG.impactParticleCount;
+const LASER_IMPACT_SURFACE_INSET_SCALE = TOWER_CONFIG.impactSurfaceInsetScale;
 const PATH_RANGE_HIGHLIGHT_VALID_COLOR = TOWER_CONFIG.rangeHighlightValidColor;
 const PATH_RANGE_HIGHLIGHT_INVALID_COLOR = TOWER_CONFIG.rangeHighlightInvalidColor;
 const LASER_CORNER_OFFSETS = TOWER_CONFIG.cornerOffsets;
+const TOWER_TYPE_ORDER = ["laser", "emp"];
 const TOWER_DISPLAY_NAMES = {
   laser: "Laser Tower",
+  emp: "EMP Tower",
 };
 
 export function createTowerSystem({ scene, camera, grid }) {
@@ -68,22 +84,118 @@ export function createTowerSystem({ scene, camera, grid }) {
   });
   muzzleFlashMaterial.toneMapped = false;
 
+  const impactFlashGeometry = new THREE.SphereGeometry(
+    TOWER_CONFIG.impactFlashRadius,
+    TOWER_CONFIG.impactFlashSegments,
+    TOWER_CONFIG.impactFlashSegments
+  );
+  const impactFlashMaterial = new THREE.MeshBasicMaterial({
+    color: TOWER_CONFIG.impactFlashColor,
+    transparent: true,
+    opacity: TOWER_CONFIG.impactFlashOpacity,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  impactFlashMaterial.toneMapped = false;
+
+  const impactRingGeometry = new THREE.RingGeometry(
+    TOWER_CONFIG.impactRingInnerRadius,
+    TOWER_CONFIG.impactRingOuterRadius,
+    TOWER_CONFIG.impactRingSegments
+  );
+  const impactRingMaterial = new THREE.MeshBasicMaterial({
+    color: TOWER_CONFIG.impactRingColor,
+    transparent: true,
+    opacity: TOWER_CONFIG.impactRingOpacity,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+  });
+  impactRingMaterial.toneMapped = false;
+
+  const impactParticleGeometry = new THREE.BoxGeometry(
+    TOWER_CONFIG.impactParticleSize,
+    TOWER_CONFIG.impactParticleSize,
+    TOWER_CONFIG.impactParticleSize
+  );
+  const impactParticleMaterial = new THREE.MeshBasicMaterial({
+    color: TOWER_CONFIG.impactRingColor,
+    transparent: true,
+    opacity: TOWER_CONFIG.impactParticleOpacity,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  impactParticleMaterial.toneMapped = false;
+
+  const empPulseGeometry = new THREE.SphereGeometry(
+    1,
+    TOWER_CONFIG.empPulseSegments,
+    TOWER_CONFIG.empPulseSegments
+  );
+  const empPulseMaterial = new THREE.MeshBasicMaterial({
+    color: TOWER_CONFIG.empPulseColor,
+    transparent: true,
+    opacity: TOWER_CONFIG.empPulseOpacity,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    wireframe: true,
+  });
+  empPulseMaterial.toneMapped = false;
+
   const tempVecA = new THREE.Vector3();
   const tempVecB = new THREE.Vector3();
   const tempVecC = new THREE.Vector3();
+  const tempVecD = new THREE.Vector3();
+  const tempVecE = new THREE.Vector3();
+  const tempColorA = new THREE.Color();
+  const tempColorB = new THREE.Color();
   const upVector = new THREE.Vector3(0, 1, 0);
+  const ringNormal = new THREE.Vector3(0, 0, 1);
+  const impactEffects = [];
+  const empPulseEffects = [];
+
+  const towerSpecs = {
+    laser: {
+      type: "laser",
+      range: TOWER_RANGE,
+      radius: LASER_TOWER_RADIUS,
+      halfSize: LASER_TOWER_HALF_SIZE,
+      height: LASER_TOWER_HEIGHT,
+      usesLineOfSight: true,
+    },
+    emp: {
+      type: "emp",
+      range: EMP_RANGE,
+      radius: EMP_TOWER_RADIUS,
+      halfSize: EMP_TOWER_HALF_SIZE,
+      height: EMP_TOWER_HEIGHT,
+      usesLineOfSight: false,
+    },
+  };
 
   let selectedTowerType = null;
   let buildMode = false;
   const towerStock = {
     laser: TOWER_CONFIG.baseMaxTowers,
+    emp: TOWER_CONFIG.baseEmpTowers ?? 0,
   };
+  const unlockedTowerTypes = new Set(["laser"]);
+  if (towerStock.emp > 0) {
+    unlockedTowerTypes.add("emp");
+  }
   const towers = [];
   let previewValid = false;
   let previewPosition = null;
 
   let towerDamageMultiplier = 1;
   let towerFireRateMultiplier = 1;
+
+  function getTowerSpec(type) {
+    if (!type) {
+      return null;
+    }
+    return towerSpecs[type] || null;
+  }
 
   function getTowerRemaining(type) {
     if (!type) {
@@ -96,6 +208,9 @@ export function createTowerSystem({ scene, camera, grid }) {
     if (typeof type !== "string") {
       return 0;
     }
+    if (!getTowerSpec(type)) {
+      return 0;
+    }
 
     const increment = Math.max(0, Math.floor(amount));
     if (increment <= 0) {
@@ -103,6 +218,7 @@ export function createTowerSystem({ scene, camera, grid }) {
     }
 
     towerStock[type] = getTowerRemaining(type) + increment;
+    unlockedTowerTypes.add(type);
     return towerStock[type];
   }
 
@@ -207,6 +323,102 @@ export function createTowerSystem({ scene, camera, grid }) {
     return root;
   }
 
+  function createEmpTowerMesh({
+    coreColor,
+    emissiveColor,
+    auraColor = emissiveColor,
+    opacity = 1,
+    transparent = false,
+  }) {
+    const root = new THREE.Group();
+    const hoverNode = new THREE.Object3D();
+    hoverNode.position.y = EMP_HOVER_BASE_Y;
+    root.add(hoverNode);
+
+    const coreMaterial = new THREE.MeshStandardMaterial({
+      color: coreColor,
+      emissive: emissiveColor,
+      emissiveIntensity: 1.0,
+      roughness: 0.34,
+      metalness: 0.18,
+      transparent,
+      opacity,
+    });
+    const coreMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(TOWER_CONFIG.empCoreRadius, 20, 16),
+      coreMaterial
+    );
+    hoverNode.add(coreMesh);
+
+    const auraMaterial = new THREE.MeshBasicMaterial({
+      color: auraColor,
+      transparent: true,
+      opacity: Math.max(0, Math.min(1, TOWER_CONFIG.empAuraOpacity * opacity)),
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    auraMaterial.toneMapped = false;
+    const auraMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(TOWER_CONFIG.empAuraRadius, 20, 16),
+      auraMaterial
+    );
+    hoverNode.add(auraMesh);
+
+    const glowLight = new THREE.PointLight(emissiveColor, 0.35, TOWER_CONFIG.ringLightDistance);
+    hoverNode.add(glowLight);
+
+    root.userData.materials = [coreMaterial, auraMaterial];
+    root.userData.empCoreMaterial = coreMaterial;
+    root.userData.empAuraMaterial = auraMaterial;
+    root.userData.empLight = glowLight;
+    root.userData.hoverNode = hoverNode;
+
+    applyShadowSettings(root);
+    auraMesh.castShadow = false;
+    auraMesh.receiveShadow = false;
+    return root;
+  }
+
+  function createTowerPreviewMesh(type) {
+    if (type === "emp") {
+      return createEmpTowerMesh({
+        coreColor: TOWER_CONFIG.empPreviewColor,
+        emissiveColor: TOWER_CONFIG.empPreviewGlow,
+        auraColor: TOWER_CONFIG.empPreviewGlow,
+        opacity: TOWER_CONFIG.previewOpacity,
+        transparent: true,
+      });
+    }
+
+    return createLaserTowerMesh({
+      bodyColor: TOWER_CONFIG.previewBodyColor,
+      ringColor: TOWER_CONFIG.previewRingColor,
+      ringGlowColor: TOWER_CONFIG.previewRingGlow,
+      opacity: TOWER_CONFIG.previewOpacity,
+      transparent: true,
+    });
+  }
+
+  function createTowerPlacedMesh(type) {
+    if (type === "emp") {
+      return createEmpTowerMesh({
+        coreColor: TOWER_CONFIG.empPlacedColor,
+        emissiveColor: TOWER_CONFIG.empPlacedGlow,
+        auraColor: TOWER_CONFIG.empPlacedGlow,
+        opacity: 1,
+        transparent: false,
+      });
+    }
+
+    return createLaserTowerMesh({
+      bodyColor: TOWER_CONFIG.placedBodyColor,
+      ringColor: TOWER_CONFIG.placedRingColor,
+      ringGlowColor: TOWER_CONFIG.placedRingGlow,
+      opacity: 1,
+      transparent: false,
+    });
+  }
+
   function createPathRangeHighlights() {
     const pathTiles = Array.isArray(grid.tiles)
       ? grid.tiles.filter((tile) => tile?.userData?.isPath)
@@ -268,11 +480,25 @@ export function createTowerSystem({ scene, camera, grid }) {
   }
 
   function updatePathRangeHighlights(origin) {
+    const towerSpec = getTowerSpec(selectedTowerType);
+    if (!towerSpec) {
+      hidePathRangeHighlights();
+      return;
+    }
+
+    if (!towerSpec.usesLineOfSight) {
+      const rangeSq = towerSpec.range * towerSpec.range;
+      for (const entry of pathRangeHighlights.entries) {
+        entry.mesh.visible = origin.distanceToSquared(entry.center) <= rangeSq;
+      }
+      return;
+    }
+
     const previewTowerProbe = {
       mesh: preview,
-      range: TOWER_RANGE,
-      halfSize: LASER_TOWER_HALF_SIZE,
-      height: LASER_TOWER_HEIGHT,
+      range: towerSpec.range,
+      halfSize: towerSpec.halfSize,
+      height: towerSpec.height,
       baseY: origin.y,
       cornerIndex: null,
     };
@@ -284,6 +510,32 @@ export function createTowerSystem({ scene, camera, grid }) {
   }
 
   function setPreviewValidityVisual(isValid) {
+    if (selectedTowerType === "emp") {
+      const coreMaterial = preview.userData.empCoreMaterial;
+      const auraMaterial = preview.userData.empAuraMaterial;
+      const glowLight = preview.userData.empLight;
+      if (!coreMaterial || !auraMaterial) {
+        return;
+      }
+
+      if (isValid) {
+        coreMaterial.color.setHex(TOWER_CONFIG.empPreviewColor);
+        coreMaterial.emissive.setHex(TOWER_CONFIG.empPreviewGlow);
+        auraMaterial.color.setHex(TOWER_CONFIG.empPreviewGlow);
+        if (glowLight) {
+          glowLight.color.setHex(TOWER_CONFIG.empPreviewGlow);
+        }
+      } else {
+        coreMaterial.color.setHex(TOWER_CONFIG.empPreviewInvalidColor);
+        coreMaterial.emissive.setHex(TOWER_CONFIG.empPreviewInvalidGlow);
+        auraMaterial.color.setHex(TOWER_CONFIG.empPreviewInvalidGlow);
+        if (glowLight) {
+          glowLight.color.setHex(TOWER_CONFIG.empPreviewInvalidGlow);
+        }
+      }
+      return;
+    }
+
     const materials = preview.userData.materials || [];
     const bodyMaterial = materials[0];
     const edgeMaterial = materials[1];
@@ -305,13 +557,7 @@ export function createTowerSystem({ scene, camera, grid }) {
     }
   }
 
-  let preview = createLaserTowerMesh({
-    bodyColor: TOWER_CONFIG.previewBodyColor,
-    ringColor: TOWER_CONFIG.previewRingColor,
-    ringGlowColor: TOWER_CONFIG.previewRingGlow,
-    opacity: TOWER_CONFIG.previewOpacity,
-    transparent: true,
-  });
+  let preview = createTowerPreviewMesh("laser");
   preview.visible = false;
   scene.add(preview);
 
@@ -336,11 +582,11 @@ export function createTowerSystem({ scene, camera, grid }) {
     return Math.hypot(point.x - closestX, point.z - closestZ);
   }
 
-  function overlapsTrack(position) {
+  function overlapsTrack(position, towerRadius) {
     if (pathWaypoints.length < 2) {
       return false;
     }
-    const minDistanceFromPath = pathHalfWidth + LASER_TOWER_RADIUS;
+    const minDistanceFromPath = pathHalfWidth + towerRadius;
     for (let i = 0; i < pathWaypoints.length - 1; i += 1) {
       const start = pathWaypoints[i];
       const end = pathWaypoints[i + 1];
@@ -351,9 +597,9 @@ export function createTowerSystem({ scene, camera, grid }) {
     return false;
   }
 
-  function overlapsOtherTower(position) {
+  function overlapsOtherTower(position, towerRadius) {
     for (const tower of towers) {
-      const minDistance = LASER_TOWER_RADIUS + (tower.radius ?? LASER_TOWER_RADIUS) + TOWER_PLACEMENT_GAP;
+      const minDistance = towerRadius + (tower.radius ?? LASER_TOWER_RADIUS) + TOWER_PLACEMENT_GAP;
       const dx = position.x - tower.mesh.position.x;
       const dz = position.z - tower.mesh.position.z;
       if ((dx * dx + dz * dz) < (minDistance * minDistance)) {
@@ -363,23 +609,23 @@ export function createTowerSystem({ scene, camera, grid }) {
     return false;
   }
 
-  function isInsideBuildBounds(position) {
+  function isInsideBuildBounds(position, towerRadius) {
     return (
-      position.x >= grid.moveBounds.minX + LASER_TOWER_RADIUS &&
-      position.x <= grid.moveBounds.maxX - LASER_TOWER_RADIUS &&
-      position.z >= grid.moveBounds.minZ + LASER_TOWER_RADIUS &&
-      position.z <= grid.moveBounds.maxZ - LASER_TOWER_RADIUS
+      position.x >= grid.moveBounds.minX + towerRadius &&
+      position.x <= grid.moveBounds.maxX - towerRadius &&
+      position.z >= grid.moveBounds.minZ + towerRadius &&
+      position.z <= grid.moveBounds.maxZ - towerRadius
     );
   }
 
-  function isPlacementValid(position) {
-    if (!isInsideBuildBounds(position)) {
+  function isPlacementValid(position, towerRadius) {
+    if (!isInsideBuildBounds(position, towerRadius)) {
       return false;
     }
-    if (overlapsTrack(position)) {
+    if (overlapsTrack(position, towerRadius)) {
       return false;
     }
-    if (overlapsOtherTower(position)) {
+    if (overlapsOtherTower(position, towerRadius)) {
       return false;
     }
     return true;
@@ -393,7 +639,8 @@ export function createTowerSystem({ scene, camera, grid }) {
   }
 
   function selectTower(type = "laser") {
-    if (type !== "laser") {
+    const towerSpec = getTowerSpec(type);
+    if (!towerSpec) {
       return false;
     }
 
@@ -405,13 +652,7 @@ export function createTowerSystem({ scene, camera, grid }) {
     buildMode = true;
 
     scene.remove(preview);
-    preview = createLaserTowerMesh({
-      bodyColor: TOWER_CONFIG.previewBodyColor,
-      ringColor: TOWER_CONFIG.previewRingColor,
-      ringGlowColor: TOWER_CONFIG.previewRingGlow,
-      opacity: TOWER_CONFIG.previewOpacity,
-      transparent: true,
-    });
+    preview = createTowerPreviewMesh(type);
     scene.add(preview);
 
     preview.visible = true;
@@ -432,9 +673,10 @@ export function createTowerSystem({ scene, camera, grid }) {
   }
 
   function updatePreviewFromCamera() {
+    const towerSpec = getTowerSpec(selectedTowerType);
     if (
       !buildMode
-      || selectedTowerType !== "laser"
+      || !towerSpec
       || getTowerRemaining(selectedTowerType) <= 0
     ) {
       preview.visible = false;
@@ -457,12 +699,12 @@ export function createTowerSystem({ scene, camera, grid }) {
     }
 
     const x = Math.min(
-      grid.moveBounds.maxX - LASER_TOWER_RADIUS,
-      Math.max(grid.moveBounds.minX + LASER_TOWER_RADIUS, groundHit.x)
+      grid.moveBounds.maxX - towerSpec.radius,
+      Math.max(grid.moveBounds.minX + towerSpec.radius, groundHit.x)
     );
     const z = Math.min(
-      grid.moveBounds.maxZ - LASER_TOWER_RADIUS,
-      Math.max(grid.moveBounds.minZ + LASER_TOWER_RADIUS, groundHit.z)
+      grid.moveBounds.maxZ - towerSpec.radius,
+      Math.max(grid.moveBounds.minZ + towerSpec.radius, groundHit.z)
     );
     const y = getBuildSurfaceY(x, z);
 
@@ -472,10 +714,40 @@ export function createTowerSystem({ scene, camera, grid }) {
       previewPosition = new THREE.Vector3();
     }
     previewPosition.copy(preview.position);
-    previewValid = isPlacementValid(previewPosition);
+    previewValid = isPlacementValid(previewPosition, towerSpec.radius);
     setPreviewValidityVisual(previewValid);
     setPathRangeHighlightValidityVisual(previewValid);
     updatePathRangeHighlights(previewPosition);
+  }
+
+  function createTowerEntry(towerType, towerMesh, basePosition) {
+    const towerSpec = getTowerSpec(towerType);
+    if (!towerSpec) {
+      return null;
+    }
+
+    const entry = {
+      mesh: towerMesh,
+      cooldown: 0,
+      pulseTimer: 0,
+      chargeTimer: 0,
+      towerType,
+      range: towerSpec.range,
+      radius: towerSpec.radius,
+      halfSize: towerSpec.halfSize,
+      height: towerSpec.height,
+      baseY: basePosition.y,
+      beamVisual: null,
+      cornerIndex: null,
+      bobClock: Math.random() * Math.PI * 2,
+      bobPhase: Math.random() * Math.PI * 2,
+      empIdleColor: new THREE.Color(TOWER_CONFIG.empIdleColor),
+      empChargeColor: new THREE.Color(TOWER_CONFIG.empChargeColor),
+      empEmissiveIdle: new THREE.Color(TOWER_CONFIG.empEmissiveIdle),
+      empEmissiveCharge: new THREE.Color(TOWER_CONFIG.empEmissiveCharge),
+    };
+
+    return entry;
   }
 
   function placeSelectedTower() {
@@ -491,29 +763,17 @@ export function createTowerSystem({ scene, camera, grid }) {
       return false;
     }
 
-    const towerMesh = createLaserTowerMesh({
-      bodyColor: TOWER_CONFIG.placedBodyColor,
-      ringColor: TOWER_CONFIG.placedRingColor,
-      ringGlowColor: TOWER_CONFIG.placedRingGlow,
-      opacity: 1,
-      transparent: false,
-    });
+    const towerMesh = createTowerPlacedMesh(selectedTowerType);
     towerMesh.position.copy(previewPosition);
     scene.add(towerMesh);
 
-    towers.push({
-      mesh: towerMesh,
-      cooldown: 0,
-      pulseTimer: 0,
-      towerType: selectedTowerType,
-      range: TOWER_RANGE,
-      radius: LASER_TOWER_RADIUS,
-      halfSize: LASER_TOWER_HALF_SIZE,
-      height: LASER_TOWER_HEIGHT,
-      baseY: previewPosition.y,
-      beamVisual: null,
-      cornerIndex: null,
-    });
+    const towerEntry = createTowerEntry(selectedTowerType, towerMesh, previewPosition);
+    if (!towerEntry) {
+      scene.remove(towerMesh);
+      return false;
+    }
+    towers.push(towerEntry);
+    unlockedTowerTypes.add(selectedTowerType);
 
     towerStock[selectedTowerType] = Math.max(0, getTowerRemaining(selectedTowerType) - 1);
     if (getTowerRemaining(selectedTowerType) <= 0) {
@@ -753,12 +1013,18 @@ export function createTowerSystem({ scene, camera, grid }) {
             continue;
           }
 
-          const distSq = tower.mesh.position.distanceToSquared(enemyMesh.position);
+          tempVecD.copy(enemyMesh.position);
+          const aimOffsetY = enemyMesh.userData?.bodyCenterOffsetY;
+          if (typeof aimOffsetY === "number") {
+            tempVecD.y += aimOffsetY;
+          }
+
+          const distSq = tower.mesh.position.distanceToSquared(tempVecD);
           if (distSq > bestDistSq) {
             continue;
           }
 
-          if (!hasLineOfSightToPoint(tower, enemyMesh.position)) {
+          if (!hasLineOfSightToPoint(tower, tempVecD)) {
             continue;
           }
 
@@ -766,6 +1032,7 @@ export function createTowerSystem({ scene, camera, grid }) {
           bestTarget = {
             mesh: enemyMesh,
             position: enemyMesh.position,
+            aimPoint: tempVecD.clone(),
           };
         }
         if (bestTarget) {
@@ -777,13 +1044,53 @@ export function createTowerSystem({ scene, camera, grid }) {
     if (typeof enemySystem.getTargetInRange === "function") {
       const fallbackTarget = enemySystem.getTargetInRange(tower.mesh.position, towerRange);
       if (fallbackTarget && fallbackTarget.position) {
-        if (hasLineOfSightToPoint(tower, fallbackTarget.position)) {
-          return fallbackTarget;
+        const fallbackAimPoint = fallbackTarget.position.clone();
+        const fallbackOffsetY = fallbackTarget.mesh?.userData?.bodyCenterOffsetY;
+        if (typeof fallbackOffsetY === "number") {
+          fallbackAimPoint.y += fallbackOffsetY;
+        }
+        if (hasLineOfSightToPoint(tower, fallbackAimPoint)) {
+          return {
+            ...fallbackTarget,
+            aimPoint: fallbackAimPoint,
+          };
         }
       }
     }
 
     return null;
+  }
+
+  function getDamageableEnemyMeshes(enemySystem) {
+    if (typeof enemySystem.getDamageableEnemies === "function") {
+      const meshes = enemySystem.getDamageableEnemies();
+      if (Array.isArray(meshes)) {
+        return meshes;
+      }
+    }
+
+    if (typeof enemySystem.getEnemies === "function") {
+      const meshes = enemySystem.getEnemies();
+      if (Array.isArray(meshes)) {
+        return meshes.filter((mesh) => mesh?.visible);
+      }
+    }
+
+    return [];
+  }
+
+  function hasDamageableEnemyInRange(tower, enemySystem) {
+    const range = tower.range ?? EMP_RANGE;
+    const rangeSq = range * range;
+    for (const enemyMesh of getDamageableEnemyMeshes(enemySystem)) {
+      if (!enemyMesh || !enemyMesh.visible) {
+        continue;
+      }
+      if (tower.mesh.position.distanceToSquared(enemyMesh.position) <= rangeSq) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function updateBeamTransform(beamMesh, origin, targetPosition) {
@@ -824,79 +1131,427 @@ export function createTowerSystem({ scene, camera, grid }) {
     beamVisual.flash.material.dispose();
   }
 
-  function updateTowerCombat(deltaSeconds, enemySystem) {
-    for (const tower of towers) {
-      tower.cooldown = Math.max(0, tower.cooldown - deltaSeconds);
-      tower.pulseTimer = Math.max(0, (tower.pulseTimer || 0) - deltaSeconds);
+  function randomDirection(out) {
+    const z = (Math.random() * 2) - 1;
+    const angle = Math.random() * Math.PI * 2;
+    const radius = Math.sqrt(Math.max(0, 1 - (z * z)));
+    out.set(radius * Math.cos(angle), z, radius * Math.sin(angle));
+    return out;
+  }
 
-      const ringMaterial = tower.mesh.userData.ringMaterial;
-      const flashLight = tower.mesh.userData.flashLight;
+  function destroyImpactEffect(effect) {
+    scene.remove(effect.flash);
+    scene.remove(effect.ring);
+    effect.flash.material.dispose();
+    effect.ring.material.dispose();
 
-      const target = findTargetWithLineOfSight(tower, enemySystem);
-      if (!target || !target.mesh || !target.mesh.visible) {
-        if (tower.beamVisual) {
-          destroyLaserBeamVisual(tower.beamVisual);
-          tower.beamVisual = null;
-        }
-        tower.pulseTimer = 0;
-        if (ringMaterial) {
-          ringMaterial.emissiveIntensity = LASER_IDLE_GLOW_INTENSITY;
-        }
-        if (flashLight) {
-          flashLight.intensity = 0;
-        }
+    for (const particle of effect.particles) {
+      scene.remove(particle.mesh);
+      particle.mesh.material.dispose();
+    }
+  }
+
+  function spawnImpactEffect(position, beamDirection) {
+    const flash = new THREE.Mesh(impactFlashGeometry, impactFlashMaterial.clone());
+    flash.material.toneMapped = false;
+    flash.position.copy(position);
+    scene.add(flash);
+
+    const ring = new THREE.Mesh(impactRingGeometry, impactRingMaterial.clone());
+    ring.material.toneMapped = false;
+    ring.position.copy(position);
+    ring.quaternion.setFromUnitVectors(ringNormal, beamDirection);
+    scene.add(ring);
+
+    const particles = [];
+    const count = Math.max(1, LASER_IMPACT_PARTICLE_COUNT);
+    for (let i = 0; i < count; i += 1) {
+      const particle = new THREE.Mesh(impactParticleGeometry, impactParticleMaterial.clone());
+      particle.material.toneMapped = false;
+
+      randomDirection(tempVecA);
+      particle.position.copy(position).addScaledVector(tempVecA, Math.random() * TOWER_CONFIG.impactPositionJitter);
+      particle.rotation.set(
+        Math.random() * Math.PI * 2,
+        Math.random() * Math.PI * 2,
+        Math.random() * Math.PI * 2
+      );
+      scene.add(particle);
+
+      randomDirection(tempVecB);
+      tempVecC.copy(beamDirection).addScaledVector(tempVecB, TOWER_CONFIG.impactParticleSpread);
+      if (tempVecC.lengthSq() < TOWER_CONFIG.segmentEpsilon) {
+        tempVecC.copy(beamDirection);
+      }
+      const speed = THREE.MathUtils.lerp(
+        TOWER_CONFIG.impactParticleSpeedMin,
+        TOWER_CONFIG.impactParticleSpeedMax,
+        Math.random()
+      );
+      tempVecC.normalize().multiplyScalar(speed);
+
+      const particleLife = THREE.MathUtils.lerp(
+        TOWER_CONFIG.impactParticleLifeMin,
+        TOWER_CONFIG.impactParticleLifeMax,
+        Math.random()
+      );
+      const baseScale = THREE.MathUtils.lerp(0.65, 1.18, Math.random());
+      particle.scale.setScalar(baseScale);
+
+      particles.push({
+        mesh: particle,
+        velocity: tempVecC.clone(),
+        life: particleLife,
+        maxLife: particleLife,
+        baseScale,
+        baseOpacity: TOWER_CONFIG.impactParticleOpacity,
+        spin: new THREE.Vector3(
+          THREE.MathUtils.lerp(-12, 12, Math.random()),
+          THREE.MathUtils.lerp(-12, 12, Math.random()),
+          THREE.MathUtils.lerp(-12, 12, Math.random())
+        ),
+      });
+    }
+
+    impactEffects.push({
+      flash,
+      ring,
+      particles,
+      life: LASER_IMPACT_DURATION,
+      maxLife: LASER_IMPACT_DURATION,
+    });
+  }
+
+  function updateImpactEffects(deltaSeconds) {
+    for (let i = impactEffects.length - 1; i >= 0; i -= 1) {
+      const effect = impactEffects[i];
+      effect.life -= deltaSeconds;
+      if (effect.life <= 0) {
+        destroyImpactEffect(effect);
+        impactEffects.splice(i, 1);
         continue;
       }
 
-      const targetPoint = target.position.clone();
-      const origin = resolveCornerShotOrigin(tower, targetPoint);
+      const t = Math.max(0, effect.life / effect.maxLife);
+      const invT = 1 - t;
+      effect.flash.material.opacity = TOWER_CONFIG.impactFlashOpacity * t;
+      effect.flash.scale.setScalar(1 + (invT * TOWER_CONFIG.impactFlashExpand));
+      effect.ring.material.opacity = TOWER_CONFIG.impactRingOpacity * t;
+      effect.ring.scale.setScalar(1 + (invT * TOWER_CONFIG.impactRingExpand));
+      effect.ring.rotateZ(deltaSeconds * TOWER_CONFIG.impactRingSpin);
 
-      if (!tower.beamVisual) {
-        tower.beamVisual = createLaserBeamVisual();
+      for (let j = effect.particles.length - 1; j >= 0; j -= 1) {
+        const particle = effect.particles[j];
+        particle.life -= deltaSeconds;
+        if (particle.life <= 0) {
+          scene.remove(particle.mesh);
+          particle.mesh.material.dispose();
+          effect.particles.splice(j, 1);
+          continue;
+        }
+
+        const pt = Math.max(0, particle.life / particle.maxLife);
+        particle.mesh.position.addScaledVector(particle.velocity, deltaSeconds);
+        particle.velocity.multiplyScalar(Math.max(0, 1 - (TOWER_CONFIG.impactParticleDrag * deltaSeconds)));
+        particle.velocity.y -= TOWER_CONFIG.impactParticleGravity * deltaSeconds;
+        particle.mesh.material.opacity = particle.baseOpacity * pt;
+        particle.mesh.scale.setScalar(
+          particle.baseScale * (0.45 + (0.55 * pt))
+        );
+        particle.mesh.rotation.x += particle.spin.x * deltaSeconds;
+        particle.mesh.rotation.y += particle.spin.y * deltaSeconds;
+        particle.mesh.rotation.z += particle.spin.z * deltaSeconds;
       }
-      const pulseT = tower.pulseTimer > 0 ? (tower.pulseTimer / LASER_PULSE_DURATION) : 0;
-      const pulseBoost = pulseT > 0 ? Math.pow(pulseT, TOWER_CONFIG.pulseExponent) : 0;
+    }
+  }
 
+  function destroyEmpPulseEffect(effect) {
+    if (!effect?.mesh) {
+      return;
+    }
+    scene.remove(effect.mesh);
+    effect.mesh.material.dispose();
+  }
+
+  function getEmpPulseOrigin(tower, out) {
+    const hoverNode = tower.mesh?.userData?.hoverNode;
+    if (hoverNode && typeof hoverNode.getWorldPosition === "function") {
+      hoverNode.getWorldPosition(out);
+      return out;
+    }
+
+    out.copy(tower.mesh.position);
+    out.y += EMP_HOVER_BASE_Y;
+    return out;
+  }
+
+  function spawnEmpPulse(origin, maxRadius, damage) {
+    const mesh = new THREE.Mesh(empPulseGeometry, empPulseMaterial.clone());
+    mesh.material.toneMapped = false;
+    mesh.position.copy(origin);
+    mesh.scale.setScalar(0.01);
+    scene.add(mesh);
+
+    empPulseEffects.push({
+      mesh,
+      origin: origin.clone(),
+      elapsed: 0,
+      prevRadius: 0,
+      currentRadius: 0,
+      maxRadius,
+      duration: Math.max(TOWER_CONFIG.segmentEpsilon, EMP_PULSE_DURATION),
+      damage,
+      hitSet: new Set(),
+    });
+  }
+
+  function doesPulseWaveHitEnemy(pulse, enemyMesh) {
+    const enemyRadius = typeof enemyMesh?.userData?.hitSphereRadius === "number"
+      ? enemyMesh.userData.hitSphereRadius
+      : 0;
+    const dist = pulse.origin.distanceTo(enemyMesh.position);
+    const halfShell = Math.max(0.01, EMP_SHELL_THICKNESS * 0.5);
+    const shellMin = Math.max(0, pulse.currentRadius - halfShell);
+    const shellMax = pulse.currentRadius + halfShell;
+
+    if ((dist + enemyRadius) < shellMin) {
+      return false;
+    }
+    if ((dist - enemyRadius) > shellMax) {
+      return false;
+    }
+    if ((dist + enemyRadius) < pulse.prevRadius) {
+      return false;
+    }
+    return true;
+  }
+
+  function updateEmpPulseEffects(deltaSeconds, enemySystem) {
+    const damageableEnemies = getDamageableEnemyMeshes(enemySystem);
+
+    for (let i = empPulseEffects.length - 1; i >= 0; i -= 1) {
+      const pulse = empPulseEffects[i];
+      pulse.elapsed += deltaSeconds;
+      pulse.prevRadius = pulse.currentRadius;
+
+      const t = Math.min(1, pulse.elapsed / pulse.duration);
+      pulse.currentRadius = pulse.maxRadius * t;
+
+      pulse.mesh.scale.setScalar(Math.max(0.01, pulse.currentRadius));
+      pulse.mesh.material.opacity = Math.max(0, TOWER_CONFIG.empPulseOpacity * (1 - t));
+
+      for (const enemyMesh of damageableEnemies) {
+        if (!enemyMesh || !enemyMesh.visible || pulse.hitSet.has(enemyMesh)) {
+          continue;
+        }
+        if (!doesPulseWaveHitEnemy(pulse, enemyMesh)) {
+          continue;
+        }
+
+        let hit = false;
+        if (typeof enemySystem.applyDamageToEnemyMesh === "function") {
+          hit = enemySystem.applyDamageToEnemyMesh(enemyMesh, pulse.damage);
+        } else if (typeof enemySystem.applyDamageAtPoint === "function") {
+          const enemyRadius = enemyMesh?.userData?.hitSphereRadius ?? 0;
+          hit = enemySystem.applyDamageAtPoint(enemyMesh.position, enemyRadius, pulse.damage);
+        }
+
+        if (hit) {
+          pulse.hitSet.add(enemyMesh);
+        }
+      }
+
+      if (t >= 1) {
+        destroyEmpPulseEffect(pulse);
+        empPulseEffects.splice(i, 1);
+      }
+    }
+  }
+
+  function updateEmpTowerBobbing(tower, deltaSeconds) {
+    const hoverNode = tower.mesh?.userData?.hoverNode;
+    if (!hoverNode) {
+      return;
+    }
+    tower.bobClock = (tower.bobClock || 0) + deltaSeconds;
+    hoverNode.position.y = EMP_HOVER_BASE_Y + (
+      Math.sin((tower.bobClock * EMP_BOB_FREQUENCY) + (tower.bobPhase || 0))
+      * EMP_BOB_AMPLITUDE
+    );
+  }
+
+  function updateEmpTowerAppearance(tower, chargeRatio) {
+    const coreMaterial = tower.mesh?.userData?.empCoreMaterial;
+    const auraMaterial = tower.mesh?.userData?.empAuraMaterial;
+    const empLight = tower.mesh?.userData?.empLight;
+    if (!coreMaterial) {
+      return;
+    }
+
+    tempColorA.copy(tower.empIdleColor).lerp(tower.empChargeColor, chargeRatio);
+    tempColorB.copy(tower.empEmissiveIdle).lerp(tower.empEmissiveCharge, chargeRatio);
+    coreMaterial.color.copy(tempColorA);
+    coreMaterial.emissive.copy(tempColorB);
+
+    if (auraMaterial) {
+      auraMaterial.color.copy(tempColorB);
+      auraMaterial.opacity = THREE.MathUtils.lerp(
+        TOWER_CONFIG.empAuraOpacity * 0.35,
+        TOWER_CONFIG.empAuraOpacity,
+        chargeRatio
+      );
+    }
+    if (empLight) {
+      empLight.color.copy(tempColorB);
+      empLight.intensity = THREE.MathUtils.lerp(0.2, 2.2, chargeRatio);
+    }
+  }
+
+  function updateLaserTowerCombat(tower, deltaSeconds, enemySystem) {
+    tower.cooldown = Math.max(0, tower.cooldown - deltaSeconds);
+    tower.pulseTimer = Math.max(0, (tower.pulseTimer || 0) - deltaSeconds);
+
+    const ringMaterial = tower.mesh.userData.ringMaterial;
+    const flashLight = tower.mesh.userData.flashLight;
+
+    const target = findTargetWithLineOfSight(tower, enemySystem);
+    if (!target || !target.mesh || !target.mesh.visible) {
       if (tower.beamVisual) {
-        updateBeamTransform(tower.beamVisual.beam, origin, targetPoint);
-        tower.beamVisual.flash.position.copy(origin);
-        tower.beamVisual.beam.scale.x = 1 + (pulseBoost * LASER_BEAM_PULSE_WIDTH_BOOST);
-        tower.beamVisual.beam.scale.z = 1 + (pulseBoost * LASER_BEAM_PULSE_WIDTH_BOOST);
-        tower.beamVisual.beam.material.opacity = Math.min(
-          TOWER_CONFIG.beamMaxOpacity,
-          LASER_BEAM_BASE_OPACITY + (pulseBoost * LASER_BEAM_PULSE_OPACITY_BOOST)
-        );
-        tower.beamVisual.flash.material.opacity = Math.min(
-          TOWER_CONFIG.flashMaxOpacity,
-          LASER_FLASH_BASE_OPACITY + (pulseBoost * LASER_FLASH_PULSE_OPACITY_BOOST)
-        );
-        tower.beamVisual.flash.scale.setScalar(
-          LASER_FLASH_BASE_SCALE + (pulseBoost * LASER_FLASH_PULSE_SCALE_BOOST)
-        );
+        destroyLaserBeamVisual(tower.beamVisual);
+        tower.beamVisual = null;
       }
-
+      tower.pulseTimer = 0;
       if (ringMaterial) {
-        ringMaterial.emissiveIntensity = LASER_ACTIVE_GLOW_INTENSITY + (pulseBoost * TOWER_CONFIG.ringPulseBoost);
+        ringMaterial.emissiveIntensity = LASER_IDLE_GLOW_INTENSITY;
       }
       if (flashLight) {
-        flashLight.intensity = TOWER_CONFIG.flashLightBaseIntensity + (pulseBoost * TOWER_CONFIG.flashLightPulseBoost);
+        flashLight.intensity = 0;
       }
+      return;
+    }
 
-      if (tower.cooldown <= 0) {
-        enemySystem.applyDamageAtPoint(
-          target.position,
-          TOWER_BEAM_HIT_RADIUS,
-          TOWER_BEAM_DAMAGE * towerDamageMultiplier
-        );
-        tower.cooldown = TOWER_FIRE_INTERVAL * towerFireRateMultiplier;
+    const targetPoint = target.aimPoint
+      ? target.aimPoint.clone()
+      : target.position.clone();
+    const origin = resolveCornerShotOrigin(tower, targetPoint);
+    const impactPoint = targetPoint.clone();
+    const targetHalfSize = target.mesh?.userData?.bodyHalfSize;
+    const targetSphereRadius = target.mesh?.userData?.hitSphereRadius;
+    tempVecD.copy(target.position).sub(origin);
+    if (tempVecD.lengthSq() >= TOWER_CONFIG.segmentEpsilon) {
+      const baseRadius = typeof targetSphereRadius === "number"
+        ? targetSphereRadius
+        : (typeof targetHalfSize === "number" ? targetHalfSize : 0);
+      if (baseRadius > 0) {
+        // Force the impact just outside the enemy hit sphere, never inside it.
+        const outsideFactor = Math.max(1.02, LASER_IMPACT_SURFACE_INSET_SCALE);
+        const outsideDistance = (baseRadius * outsideFactor) + 0.03;
+        tempVecD.normalize();
+        impactPoint.copy(target.position).addScaledVector(tempVecD, -outsideDistance);
+      }
+    }
+
+    if (!tower.beamVisual) {
+      tower.beamVisual = createLaserBeamVisual();
+    }
+    const pulseT = tower.pulseTimer > 0 ? (tower.pulseTimer / LASER_PULSE_DURATION) : 0;
+    const pulseBoost = pulseT > 0 ? Math.pow(pulseT, TOWER_CONFIG.pulseExponent) : 0;
+
+    if (tower.beamVisual) {
+      updateBeamTransform(tower.beamVisual.beam, origin, impactPoint);
+      tower.beamVisual.flash.position.copy(origin);
+      tower.beamVisual.beam.scale.x = 1 + (pulseBoost * LASER_BEAM_PULSE_WIDTH_BOOST);
+      tower.beamVisual.beam.scale.z = 1 + (pulseBoost * LASER_BEAM_PULSE_WIDTH_BOOST);
+      tower.beamVisual.beam.material.opacity = Math.min(
+        TOWER_CONFIG.beamMaxOpacity,
+        LASER_BEAM_BASE_OPACITY + (pulseBoost * LASER_BEAM_PULSE_OPACITY_BOOST)
+      );
+      tower.beamVisual.flash.material.opacity = Math.min(
+        TOWER_CONFIG.flashMaxOpacity,
+        LASER_FLASH_BASE_OPACITY + (pulseBoost * LASER_FLASH_PULSE_OPACITY_BOOST)
+      );
+      tower.beamVisual.flash.scale.setScalar(
+        LASER_FLASH_BASE_SCALE + (pulseBoost * LASER_FLASH_PULSE_SCALE_BOOST)
+      );
+    }
+
+    if (ringMaterial) {
+      ringMaterial.emissiveIntensity = LASER_ACTIVE_GLOW_INTENSITY + (pulseBoost * TOWER_CONFIG.ringPulseBoost);
+    }
+    if (flashLight) {
+      flashLight.intensity = TOWER_CONFIG.flashLightBaseIntensity + (pulseBoost * TOWER_CONFIG.flashLightPulseBoost);
+    }
+
+    if (tower.cooldown <= 0) {
+      const hitAny = enemySystem.applyDamageAtPoint(
+        targetPoint,
+        TOWER_BEAM_HIT_RADIUS,
+        TOWER_BEAM_DAMAGE * towerDamageMultiplier
+      );
+      tower.cooldown = TOWER_FIRE_INTERVAL * towerFireRateMultiplier;
+      if (hitAny) {
+        tempVecE.copy(impactPoint).sub(origin);
+        if (tempVecE.lengthSq() < TOWER_CONFIG.segmentEpsilon) {
+          tempVecE.copy(upVector);
+        } else {
+          tempVecE.normalize();
+        }
+        spawnImpactEffect(impactPoint, tempVecE);
         tower.pulseTimer = LASER_PULSE_DURATION;
+      }
+    }
+  }
+
+  function updateEmpTowerCombat(tower, deltaSeconds, enemySystem) {
+    if (tower.beamVisual) {
+      destroyLaserBeamVisual(tower.beamVisual);
+      tower.beamVisual = null;
+    }
+
+    updateEmpTowerBobbing(tower, deltaSeconds);
+
+    const hasEnemyInRange = hasDamageableEnemyInRange(tower, enemySystem);
+    const chargeInterval = Math.max(0.05, EMP_PULSE_INTERVAL * towerFireRateMultiplier);
+    if (hasEnemyInRange) {
+      tower.chargeTimer += deltaSeconds;
+    } else {
+      tower.chargeTimer = Math.max(0, tower.chargeTimer - (deltaSeconds * 1.5));
+    }
+
+    let chargeRatio = THREE.MathUtils.clamp(tower.chargeTimer / chargeInterval, 0, 1);
+    updateEmpTowerAppearance(tower, chargeRatio);
+
+    if (!hasEnemyInRange || tower.chargeTimer < chargeInterval) {
+      return;
+    }
+
+    const pulseRange = tower.range ?? EMP_RANGE;
+    const pulseDamage = EMP_PULSE_DAMAGE * towerDamageMultiplier;
+    while (tower.chargeTimer >= chargeInterval) {
+      tower.chargeTimer -= chargeInterval;
+      getEmpPulseOrigin(tower, tempVecA);
+      spawnEmpPulse(tempVecA, pulseRange, pulseDamage);
+    }
+
+    chargeRatio = THREE.MathUtils.clamp(tower.chargeTimer / chargeInterval, 0, 1);
+    updateEmpTowerAppearance(tower, chargeRatio);
+  }
+
+  function updateTowerCombat(deltaSeconds, enemySystem) {
+    for (const tower of towers) {
+      if (tower.towerType === "emp") {
+        updateEmpTowerCombat(tower, deltaSeconds, enemySystem);
+      } else {
+        updateLaserTowerCombat(tower, deltaSeconds, enemySystem);
       }
     }
   }
 
   function update(deltaSeconds, enemySystem) {
     updatePreviewFromCamera();
+    updateImpactEffects(deltaSeconds);
     updateTowerCombat(deltaSeconds, enemySystem);
+    updateEmpPulseEffects(deltaSeconds, enemySystem);
   }
 
   function isBuildMode() {
@@ -906,7 +1561,8 @@ export function createTowerSystem({ scene, camera, grid }) {
   function getStatusText() {
     if (buildMode) {
       if (previewValid) {
-        return "Build mode: place laser cube turret";
+        const selectedLabel = TOWER_DISPLAY_NAMES[selectedTowerType] || "tower";
+        return `Build mode: place ${selectedLabel}`;
       }
       return "Build mode: invalid location";
     }
@@ -925,11 +1581,13 @@ export function createTowerSystem({ scene, camera, grid }) {
   }
 
   function getTowerInventory() {
-    return Object.keys(towerStock).map((type) => ({
+    return TOWER_TYPE_ORDER
+      .filter((type) => unlockedTowerTypes.has(type))
+      .map((type) => ({
       type,
       label: TOWER_DISPLAY_NAMES[type] || type,
       remaining: getTowerRemaining(type),
-    }));
+      }));
   }
 
   function getSelectedTowerType() {
@@ -956,36 +1614,27 @@ export function createTowerSystem({ scene, camera, grid }) {
     upgradeTowerDamage,
     upgradeTowerFireRate,
     forcePlaceTower: (x, z, towerType = "laser") => {
-      if (towerType !== "laser" || getTowerRemaining(towerType) <= 0) {
+      const towerSpec = getTowerSpec(towerType);
+      if (!towerSpec || getTowerRemaining(towerType) <= 0) {
         return false;
       }
 
       const towerPosition = new THREE.Vector3(x, getBuildSurfaceY(x, z), z);
-      if (!isPlacementValid(towerPosition)) {
+      if (!isPlacementValid(towerPosition, towerSpec.radius)) {
         return false;
       }
 
-      const towerMesh = createLaserTowerMesh({
-        bodyColor: TOWER_CONFIG.placedBodyColor,
-        ringColor: TOWER_CONFIG.placedRingColor,
-        ringGlowColor: TOWER_CONFIG.placedRingGlow,
-      });
+      const towerMesh = createTowerPlacedMesh(towerType);
 
       towerMesh.position.copy(towerPosition);
       scene.add(towerMesh);
-      towers.push({
-        mesh: towerMesh,
-        cooldown: 0,
-        pulseTimer: 0,
-        towerType,
-        range: TOWER_RANGE,
-        radius: LASER_TOWER_RADIUS,
-        halfSize: LASER_TOWER_HALF_SIZE,
-        height: LASER_TOWER_HEIGHT,
-        baseY: towerPosition.y,
-        beamVisual: null,
-        cornerIndex: null,
-      });
+      const towerEntry = createTowerEntry(towerType, towerMesh, towerPosition);
+      if (!towerEntry) {
+        scene.remove(towerMesh);
+        return false;
+      }
+      towers.push(towerEntry);
+      unlockedTowerTypes.add(towerType);
       towerStock[towerType] = Math.max(0, getTowerRemaining(towerType) - 1);
       return true;
     }
