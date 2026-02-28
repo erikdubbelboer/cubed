@@ -69,6 +69,79 @@ export const GAME_CONFIG = {
     startingUnlockedTowers: ["laser"],
   },
 
+  upgrades: [
+    {
+      id: "tower_aoe_unlock",
+      label: "Unlock AOE Tower",
+      iconId: "tower_aoe_add",
+      maxCount: 1,
+      grants: { unlockTowerType: "aoe" },
+    },
+    {
+      id: "tower_slow_unlock",
+      label: "Unlock Slow Tower",
+      iconId: "tower_slow_add",
+      maxCount: 1,
+      grants: { unlockTowerType: "slow" },
+    },
+    {
+      id: "tower_damage",
+      label: "Tower does more damage",
+      iconId: "tower_damage",
+      maxCount: null,
+      grants: { towerDamageAdd: 0.5 },
+    },
+    {
+      id: "player_damage",
+      label: "I do more damage",
+      iconId: "player_damage",
+      maxCount: null,
+      grants: { playerDamageAdd: 0.5 },
+    },
+    {
+      id: "enemy_slow",
+      label: "Enemies move slower",
+      iconId: "enemy_slow",
+      maxCount: null,
+      grants: { enemySpeedMultiplier: 0.8 },
+    },
+    {
+      id: "tower_fire_rate",
+      label: "Tower shoots faster",
+      iconId: "tower_fire_rate",
+      maxCount: null,
+      grants: { towerFireRateMultiplier: 0.75 },
+    },
+    {
+      id: "player_fire_rate",
+      label: "I shoot faster",
+      iconId: "player_fire_rate",
+      maxCount: null,
+      grants: { playerFireRateMultiplier: 0.75 },
+    },
+    {
+      id: "player_jetpack_efficiency",
+      label: "Jetpack fuel lasts longer",
+      iconId: "player_jetpack_efficiency",
+      maxCount: 1,
+      grants: { jetpackEfficiencyMultiplier: 2 },
+    },
+    {
+      id: "player_weapon_charge_capacity",
+      label: "Double weapon charges",
+      iconId: "player_weapon_charge_capacity",
+      maxCount: 1,
+      grants: { weaponMaxChargesMultiplier: 2 },
+    },
+    {
+      id: "player_weapon_pierce",
+      label: "Shots pierce +1 enemy",
+      iconId: "player_weapon_pierce",
+      maxCount: 1,
+      grants: { weaponPierceAdd: 1 },
+    },
+  ],
+
   waves: {
     // First wave number shown to player. Typical value: 1.
     initialWave: 1,
@@ -887,6 +960,14 @@ export const GAME_CONFIG = {
     weapon: {
       // Shots per second are derived from this cooldown.
       baseFireCooldown: 3,
+      // Maximum burst charges before the weapon must recharge.
+      baseMaxCharges: 3,
+      // Charges available at the start of the level.
+      startingCharges: 1,
+      // Delay between burst shots while holding fire.
+      burstShotDelay: 0.4,
+      // Extra enemies a shot can pass through before despawning.
+      basePierce: 0,
       // Projectile damage before upgrades.
       projectileDamage: 0.5,
       // Projectile cube size in world units. Typical range: 0.03-0.4.

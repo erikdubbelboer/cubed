@@ -146,6 +146,23 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
   const reloadBarReadyColor = new THREE.Color(PLAYER_CONFIG.gun.reloadBarReadyColor);
   const reloadBarReloadColor = new THREE.Color(PLAYER_CONFIG.gun.reloadBarReloadColor);
   const reloadBarCurrentColor = new THREE.Color();
+  const chargeDotReadyColor = new THREE.Color(PLAYER_CONFIG.gun.reloadBarReadyColor);
+  const chargeDotChargingColor = new THREE.Color(PLAYER_CONFIG.gun.reloadBarReloadColor);
+  const chargeDotEmptyColor = new THREE.Color(PLAYER_CONFIG.gun.reloadBarTrackColor);
+  const chargeDotCurrentColor = new THREE.Color();
+  const chargeDotGeometry = new THREE.SphereGeometry(
+    Math.max(0.003, reloadBarHeight * 0.26),
+    10,
+    8
+  );
+  const chargeDotsGroup = new THREE.Group();
+  chargeDotsGroup.position.set(
+    PLAYER_CONFIG.gun.reloadBarOffsetX,
+    PLAYER_CONFIG.gun.reloadBarOffsetY + (reloadBarHeight * 1.45),
+    PLAYER_CONFIG.gun.reloadBarOffsetZ + (reloadBarDepth * 0.5)
+  );
+  gunGroup.add(chargeDotsGroup);
+  let chargeDots = [];
 
   const gunBasePosition = new THREE.Vector3(
     PLAYER_CONFIG.gun.offsetX,
@@ -206,6 +223,7 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
   const jetpackMaxRiseSpeed = PLAYER_CONFIG.jetpack.maxRiseSpeed;
   let jetpackFuel = jetpackMaxFuel;
   let hasInfiniteJetpackFuel = false;
+  let jetpackFuelEfficiencyMultiplier = 1;
 
   const projectileGeometry = new THREE.BoxGeometry(
     PLAYER_CONFIG.weapon.projectileSize,
@@ -240,20 +258,86 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     PLAYER_CONFIG.projectileImpact.ringSegments
   );
   const projectileMaxDistanceFromPlayerSq = Math.pow((GAME_CONFIG.grid.cellSize * 20), 2);
-  const baseFireCooldown = PLAYER_CONFIG.weapon.baseFireCooldown;
+  const baseFireCooldown = Math.max(0.001, Number(PLAYER_CONFIG.weapon.baseFireCooldown) || 0.001);
+  const baseMaxCharges = Math.max(1, Math.floor(Number(PLAYER_CONFIG.weapon.baseMaxCharges) || 1));
+  const baseStartingCharges = Math.max(0, Math.floor(Number(PLAYER_CONFIG.weapon.startingCharges) || 1));
+  const baseBurstShotDelay = Math.max(0, Number(PLAYER_CONFIG.weapon.burstShotDelay) || 0);
+  const baseWeaponPierce = Math.max(0, Math.floor(Number(PLAYER_CONFIG.weapon.basePierce) || 0));
 
-  let fireCooldownRemaining = 0;
   let currentFireCooldown = baseFireCooldown;
+  let maxWeaponCharges = baseMaxCharges;
+  let currentWeaponCharges = Math.min(maxWeaponCharges, baseStartingCharges);
+  let chargeReloadProgress = 0;
+  let shotDelayRemaining = 0;
+  let currentBurstShotDelay = Math.max(0, baseBurstShotDelay);
+  let weaponPierceCount = baseWeaponPierce;
 
   let playerDamageMultiplier = 1;
   let playerFireRateMultiplier = 1;
 
-  function upgradePlayerDamage() { playerDamageMultiplier += PLAYER_CONFIG.upgrades.damageUpgradeAdd; }
-  function upgradePlayerFireRate() {
-    playerFireRateMultiplier *= PLAYER_CONFIG.upgrades.fireRateUpgradeMultiplier;
-    if (fireCooldownRemaining <= 0) {
-      currentFireCooldown = baseFireCooldown * playerFireRateMultiplier;
+  function upgradePlayerDamage(addAmount = PLAYER_CONFIG.upgrades.damageUpgradeAdd) {
+    const amount = Number(addAmount);
+    if (!Number.isFinite(amount)) {
+      return;
     }
+    playerDamageMultiplier += amount;
+  }
+
+  function upgradePlayerFireRate(multiplier = PLAYER_CONFIG.upgrades.fireRateUpgradeMultiplier) {
+    const rateMultiplier = Number(multiplier);
+    if (!Number.isFinite(rateMultiplier) || rateMultiplier <= 0) {
+      return;
+    }
+
+    const previousFireCooldown = currentFireCooldown;
+    const previousBurstDelay = Math.max(0.0001, currentBurstShotDelay);
+    playerFireRateMultiplier *= rateMultiplier;
+    currentFireCooldown = Math.max(0.001, baseFireCooldown * playerFireRateMultiplier);
+    currentBurstShotDelay = Math.max(0, baseBurstShotDelay * playerFireRateMultiplier);
+
+    if (currentWeaponCharges < maxWeaponCharges && previousFireCooldown > 0) {
+      const progressRatio = chargeReloadProgress / previousFireCooldown;
+      chargeReloadProgress = Math.max(0, Math.min(currentFireCooldown, progressRatio * currentFireCooldown));
+    }
+
+    if (shotDelayRemaining > 0) {
+      const shotDelayRatio = shotDelayRemaining / previousBurstDelay;
+      shotDelayRemaining = Math.max(0, Math.min(currentBurstShotDelay, shotDelayRatio * currentBurstShotDelay));
+    }
+  }
+
+  function upgradeJetpackFuelEfficiency(multiplier = 2) {
+    const efficiencyMultiplier = Number(multiplier);
+    if (!Number.isFinite(efficiencyMultiplier) || efficiencyMultiplier <= 0) {
+      return;
+    }
+    jetpackFuelEfficiencyMultiplier *= efficiencyMultiplier;
+  }
+
+  function upgradeWeaponMaxCharges(multiplier = 2) {
+    const chargeMultiplier = Number(multiplier);
+    if (!Number.isFinite(chargeMultiplier) || chargeMultiplier <= 0) {
+      return;
+    }
+
+    const nextMaxCharges = Math.max(1, Math.round(maxWeaponCharges * chargeMultiplier));
+    if (nextMaxCharges === maxWeaponCharges) {
+      return;
+    }
+
+    maxWeaponCharges = nextMaxCharges;
+    currentWeaponCharges = maxWeaponCharges;
+    chargeReloadProgress = 0;
+    rebuildChargeDots();
+    updateReloadBar(1);
+  }
+
+  function upgradeWeaponPierce(addAmount = 1) {
+    const pierceAdd = Math.floor(Number(addAmount));
+    if (!Number.isFinite(pierceAdd) || pierceAdd <= 0) {
+      return;
+    }
+    weaponPierceCount += pierceAdd;
   }
 
   function setMovementKey(code, isDown) {
@@ -438,6 +522,71 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     jetpackFuel = jetpackMaxFuel;
   }
 
+  function rebuildChargeDots() {
+    for (const dot of chargeDots) {
+      chargeDotsGroup.remove(dot);
+      dot.material.dispose();
+    }
+    chargeDots = [];
+
+    const maxDotsPerRow = 3;
+    const dotStep = reloadBarHeight * 0.9;
+    const rows = Math.max(1, Math.ceil(maxWeaponCharges / maxDotsPerRow));
+    const rowOffsetBase = ((rows - 1) * dotStep) * 0.5;
+
+    for (let i = 0; i < maxWeaponCharges; i += 1) {
+      const col = i % maxDotsPerRow;
+      const row = Math.floor(i / maxDotsPerRow);
+      const colsInRow = Math.min(maxDotsPerRow, maxWeaponCharges - (row * maxDotsPerRow));
+      const colOffsetBase = ((colsInRow - 1) * dotStep) * 0.5;
+
+      const dot = new THREE.Mesh(
+        chargeDotGeometry,
+        new THREE.MeshBasicMaterial({
+          color: PLAYER_CONFIG.gun.reloadBarTrackColor,
+          transparent: true,
+          opacity: 0.35,
+        })
+      );
+      dot.material.toneMapped = false;
+      dot.position.set(
+        (col * dotStep) - colOffsetBase,
+        rowOffsetBase - (row * dotStep),
+        0
+      );
+      chargeDotsGroup.add(dot);
+      chargeDots.push(dot);
+    }
+  }
+
+  function updateChargeDots(reloadProgress) {
+    if (chargeDots.length === 0) {
+      return;
+    }
+
+    const fullCharges = Math.floor(currentWeaponCharges);
+    const hasPartial = currentWeaponCharges < maxWeaponCharges;
+
+    for (let i = 0; i < chargeDots.length; i += 1) {
+      const dot = chargeDots[i];
+      if (i < fullCharges) {
+        dot.material.color.copy(chargeDotReadyColor);
+        dot.material.opacity = 1;
+      } else if (hasPartial && i === fullCharges) {
+        chargeDotCurrentColor.lerpColors(
+          chargeDotChargingColor,
+          chargeDotReadyColor,
+          Math.max(0, Math.min(1, reloadProgress))
+        );
+        dot.material.color.copy(chargeDotCurrentColor);
+        dot.material.opacity = 0.45 + (Math.max(0, Math.min(1, reloadProgress)) * 0.55);
+      } else {
+        dot.material.color.copy(chargeDotEmptyColor);
+        dot.material.opacity = 0.28;
+      }
+    }
+  }
+
   function updateReloadBar(progress) {
     const clampedProgress = Math.max(0, Math.min(1, progress));
     const fillScale = Math.max(0.001, clampedProgress);
@@ -447,7 +596,11 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     reloadBarCurrentColor.lerpColors(reloadBarReloadColor, reloadBarReadyColor, clampedProgress);
     reloadBarFillMaterial.color.copy(reloadBarCurrentColor);
     reloadBarFillMaterial.opacity = 0.45 + (clampedProgress * 0.55);
+    updateChargeDots(clampedProgress);
   }
+
+  rebuildChargeDots();
+  updateReloadBar(currentWeaponCharges >= maxWeaponCharges ? 1 : 0);
 
   function updateGunVisuals(deltaSeconds, movementSpeed) {
     gunFlashTimer = Math.max(0, gunFlashTimer - deltaSeconds);
@@ -462,9 +615,11 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     gunFlashMesh.scale.setScalar(1 + flashBoost * PLAYER_CONFIG.gun.flashScaleBoost);
     gunLight.intensity = flashBoost * PLAYER_CONFIG.gun.lightFlashBoost;
 
-    const reloadProgress = currentFireCooldown > 0
-      ? (1 - (fireCooldownRemaining / currentFireCooldown))
-      : 1;
+    const reloadProgress = currentWeaponCharges >= maxWeaponCharges
+      ? 1
+      : (currentFireCooldown > 0
+        ? Math.max(0, Math.min(1, chargeReloadProgress / currentFireCooldown))
+        : 1);
     updateReloadBar(reloadProgress);
 
     const speedRatio = Math.min(1, movementSpeed / gunBobSpeedForMax);
@@ -489,7 +644,7 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
   }
 
   function tryShoot() {
-    if (fireCooldownRemaining > 0) {
+    if (currentWeaponCharges <= 0 || shotDelayRemaining > 0) {
       return false;
     }
 
@@ -510,13 +665,33 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
       velocity: projectileVelocity.clone(),
       life: projectileLifetime,
       damage: projectileDamage * playerDamageMultiplier,
+      remainingPierceHits: weaponPierceCount,
+      hitEnemyMeshIds: new Set(),
     });
 
     gunFlashTimer = gunFlashDuration;
-    currentFireCooldown = baseFireCooldown * playerFireRateMultiplier;
-    fireCooldownRemaining = currentFireCooldown;
-    updateReloadBar(0);
+    currentWeaponCharges = Math.max(0, currentWeaponCharges - 1);
+    shotDelayRemaining = currentBurstShotDelay;
+    updateReloadBar(currentWeaponCharges >= maxWeaponCharges ? 1 : 0);
     return true;
+  }
+
+  function updateWeaponChargeRecharge(deltaSeconds) {
+    if (currentWeaponCharges >= maxWeaponCharges) {
+      chargeReloadProgress = 0;
+      return;
+    }
+
+    chargeReloadProgress += Math.max(0, deltaSeconds);
+    while (chargeReloadProgress >= currentFireCooldown && currentWeaponCharges < maxWeaponCharges) {
+      chargeReloadProgress -= currentFireCooldown;
+      currentWeaponCharges += 1;
+    }
+
+    if (currentWeaponCharges >= maxWeaponCharges) {
+      currentWeaponCharges = maxWeaponCharges;
+      chargeReloadProgress = 0;
+    }
   }
 
   function removeProjectile(index) {
@@ -619,25 +794,78 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
       return false;
     }
 
+    function getProjectileEnemyHit(projectile) {
+      if (!enemySystem || typeof enemySystem.getDamageableEnemies !== "function") {
+        return null;
+      }
+
+      const enemies = enemySystem.getDamageableEnemies();
+      if (!Array.isArray(enemies) || enemies.length === 0) {
+        return null;
+      }
+
+      let closestEnemyMesh = null;
+      let closestDistSq = Number.POSITIVE_INFINITY;
+
+      for (const enemyMesh of enemies) {
+        if (!enemyMesh || !enemyMesh.position) {
+          continue;
+        }
+        if (projectile.hitEnemyMeshIds.has(enemyMesh.uuid)) {
+          continue;
+        }
+
+        const enemyRadius = Number(enemyMesh.userData?.hitSphereRadius);
+        const collisionRadius = Number.isFinite(enemyRadius) ? enemyRadius : 0;
+        const maxHitDistance = collisionRadius + projectileHitRadius;
+        const distSq = enemyMesh.position.distanceToSquared(projectile.mesh.position);
+        if (distSq > maxHitDistance * maxHitDistance) {
+          continue;
+        }
+
+        if (distSq < closestDistSq) {
+          closestDistSq = distSq;
+          closestEnemyMesh = enemyMesh;
+        }
+      }
+
+      return closestEnemyMesh;
+    }
+
     for (let i = projectiles.length - 1; i >= 0; i -= 1) {
       const projectile = projectiles[i];
       projectile.velocity.y -= projectileGravity * deltaSeconds;
       projectile.mesh.position.addScaledVector(projectile.velocity, deltaSeconds);
       projectile.life -= deltaSeconds;
 
-      const hit = enemySystem.applyDamageAtPoint(
-        projectile.mesh.position,
-        projectileHitRadius,
-        projectile.damage
-      );
+      const hitEnemyMesh = getProjectileEnemyHit(projectile);
+      let hitEnemy = false;
+      if (
+        hitEnemyMesh
+        && enemySystem
+        && typeof enemySystem.applyDamageToEnemyMesh === "function"
+      ) {
+        hitEnemy = enemySystem.applyDamageToEnemyMesh(hitEnemyMesh, projectile.damage);
+      }
+
+      if (hitEnemy && hitEnemyMesh) {
+        projectile.hitEnemyMeshIds.add(hitEnemyMesh.uuid);
+        spawnProjectileImpact(projectile.mesh.position);
+        if (projectile.remainingPierceHits > 0) {
+          projectile.remainingPierceHits -= 1;
+        } else {
+          removeProjectile(i);
+          continue;
+        }
+      }
 
       const tooFarFromPlayer =
         projectile.mesh.position.distanceToSquared(camera.position) > projectileMaxDistanceFromPlayerSq;
 
       const hitTower = projectileHitsTower(projectile.mesh.position);
 
-      if (hit || hitTower || projectile.life <= 0 || tooFarFromPlayer) {
-        if (hit || hitTower) {
+      if (hitTower || projectile.life <= 0 || tooFarFromPlayer) {
+        if (hitTower) {
           spawnProjectileImpact(projectile.mesh.position);
         }
         removeProjectile(i);
@@ -728,7 +956,8 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
       if (hasInfiniteJetpackFuel) {
         jetpackFuel = jetpackMaxFuel;
       } else {
-        jetpackFuel = Math.max(0, jetpackFuel - jetpackBurnRate * deltaSeconds);
+        const burnRate = jetpackBurnRate / Math.max(1e-6, jetpackFuelEfficiencyMultiplier);
+        jetpackFuel = Math.max(0, jetpackFuel - burnRate * deltaSeconds);
       }
       verticalVelocity = Math.min(
         jetpackMaxRiseSpeed,
@@ -822,10 +1051,11 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
   }
 
   function update(deltaSeconds, enemySystem) {
-    fireCooldownRemaining = Math.max(0, fireCooldownRemaining - deltaSeconds);
+    shotDelayRemaining = Math.max(0, shotDelayRemaining - Math.max(0, deltaSeconds));
     updateLook();
     movementStartPosition.copy(camera.position);
     updateMovement(deltaSeconds);
+    updateWeaponChargeRecharge(deltaSeconds);
     const movementSpeed = deltaSeconds > 0
       ? movementStartPosition.distanceTo(camera.position) / deltaSeconds
       : 0;
@@ -863,6 +1093,9 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     getJetpackFuelPercent,
     upgradePlayerDamage,
     upgradePlayerFireRate,
+    upgradeJetpackFuelEfficiency,
+    upgradeWeaponMaxCharges,
+    upgradeWeaponPierce,
     setMenuMode,
     disableJetpackFuelConsumption,
   };

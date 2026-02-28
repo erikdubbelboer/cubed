@@ -342,8 +342,21 @@ export function createTowerSystem({
     return TOWER_TYPE_ORDER.filter((type) => unlockedTowerTypes.has(type));
   }
 
-  function upgradeTowerDamage() { towerDamageMultiplier += TOWER_CONFIG.damageUpgradeAdd; }
-  function upgradeTowerFireRate() { towerFireRateMultiplier *= TOWER_CONFIG.fireRateUpgradeMultiplier; }
+  function upgradeTowerDamage(addAmount = TOWER_CONFIG.damageUpgradeAdd) {
+    const amount = Number(addAmount);
+    if (!Number.isFinite(amount)) {
+      return;
+    }
+    towerDamageMultiplier += amount;
+  }
+
+  function upgradeTowerFireRate(multiplier = TOWER_CONFIG.fireRateUpgradeMultiplier) {
+    const rateMultiplier = Number(multiplier);
+    if (!Number.isFinite(rateMultiplier) || rateMultiplier <= 0) {
+      return;
+    }
+    towerFireRateMultiplier *= rateMultiplier;
+  }
 
   function applyShadowSettings(object) {
     object.traverse((child) => {

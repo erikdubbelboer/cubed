@@ -315,6 +315,93 @@ function drawIconPlayerFireRate(ctx, x, y, size) {
   ctx.stroke();
 }
 
+function drawIconJetpackEfficiency(ctx, x, y, size) {
+  const cx = x + (size * 0.5);
+  const cy = y + (size * 0.52);
+  const bodyW = size * 0.4;
+  const bodyH = size * 0.42;
+  const top = cy - (bodyH * 0.5);
+
+  ctx.fillStyle = "rgba(139, 255, 229, 0.95)";
+  ctx.fillRect(cx - (bodyW * 0.5), top, bodyW, bodyH);
+
+  ctx.fillStyle = "rgba(94, 214, 255, 0.9)";
+  ctx.beginPath();
+  ctx.moveTo(cx - (bodyW * 0.25), cy + (bodyH * 0.5));
+  ctx.lineTo(cx - (bodyW * 0.05), y + size * 0.9);
+  ctx.lineTo(cx - (bodyW * 0.42), y + size * 0.9);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(cx + (bodyW * 0.25), cy + (bodyH * 0.5));
+  ctx.lineTo(cx + (bodyW * 0.42), y + size * 0.9);
+  ctx.lineTo(cx + (bodyW * 0.05), y + size * 0.9);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(186, 255, 239, 0.92)";
+  ctx.lineWidth = Math.max(1.5, size * 0.055);
+  ctx.beginPath();
+  ctx.moveTo(cx + (bodyW * 0.6), cy - (bodyH * 0.05));
+  ctx.lineTo(cx + (bodyW * 0.9), cy - (bodyH * 0.05));
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(cx + (bodyW * 0.9), cy - (bodyH * 0.05));
+  ctx.lineTo(cx + (bodyW * 0.78), cy - (bodyH * 0.18));
+  ctx.moveTo(cx + (bodyW * 0.9), cy - (bodyH * 0.05));
+  ctx.lineTo(cx + (bodyW * 0.78), cy + (bodyH * 0.08));
+  ctx.stroke();
+}
+
+function drawIconWeaponChargeCapacity(ctx, x, y, size) {
+  const rows = 2;
+  const cols = 3;
+  const gap = size * 0.08;
+  const cellSize = (size * 0.68 - (gap * (cols - 1))) / cols;
+  const startX = x + (size * 0.16);
+  const startY = y + (size * 0.22);
+
+  ctx.fillStyle = "rgba(122, 255, 219, 0.92)";
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      const cellX = startX + (col * (cellSize + gap));
+      const cellY = startY + (row * (cellSize + gap));
+      ctx.fillRect(cellX, cellY, cellSize, cellSize);
+    }
+  }
+
+  ctx.strokeStyle = "rgba(198, 244, 255, 0.9)";
+  ctx.lineWidth = Math.max(1.5, size * 0.05);
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.2, y + size * 0.82);
+  ctx.lineTo(x + size * 0.8, y + size * 0.82);
+  ctx.stroke();
+}
+
+function drawIconWeaponPierce(ctx, x, y, size) {
+  ctx.fillStyle = "rgba(122, 255, 219, 0.95)";
+  ctx.fillRect(x + size * 0.16, y + size * 0.3, size * 0.16, size * 0.4);
+  ctx.fillRect(x + size * 0.64, y + size * 0.3, size * 0.16, size * 0.4);
+
+  ctx.strokeStyle = "rgba(188, 239, 255, 0.96)";
+  ctx.lineWidth = Math.max(1.5, size * 0.055);
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.08, y + size * 0.5);
+  ctx.lineTo(x + size * 0.86, y + size * 0.5);
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(188, 239, 255, 0.96)";
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.86, y + size * 0.42);
+  ctx.lineTo(x + size * 0.96, y + size * 0.5);
+  ctx.lineTo(x + size * 0.86, y + size * 0.58);
+  ctx.closePath();
+  ctx.fill();
+}
+
 function drawIconDefault(ctx, x, y, size) {
   drawTowerBaseIcon(ctx, x, y, size);
 }
@@ -359,6 +446,15 @@ function drawIconById(ctx, iconId, x, y, size) {
       return;
     case "player_fire_rate":
       drawIconPlayerFireRate(ctx, x, y, size);
+      return;
+    case "player_jetpack_efficiency":
+      drawIconJetpackEfficiency(ctx, x, y, size);
+      return;
+    case "player_weapon_charge_capacity":
+      drawIconWeaponChargeCapacity(ctx, x, y, size);
+      return;
+    case "player_weapon_pierce":
+      drawIconWeaponPierce(ctx, x, y, size);
       return;
     default:
       drawIconDefault(ctx, x, y, size);

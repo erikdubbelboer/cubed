@@ -131,8 +131,12 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
   let waveElapsedTime = 0;
   let enemySpeedMultiplier = 1;
 
-  function upgradeSlowEnemies() {
-    enemySpeedMultiplier *= ENEMY_CONFIG.slowUpgradeMultiplier;
+  function upgradeSlowEnemies(multiplier = ENEMY_CONFIG.slowUpgradeMultiplier) {
+    const speedMultiplier = Number(multiplier);
+    if (!Number.isFinite(speedMultiplier) || speedMultiplier <= 0) {
+      return;
+    }
+    enemySpeedMultiplier *= speedMultiplier;
   }
 
   function buildSpawnEventsFromSegments(segments) {

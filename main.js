@@ -13,6 +13,8 @@ const UI_CONFIG = GAME_CONFIG.ui;
 const WAVE_CONFIG = GAME_CONFIG.waves;
 const ECONOMY_CONFIG = GAME_CONFIG.economy ?? {};
 const CONFIGURED_ROUNDS = Array.isArray(WAVE_CONFIG.rounds) ? WAVE_CONFIG.rounds : [];
+const UPGRADE_DEFINITIONS = Array.isArray(GAME_CONFIG.upgrades) ? GAME_CONFIG.upgrades : [];
+const FIRST_MENU_FORCED_UPGRADE_ID = "tower_aoe_unlock";
 
 const app = document.getElementById("app");
 
@@ -332,6 +334,8 @@ let currentUpgradeOptions = [];
 let lastTouchUiActionAt = -Infinity;
 let menuAdvancesWaveOnChoice = true;
 let menuResumeWaveState = "PLAYING";
+let hasShownFirstUpgradeMenu = false;
+const upgradeCountsById = new Map();
 
 function updateMenuHoverFromVirtualCursor() {
   if (waveState !== "MENU") {
@@ -339,6 +343,127 @@ function updateMenuHoverFromVirtualCursor() {
     return;
   }
   hoveredUpgradeIndex = uiOverlay.hitTestMenuOption(vCursorX, vCursorY);
+}
+
+function getUpgradeCount(id) {
+  if (typeof id !== "string" || id.length === 0) {
+    return 0;
+  }
+  return upgradeCountsById.get(id) ?? 0;
+}
+
+function incrementUpgradeCount(id) {
+  if (typeof id !== "string" || id.length === 0) {
+    return;
+  }
+  upgradeCountsById.set(id, getUpgradeCount(id) + 1);
+}
+
+function normalizeMaxUpgradeCount(rawMaxCount) {
+  if (rawMaxCount === null || rawMaxCount === undefined) {
+    return null;
+  }
+  const numericMaxCount = Math.floor(Number(rawMaxCount));
+  if (!Number.isFinite(numericMaxCount)) {
+    return null;
+  }
+  return Math.max(0, numericMaxCount);
+}
+
+function isUpgradeAvailable(definition) {
+  if (!definition || typeof definition !== "object") {
+    return false;
+  }
+  if (typeof definition.id !== "string" || definition.id.length === 0) {
+    return false;
+  }
+
+  const maxCount = normalizeMaxUpgradeCount(definition.maxCount);
+  if (maxCount !== null && getUpgradeCount(definition.id) >= maxCount) {
+    return false;
+  }
+
+  const unlockTowerType = definition.grants?.unlockTowerType;
+  if (typeof unlockTowerType === "string" && towerSystem?.isTowerTypeUnlocked(unlockTowerType)) {
+    return false;
+  }
+
+  return true;
+}
+
+function applyUpgradeGrants(grants = {}) {
+  let appliedAny = false;
+
+  if (typeof grants.unlockTowerType === "string" && towerSystem) {
+    towerSystem.unlockTowerType(grants.unlockTowerType);
+    appliedAny = true;
+  }
+
+  if (typeof grants.towerDamageAdd === "number" && towerSystem) {
+    towerSystem.upgradeTowerDamage(grants.towerDamageAdd);
+    appliedAny = true;
+  }
+
+  if (typeof grants.playerDamageAdd === "number" && player) {
+    player.upgradePlayerDamage(grants.playerDamageAdd);
+    appliedAny = true;
+  }
+
+  if (typeof grants.enemySpeedMultiplier === "number" && enemySystem) {
+    enemySystem.upgradeSlowEnemies(grants.enemySpeedMultiplier);
+    appliedAny = true;
+  }
+
+  if (typeof grants.towerFireRateMultiplier === "number" && towerSystem) {
+    towerSystem.upgradeTowerFireRate(grants.towerFireRateMultiplier);
+    appliedAny = true;
+  }
+
+  if (typeof grants.playerFireRateMultiplier === "number" && player) {
+    player.upgradePlayerFireRate(grants.playerFireRateMultiplier);
+    appliedAny = true;
+  }
+
+  if (typeof grants.jetpackEfficiencyMultiplier === "number" && player) {
+    player.upgradeJetpackFuelEfficiency(grants.jetpackEfficiencyMultiplier);
+    appliedAny = true;
+  }
+
+  if (typeof grants.weaponMaxChargesMultiplier === "number" && player) {
+    player.upgradeWeaponMaxCharges(grants.weaponMaxChargesMultiplier);
+    appliedAny = true;
+  }
+
+  if (typeof grants.weaponPierceAdd === "number" && player) {
+    player.upgradeWeaponPierce(grants.weaponPierceAdd);
+    appliedAny = true;
+  }
+
+  return appliedAny;
+}
+
+function getUpgradePool() {
+  return UPGRADE_DEFINITIONS
+    .filter((definition) => isUpgradeAvailable(definition))
+    .map((definition) => ({
+      id: definition.id,
+      label: definition.label,
+      iconId: definition.iconId,
+      apply: () => applyUpgradeGrants(definition.grants),
+    }));
+}
+
+function finishUpgradeMenuChoice() {
+  currentUpgradeOptions = [];
+  hoveredUpgradeIndex = -1;
+  player.setMenuMode(false);
+  if (menuAdvancesWaveOnChoice) {
+    startWave(currentWave + 1);
+  } else {
+    waveState = menuResumeWaveState;
+  }
+  menuAdvancesWaveOnChoice = true;
+  menuResumeWaveState = "PLAYING";
 }
 
 function applyUpgradeChoice(index) {
@@ -352,16 +477,8 @@ function applyUpgradeChoice(index) {
   }
 
   selectedUpgrade.apply();
-  currentUpgradeOptions = [];
-  hoveredUpgradeIndex = -1;
-  player.setMenuMode(false);
-  if (menuAdvancesWaveOnChoice) {
-    startWave(currentWave + 1);
-  } else {
-    waveState = menuResumeWaveState;
-  }
-  menuAdvancesWaveOnChoice = true;
-  menuResumeWaveState = "PLAYING";
+  incrementUpgradeCount(selectedUpgrade.id);
+  finishUpgradeMenuChoice();
   return true;
 }
 
@@ -526,31 +643,6 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
-const TOWER_UNLOCK_UPGRADES = [
-  { id: "tower_aoe_unlock", label: "Unlock AOE Tower", iconId: "tower_aoe_add", towerType: "aoe" },
-  { id: "tower_slow_unlock", label: "Unlock Slow Tower", iconId: "tower_slow_add", towerType: "slow" },
-];
-
-const BASE_UPGRADES = [
-  { id: "tower_damage", label: "Tower does more damage", iconId: "tower_damage", apply: () => towerSystem.upgradeTowerDamage() },
-  { id: "player_damage", label: "I do more damage", iconId: "player_damage", apply: () => player.upgradePlayerDamage() },
-  { id: "enemy_slow", label: "Enemies move slower", iconId: "enemy_slow", apply: () => enemySystem.upgradeSlowEnemies() },
-  { id: "tower_fire_rate", label: "Tower shoots faster", iconId: "tower_fire_rate", apply: () => towerSystem.upgradeTowerFireRate() },
-  { id: "player_fire_rate", label: "I shoot faster", iconId: "player_fire_rate", apply: () => player.upgradePlayerFireRate() },
-];
-
-function getUpgradePool() {
-  const unlockUpgrades = TOWER_UNLOCK_UPGRADES
-    .filter((upgrade) => towerSystem && !towerSystem.isTowerTypeUnlocked(upgrade.towerType))
-    .map((upgrade) => ({
-      id: upgrade.id,
-      label: upgrade.label,
-      iconId: upgrade.iconId,
-      apply: () => towerSystem.unlockTowerType(upgrade.towerType),
-    }));
-  return [...unlockUpgrades, ...BASE_UPGRADES];
-}
-
 let waveState = "PLAYING";
 let currentWave = WAVE_CONFIG.initialWave;
 let waveDelay = 0;
@@ -610,9 +702,31 @@ function showUpgradeMenu(options = {}) {
   vCursorX = window.innerWidth * 0.5;
   vCursorY = window.innerHeight * 0.5;
 
-  const optionCount = Math.max(1, UI_CONFIG.upgradesShown);
-  const shuffled = getUpgradePool().sort(() => 0.5 - Math.random());
-  currentUpgradeOptions = shuffled.slice(0, optionCount);
+  const optionCount = Math.max(1, Math.floor(Number(UI_CONFIG.upgradesShown) || 1));
+  const upgradePool = getUpgradePool();
+  if (upgradePool.length === 0) {
+    finishUpgradeMenuChoice();
+    return;
+  }
+
+  const randomize = (pool) => pool.slice().sort(() => 0.5 - Math.random());
+
+  if (!hasShownFirstUpgradeMenu) {
+    const forcedUpgrade = upgradePool.find((upgrade) => upgrade.id === FIRST_MENU_FORCED_UPGRADE_ID);
+    if (forcedUpgrade) {
+      const randomPool = randomize(upgradePool.filter((upgrade) => upgrade.id !== FIRST_MENU_FORCED_UPGRADE_ID));
+      currentUpgradeOptions = [
+        forcedUpgrade,
+        ...randomPool.slice(0, Math.max(0, optionCount - 1)),
+      ];
+    } else {
+      currentUpgradeOptions = randomize(upgradePool).slice(0, optionCount);
+    }
+    hasShownFirstUpgradeMenu = true;
+  } else {
+    currentUpgradeOptions = randomize(upgradePool).slice(0, optionCount);
+  }
+
   hoveredUpgradeIndex = -1;
   updateMenuHoverFromVirtualCursor();
 }
