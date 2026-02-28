@@ -10,8 +10,11 @@ const TOWER_TOP_SNAP_UP = 0.22;
 
 export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight, ui, getMovementObstacles }) {
   const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
-  const controls = new PointerLockControls(camera, document.body);
+  const controls = new PointerLockControls(camera, domElement);
   controls.pointerSpeed = 0.75;
+  let lockRequestPending = false;
+  let lockRetryPending = false;
+  let lastUnlockTime = -Infinity;
 
   camera.rotation.order = "YXZ";
 
@@ -185,6 +188,8 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
   });
 
   controls.addEventListener("lock", () => {
+    lockRequestPending = false;
+    lockRetryPending = false;
     yaw = camera.rotation.y;
     pitch = camera.rotation.x;
     lookDeltaX = 0;
@@ -193,15 +198,77 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
   });
 
   controls.addEventListener("unlock", () => {
+    lockRequestPending = false;
+    lockRetryPending = false;
+    lastUnlockTime = performance.now();
     yaw = camera.rotation.y;
     pitch = camera.rotation.x;
     jumpHeld = false;
   });
 
-  domElement.addEventListener("mousedown", (event) => {
-    if (event.button === 0 && !controls.isLocked && !isTouchDevice) {
-      controls.lock();
+  function requestPointerLock(attempt = 0) {
+    let maybePromise;
+    try {
+      maybePromise = controls.domElement.requestPointerLock?.();
+    } catch (error) {
+      lockRequestPending = false;
+      if (error?.name !== "SecurityError") {
+        console.warn("Pointer lock request failed:", error);
+      }
+      return;
     }
+
+    if (!maybePromise || typeof maybePromise.then !== "function") {
+      return;
+    }
+
+    maybePromise.catch((error) => {
+      const recentlyUnlocked = performance.now() - lastUnlockTime < 250;
+      const shouldRetry = error?.name === "SecurityError" && attempt === 0 && recentlyUnlocked;
+      if (shouldRetry) {
+        lockRetryPending = true;
+        requestAnimationFrame(() => {
+          lockRetryPending = false;
+          if (!lockRequestPending || controls.isLocked) {
+            return;
+          }
+          requestPointerLock(attempt + 1);
+        });
+        return;
+      }
+
+      lockRequestPending = false;
+      if (error?.name !== "SecurityError") {
+        console.warn("Pointer lock request failed:", error);
+      }
+    });
+  }
+
+  document.addEventListener(
+    "pointerlockerror",
+    (event) => {
+      if (!lockRequestPending) {
+        return;
+      }
+
+      // Suppress Three.js default console.error for transient relock races;
+      // promise rejection handling above already manages retries/failures.
+      event.stopImmediatePropagation();
+    },
+    true
+  );
+
+  domElement.addEventListener("click", () => {
+    if (isTouchDevice || controls.isLocked || lockRequestPending) {
+      return;
+    }
+    if (document.pointerLockElement === controls.domElement) {
+      return;
+    }
+
+    lockRequestPending = true;
+    lockRetryPending = false;
+    requestPointerLock(0);
   });
 
   let isMenuMode = false;

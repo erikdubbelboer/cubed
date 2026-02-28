@@ -6,6 +6,20 @@ const PLATFORM_HEIGHT = 1.0;
 const TILE_HEIGHT = 0.4;
 const FLOOR_Y = 0;
 const PATH_TILE_TOP_Y = FLOOR_Y + TILE_HEIGHT;
+const ENEMY_PATH_Y_OFFSET = 0.65;
+const ALTITUDE_BLOCK = Object.freeze({
+  startX: 1,
+  startZ: 4,
+  width: 2,
+  depth: 3,
+  height: 2,
+});
+const ALTITUDE_CUBE_SIZE = CELL_SIZE;
+const WALL_PATH_TILE_SIZE = CELL_SIZE * 0.76;
+const WALL_PATH_TILE_THICKNESS = TILE_HEIGHT * 0.5;
+const TERRAIN_OBSTACLE_HALF_SIZE = CELL_SIZE * 0.5;
+const WALL_CLIMB_PATH_OFFSET = 1.25;
+const WALL_PATH_TILE_VISUAL_OFFSET = WALL_PATH_TILE_THICKNESS * 0.65;
 
 const PATH_CELLS = [
   [0, 1],
@@ -41,11 +55,31 @@ const PATH_CELLS = [
   [10, 9],
 ];
 
-function cellToWorld(cellX, cellZ) {
+function isInsideAltitudeBlock(cellX, cellZ) {
+  return (
+    cellX >= ALTITUDE_BLOCK.startX &&
+    cellX < ALTITUDE_BLOCK.startX + ALTITUDE_BLOCK.width &&
+    cellZ >= ALTITUDE_BLOCK.startZ &&
+    cellZ < ALTITUDE_BLOCK.startZ + ALTITUDE_BLOCK.depth
+  );
+}
+
+function getPathSupportHeight(cellX, cellZ) {
+  if (!isInsideAltitudeBlock(cellX, cellZ)) {
+    return 0;
+  }
+  return ALTITUDE_BLOCK.height * ALTITUDE_CUBE_SIZE;
+}
+
+function getPathSurfaceY(cellX, cellZ) {
+  return FLOOR_Y + getPathSupportHeight(cellX, cellZ) + TILE_HEIGHT;
+}
+
+function cellToWorld(cellX, cellZ, pathSurfaceY = getPathSurfaceY(cellX, cellZ)) {
   const half = (GRID_SIZE * CELL_SIZE) / 2;
   const x = -half + cellX * CELL_SIZE + CELL_SIZE / 2;
   const z = -half + cellZ * CELL_SIZE + CELL_SIZE / 2;
-  return new THREE.Vector3(x, PATH_TILE_TOP_Y + 0.65, z);
+  return new THREE.Vector3(x, pathSurfaceY + ENEMY_PATH_Y_OFFSET, z);
 }
 
 export function createGrid(scene) {
@@ -79,14 +113,86 @@ export function createGrid(scene) {
   scene.add(platform);
 
   const pathSet = new Set(PATH_CELLS.map(([x, z]) => `${x},${z}`));
+  const half = (GRID_SIZE * CELL_SIZE) / 2;
+  const altitudeObstacles = [];
+  const altitudeSurfaceCells = [];
+
+  const altitudeCubeGeo = new THREE.BoxGeometry(
+    ALTITUDE_CUBE_SIZE,
+    ALTITUDE_CUBE_SIZE,
+    ALTITUDE_CUBE_SIZE
+  );
+
+  for (let dz = 0; dz < ALTITUDE_BLOCK.depth; dz += 1) {
+    for (let dx = 0; dx < ALTITUDE_BLOCK.width; dx += 1) {
+      const cellX = ALTITUDE_BLOCK.startX + dx;
+      const cellZ = ALTITUDE_BLOCK.startZ + dz;
+      const checkerOffset = ((dx + dz) & 1) === 0 ? 0.03 : -0.03;
+      const worldX = -half + cellX * CELL_SIZE + CELL_SIZE / 2;
+      const worldZ = -half + cellZ * CELL_SIZE + CELL_SIZE / 2;
+      const surfaceY = pathSet.has(`${cellX},${cellZ}`)
+        ? getPathSurfaceY(cellX, cellZ)
+        : FLOOR_Y + getPathSupportHeight(cellX, cellZ);
+
+      altitudeObstacles.push({
+        position: new THREE.Vector3(worldX, FLOOR_Y, worldZ),
+        halfSize: TERRAIN_OBSTACLE_HALF_SIZE,
+        height: surfaceY - FLOOR_Y,
+        baseY: FLOOR_Y,
+      });
+      altitudeSurfaceCells.push({
+        minX: worldX - CELL_SIZE * 0.5,
+        maxX: worldX + CELL_SIZE * 0.5,
+        minZ: worldZ - CELL_SIZE * 0.5,
+        maxZ: worldZ + CELL_SIZE * 0.5,
+        surfaceY,
+      });
+
+      for (let level = 0; level < ALTITUDE_BLOCK.height; level += 1) {
+        const lightness = 0.3 + checkerOffset + level * 0.05;
+        const color = new THREE.Color().setHSL(0.57, 0.22, lightness);
+        const cube = new THREE.Mesh(
+          altitudeCubeGeo,
+          new THREE.MeshStandardMaterial({
+            color,
+            emissive: color.clone().multiplyScalar(0.28),
+            emissiveIntensity: 0.18,
+            roughness: 0.72,
+            metalness: 0.12,
+          })
+        );
+
+        cube.position.set(
+          worldX,
+          FLOOR_Y + ALTITUDE_CUBE_SIZE * 0.5 + level * ALTITUDE_CUBE_SIZE,
+          worldZ
+        );
+        cube.castShadow = true;
+        cube.receiveShadow = true;
+        scene.add(cube);
+      }
+    }
+  }
+
   const tileGeo = new THREE.BoxGeometry(CELL_SIZE * 0.94, TILE_HEIGHT, CELL_SIZE * 0.94);
   const pathTileMat = new THREE.MeshStandardMaterial({
     color: 0xe9d5ab,
     roughness: 0.64,
     metalness: 0.08,
   });
+  const wallPathTileMat = new THREE.MeshStandardMaterial({
+    color: 0xe9d5ab,
+    emissive: 0x6b4c27,
+    emissiveIntensity: 0.16,
+    roughness: 0.66,
+    metalness: 0.05,
+  });
+  const wallPathTileGeo = new THREE.BoxGeometry(
+    WALL_PATH_TILE_SIZE,
+    WALL_PATH_TILE_SIZE,
+    WALL_PATH_TILE_THICKNESS
+  );
 
-  const half = (GRID_SIZE * CELL_SIZE) / 2;
   const tiles = [];
 
   for (let cellZ = 0; cellZ < GRID_SIZE; cellZ += 1) {
@@ -102,19 +208,107 @@ export function createGrid(scene) {
 
       tile.position.set(
         -half + cellX * CELL_SIZE + CELL_SIZE / 2,
-        FLOOR_Y + (TILE_HEIGHT / 2),
+        FLOOR_Y + getPathSupportHeight(cellX, cellZ) + (TILE_HEIGHT / 2),
         -half + cellZ * CELL_SIZE + CELL_SIZE / 2
       );
       tile.userData.cellX = cellX;
       tile.userData.cellZ = cellZ;
       tile.userData.isPath = isPath;
+      tile.userData.pathSurfaceY = getPathSurfaceY(cellX, cellZ);
       tile.receiveShadow = true;
+      tile.castShadow = true;
       tiles.push(tile);
       scene.add(tile);
     }
   }
 
-  const pathWaypoints = PATH_CELLS.map(([x, z]) => cellToWorld(x, z));
+  const cellWaypoints = PATH_CELLS.map(([x, z]) => {
+    const surfaceY = getPathSurfaceY(x, z);
+    return {
+      cellX: x,
+      cellZ: z,
+      surfaceY,
+      point: cellToWorld(x, z, surfaceY),
+    };
+  });
+  const pathWaypoints = [];
+  const wallClimbSections = [];
+  for (let i = 0; i < cellWaypoints.length; i += 1) {
+    const current = cellWaypoints[i];
+    if (i === 0) {
+      pathWaypoints.push(current.point.clone());
+      continue;
+    }
+
+    const previous = cellWaypoints[i - 1];
+    const dx = current.point.x - previous.point.x;
+    const dz = current.point.z - previous.point.z;
+    const dy = current.point.y - previous.point.y;
+
+    if (Math.abs(dy) > 1e-5 && (Math.abs(dx) > 1e-5 || Math.abs(dz) > 1e-5)) {
+      const wallX = previous.point.x + (dx * 0.5);
+      const wallZ = previous.point.z + (dz * 0.5);
+      const previousIsLower = previous.surfaceY <= current.surfaceY;
+      const lowToHighX = previousIsLower ? dx : -dx;
+      const lowToHighZ = previousIsLower ? dz : -dz;
+      const dirLength = Math.hypot(lowToHighX, lowToHighZ) || 1;
+      const normalX = -(lowToHighX / dirLength);
+      const normalZ = -(lowToHighZ / dirLength);
+      const climbX = wallX + (normalX * WALL_CLIMB_PATH_OFFSET);
+      const climbZ = wallZ + (normalZ * WALL_CLIMB_PATH_OFFSET);
+
+      pathWaypoints.push(new THREE.Vector3(climbX, previous.point.y, climbZ));
+      pathWaypoints.push(new THREE.Vector3(climbX, current.point.y, climbZ));
+      pathWaypoints.push(current.point.clone());
+
+      wallClimbSections.push({
+        wallX,
+        wallZ,
+        climbX,
+        climbZ,
+        tileX: wallX + (normalX * WALL_PATH_TILE_VISUAL_OFFSET),
+        tileZ: wallZ + (normalZ * WALL_PATH_TILE_VISUAL_OFFSET),
+        lowY: Math.min(previous.surfaceY, current.surfaceY),
+        highY: Math.max(previous.surfaceY, current.surfaceY),
+        normalX,
+        normalZ,
+      });
+      continue;
+    }
+
+    if (Math.abs(dy) > 1e-5) {
+      pathWaypoints.push(new THREE.Vector3(previous.point.x, current.point.y, previous.point.z));
+    }
+    pathWaypoints.push(current.point.clone());
+  }
+
+  for (const climb of wallClimbSections) {
+    const climbHeight = climb.highY - climb.lowY;
+    if (climbHeight <= 1e-5) {
+      continue;
+    }
+    const squareCount = Math.max(1, Math.round(climbHeight / ALTITUDE_CUBE_SIZE));
+    for (let step = 0; step < squareCount; step += 1) {
+      const t = (step + 0.5) / squareCount;
+      const wallTile = new THREE.Mesh(wallPathTileGeo, wallPathTileMat);
+      const y = climb.lowY + (climbHeight * t);
+      wallTile.position.set(
+        climb.tileX,
+        y,
+        climb.tileZ
+      );
+      wallTile.lookAt(
+        climb.tileX + climb.normalX,
+        y,
+        climb.tileZ + climb.normalZ
+      );
+      wallTile.userData.isPath = true;
+      wallTile.receiveShadow = true;
+      wallTile.castShadow = true;
+      tiles.push(wallTile);
+      scene.add(wallTile);
+    }
+  }
   const moveInset = CELL_SIZE * 0.5;
   const moveBounds = {
     minX: -half + moveInset,
@@ -136,6 +330,64 @@ export function createGrid(scene) {
     return pathSet.has(`${cellX},${cellZ}`);
   }
 
+  function getBuildSurfaceYAtWorld(worldX, worldZ) {
+    const cell = worldToCell(worldX, worldZ);
+    if (!cell || !isInsideAltitudeBlock(cell.x, cell.z)) {
+      return FLOOR_Y;
+    }
+    if (isPathCell(cell.x, cell.z)) {
+      return getPathSurfaceY(cell.x, cell.z);
+    }
+    return FLOOR_Y + getPathSupportHeight(cell.x, cell.z);
+  }
+
+  function raycastBuildSurface(ray, outPoint = new THREE.Vector3()) {
+    if (!ray || !ray.origin || !ray.direction) {
+      return false;
+    }
+    if (Math.abs(ray.direction.y) < 1e-6) {
+      return false;
+    }
+
+    let bestT = Infinity;
+    const bestPoint = new THREE.Vector3();
+
+    function testHorizontalSurface(surfaceY, inBounds) {
+      const t = (surfaceY - ray.origin.y) / ray.direction.y;
+      if (t < 0 || t >= bestT) {
+        return;
+      }
+      const hitX = ray.origin.x + ray.direction.x * t;
+      const hitZ = ray.origin.z + ray.direction.z * t;
+      if (!inBounds(hitX, hitZ)) {
+        return;
+      }
+      bestT = t;
+      bestPoint.set(hitX, surfaceY, hitZ);
+    }
+
+    for (const surfaceCell of altitudeSurfaceCells) {
+      testHorizontalSurface(
+        surfaceCell.surfaceY,
+        (x, z) => (
+          x >= surfaceCell.minX &&
+          x <= surfaceCell.maxX &&
+          z >= surfaceCell.minZ &&
+          z <= surfaceCell.maxZ
+        )
+      );
+    }
+
+    testHorizontalSurface(FLOOR_Y, (x, z) => worldToCell(x, z) !== null);
+
+    if (!Number.isFinite(bestT)) {
+      return false;
+    }
+
+    outPoint.copy(bestPoint);
+    return true;
+  }
+
   function cellToWorldCenter(cellX, cellZ, y = FLOOR_Y) {
     return new THREE.Vector3(
       -half + cellX * CELL_SIZE + CELL_SIZE / 2,
@@ -153,8 +405,11 @@ export function createGrid(scene) {
     cellSize: CELL_SIZE,
     gridSize: GRID_SIZE,
     tiles,
+    heightObstacles: altitudeObstacles,
     worldToCell,
     cellToWorldCenter,
     isPathCell,
+    getBuildSurfaceYAtWorld,
+    raycastBuildSurface,
   };
 }

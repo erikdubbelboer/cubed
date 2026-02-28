@@ -23,9 +23,73 @@ const ENEMY_TYPES = {
   },
 };
 
-export function createEnemySystem(scene, pathWaypoints) {
+function getDirectionOnPlane(from, to) {
+  const direction = to.clone().sub(from);
+  direction.y = 0;
+  if (direction.lengthSq() < 1e-6) {
+    return new THREE.Vector3(0, 0, 1);
+  }
+  return direction.normalize();
+}
+
+function getLargestEnemyRadius() {
+  return Object.values(ENEMY_TYPES).reduce((largest, enemyType) => {
+    return Math.max(largest, enemyType.radius);
+  }, 0);
+}
+
+export function getLargestEnemySize() {
+  return Object.values(ENEMY_TYPES).reduce((largest, enemyType) => {
+    return Math.max(largest, enemyType.size);
+  }, 0);
+}
+
+function setClippingOnMaterial(materialOrMaterials, clippingPlane) {
+  if (!materialOrMaterials) return;
+
+  const materials = Array.isArray(materialOrMaterials)
+    ? materialOrMaterials
+    : [materialOrMaterials];
+
+  for (const material of materials) {
+    if (!material) continue;
+    material.clippingPlanes = clippingPlane ? [clippingPlane] : null;
+    material.clipShadows = !!clippingPlane;
+    material.needsUpdate = true;
+  }
+}
+
+function applyVisualClipping(root, clippingPlane) {
+  if (!root) return;
+  root.traverse((child) => {
+    if (!child.isMesh || !child.material) return;
+    setClippingOnMaterial(child.material, clippingPlane);
+  });
+}
+
+export function createEnemySystem(scene, pathWaypoints, options = {}) {
   if (!Array.isArray(pathWaypoints) || pathWaypoints.length < 2) {
     throw new Error("Enemy system requires at least two path waypoints.");
+  }
+
+  const spawnPathDirection = getDirectionOnPlane(pathWaypoints[0], pathWaypoints[1]);
+  const spawnPortalConfig = options?.spawnPortal ?? null;
+  const hasSpawnPortal = !!spawnPortalConfig;
+  const spawnPortalForward = hasSpawnPortal && spawnPortalConfig.forward
+    ? spawnPortalConfig.forward.clone().setY(0).normalize()
+    : spawnPathDirection;
+  const maxEnemyRadius = getLargestEnemyRadius();
+  const spawnPortalPlane = hasSpawnPortal
+    ? (spawnPortalConfig.plane?.clone() ?? null)
+    : null;
+  const spawnEntryDistance = hasSpawnPortal
+    ? (spawnPortalConfig.entryDistance ?? (maxEnemyRadius * 2.6))
+    : 0;
+
+  const travelWaypoints = pathWaypoints.map((waypoint) => waypoint.clone());
+  if (hasSpawnPortal) {
+    const entryPoint = pathWaypoints[0].clone().addScaledVector(spawnPortalForward, -spawnEntryDistance);
+    travelWaypoints.unshift(entryPoint);
   }
 
   const activeEnemies = [];
@@ -94,8 +158,17 @@ export function createEnemySystem(scene, pathWaypoints) {
     healthBarRoot.position.set(0, bodyMesh.position.y + enemyType.size * 0.75 + 0.35, 0);
     enemyMesh.add(healthBarRoot);
 
+    if (spawnPortalPlane) {
+      applyVisualClipping(visualRoot, spawnPortalPlane);
+    }
+
     scene.add(enemyMesh);
-    enemyMesh.position.copy(pathWaypoints[0]);
+    enemyMesh.position.copy(travelWaypoints[0]);
+
+    const initiallyBehindPortal = spawnPortalPlane
+      ? spawnPortalPlane.distanceToPoint(enemyMesh.position) < enemyType.radius * 0.45
+      : false;
+    healthBarRoot.visible = !initiallyBehindPortal;
 
     return {
       mesh: enemyMesh,
@@ -110,6 +183,8 @@ export function createEnemySystem(scene, pathWaypoints) {
       segmentIndex: 0,
       segmentProgress: 0,
       visualRoot,
+      portalPlane: spawnPortalPlane,
+      portalClippingActive: !!spawnPortalPlane,
       alive: true,
       dying: false,
       deathTimer: 0,
@@ -279,8 +354,8 @@ export function createEnemySystem(scene, pathWaypoints) {
       // Move along path
       let remaining = enemy.speed * enemySpeedMultiplier * deltaSeconds;
       while (remaining > 0 && enemy.alive) {
-        const start = pathWaypoints[enemy.segmentIndex];
-        const end = pathWaypoints[enemy.segmentIndex + 1];
+        const start = travelWaypoints[enemy.segmentIndex];
+        const end = travelWaypoints[enemy.segmentIndex + 1];
         const segmentLength = start.distanceTo(end);
         const segmentRemaining = segmentLength - enemy.segmentProgress;
 
@@ -292,7 +367,7 @@ export function createEnemySystem(scene, pathWaypoints) {
           enemy.segmentIndex += 1;
           enemy.segmentProgress = 0;
 
-          if (enemy.segmentIndex >= pathWaypoints.length - 1) {
+          if (enemy.segmentIndex >= travelWaypoints.length - 1) {
             // Reached end, maybe damage core later, for now just kill it
             enemy.alive = false;
             scene.remove(enemy.mesh);
@@ -304,9 +379,26 @@ export function createEnemySystem(scene, pathWaypoints) {
           const t = segmentLength === 0 ? 0 : enemy.segmentProgress / segmentLength;
           enemy.mesh.position.lerpVectors(start, end, t);
 
-          const lookTarget = end.clone();
-          lookTarget.y = enemy.mesh.position.y;
-          enemy.mesh.lookAt(lookTarget);
+          const dx = end.x - enemy.mesh.position.x;
+          const dz = end.z - enemy.mesh.position.z;
+          if ((dx * dx + dz * dz) > 1e-4) {
+            const lookTarget = end.clone();
+            lookTarget.y = enemy.mesh.position.y;
+            enemy.mesh.lookAt(lookTarget);
+          }
+        }
+      }
+
+      if (enemy.alive && enemy.portalClippingActive && enemy.portalPlane) {
+        const portalDistance = enemy.portalPlane.distanceToPoint(enemy.mesh.position);
+        if (portalDistance > enemy.radius * 0.45) {
+          enemy.portalClippingActive = false;
+          applyVisualClipping(enemy.visualRoot, null);
+          if (enemy.healthBarRoot && !enemy.dying) {
+            enemy.healthBarRoot.visible = true;
+          }
+        } else if (enemy.healthBarRoot) {
+          enemy.healthBarRoot.visible = false;
         }
       }
 
@@ -320,6 +412,7 @@ export function createEnemySystem(scene, pathWaypoints) {
     let hitAny = false;
     for (const enemy of activeEnemies) {
       if (!enemy.alive) continue;
+      if (enemy.portalClippingActive) continue;
       const maxHitDistance = enemy.radius + hitRadius;
       if (enemy.mesh.position.distanceToSquared(point) <= maxHitDistance * maxHitDistance) {
         applyDamage(enemy, damage);
@@ -335,6 +428,7 @@ export function createEnemySystem(scene, pathWaypoints) {
 
     for (const enemy of activeEnemies) {
       if (!enemy.alive) continue;
+      if (enemy.portalClippingActive) continue;
       const distSq = origin.distanceToSquared(enemy.mesh.position);
       if (distSq <= closestDistSq) {
         closestDistSq = distSq;
@@ -368,7 +462,7 @@ export function createEnemySystem(scene, pathWaypoints) {
     upgradeSlowEnemies,
     forceSpawnEnemy: (type, spawnPos) => {
       const enemy = createEnemyMesh(type);
-      enemy.mesh.position.copy(spawnPos || pathWaypoints[0]);
+      enemy.mesh.position.copy(spawnPos || travelWaypoints[0]);
       activeEnemies.push(enemy);
     }
   };

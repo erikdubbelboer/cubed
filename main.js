@@ -1,9 +1,8 @@
 import * as THREE from "three";
 import { createGrid } from "./grid.js";
 import { createPlayer } from "./player.js";
-import { createEnemySystem } from "./enemies.js";
+import { createEnemySystem, getLargestEnemySize } from "./enemies.js";
 import { createTowerSystem } from "./towers.js";
-import { loadModels, getModel } from "./models.js";
 
 const app = document.getElementById("app");
 const overlayEl = document.getElementById("overlay");
@@ -49,6 +48,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.localClippingEnabled = true;
 renderer.toneMappingExposure = 1.15;
 app.appendChild(renderer.domElement);
 
@@ -79,8 +79,102 @@ let player;
 let enemySystem;
 let towerSystem;
 
-const GATE_MODEL_SCALE = 3.2;
-const GATE_Y_OFFSET = 0.02;
+const LARGEST_ENEMY_SIZE = getLargestEnemySize();
+const PORTAL_FACE_SIZE = LARGEST_ENEMY_SIZE * 1.5;
+const PORTAL_WIDTH = PORTAL_FACE_SIZE;
+const PORTAL_HEIGHT = PORTAL_FACE_SIZE;
+const PORTAL_THICKNESS = 0.22;
+const PORTAL_Y_OFFSET = 0.02;
+const PORTAL_ENTRY_DISTANCE = PORTAL_FACE_SIZE * 0.8;
+const PORTAL_GEOMETRY = new THREE.BoxGeometry(PORTAL_WIDTH, PORTAL_HEIGHT, PORTAL_THICKNESS);
+
+const PORTAL_UNIFORMS = {
+  uTime: { value: 0 },
+  uColorA: { value: new THREE.Color(0x3dcfff) },
+  uColorB: { value: new THREE.Color(0x2042ff) },
+  uEdgeColor: { value: new THREE.Color(0x7bf7ff) },
+  uOpacity: { value: 0.78 },
+};
+
+const PORTAL_MATERIAL = new THREE.ShaderMaterial({
+  uniforms: PORTAL_UNIFORMS,
+  transparent: true,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform float uTime;
+    uniform vec3 uColorA;
+    uniform vec3 uColorB;
+    uniform vec3 uEdgeColor;
+    uniform float uOpacity;
+    varying vec2 vUv;
+
+    float hash21(vec2 p) {
+      p = fract(p * vec2(123.34, 345.45));
+      p += dot(p, p + 34.345);
+      return fract(p.x * p.y);
+    }
+
+    float noise2(vec2 p) {
+      vec2 i = floor(p);
+      vec2 f = fract(p);
+
+      float a = hash21(i);
+      float b = hash21(i + vec2(1.0, 0.0));
+      float c = hash21(i + vec2(0.0, 1.0));
+      float d = hash21(i + vec2(1.0, 1.0));
+
+      vec2 u = f * f * (3.0 - 2.0 * f);
+      return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+    }
+
+    float fbm(vec2 p) {
+      float value = 0.0;
+      float amplitude = 0.5;
+      for (int i = 0; i < 5; i++) {
+        value += noise2(p) * amplitude;
+        p = p * 2.03 + vec2(13.7, 8.4);
+        amplitude *= 0.5;
+      }
+      return value;
+    }
+
+    void main() {
+      vec2 uv = vUv * 2.0 - 1.0;
+      float radial = length(uv);
+
+      vec2 flowUv = uv * 2.2;
+      flowUv += vec2(
+        sin(uTime * 0.9 + uv.y * 6.0),
+        cos(uTime * 0.75 + uv.x * 7.0)
+      ) * 0.22;
+
+      float flowA = fbm(flowUv * 1.65 + vec2(uTime * 0.35, -uTime * 0.24));
+      float flowB = fbm(flowUv * 3.2 + vec2(-uTime * 0.55, uTime * 0.43));
+      float flow = mix(flowA, flowB, 0.5);
+
+      float innerMask = smoothstep(1.18, 0.05, radial);
+      float rimMask = smoothstep(0.63, 1.02, radial);
+      float pulse = 0.55 + 0.45 * sin(uTime * 2.4 + radial * 14.0 + flow * 6.0);
+
+      vec3 waterColor = mix(uColorA, uColorB, flow);
+      vec3 color = waterColor + uEdgeColor * rimMask * pulse * 0.9;
+      float alpha = uOpacity * innerMask * (0.6 + 0.4 * flow);
+      alpha += rimMask * 0.2;
+      alpha = clamp(alpha, 0.0, 0.92);
+
+      gl_FragColor = vec4(color, alpha);
+    }
+  `,
+});
+PORTAL_MATERIAL.toneMapped = false;
 
 const clock = new THREE.Clock();
 let isPaused = false;
@@ -95,33 +189,51 @@ function getPathDirection(from, to) {
 }
 
 function placePathEndpointGate(position, facingDirection) {
-  const gate = getModel("gate_complex");
-  if (!gate) {
-    return;
+  const gate = new THREE.Mesh(PORTAL_GEOMETRY, PORTAL_MATERIAL);
+  gate.castShadow = false;
+  gate.receiveShadow = true;
+  const portalForward = facingDirection.clone();
+  portalForward.y = 0;
+  if (portalForward.lengthSq() < 1e-6) {
+    portalForward.set(0, 0, 1);
+  } else {
+    portalForward.normalize();
   }
-
-  gate.scale.setScalar(GATE_MODEL_SCALE);
   const pathSurfaceY = grid.pathTileTopY ?? grid.tileTopY;
-  gate.position.set(position.x, pathSurfaceY + GATE_Y_OFFSET, position.z);
-
-  const lookTarget = gate.position.clone().add(facingDirection);
+  gate.position.set(position.x, pathSurfaceY + PORTAL_HEIGHT * 0.5 + PORTAL_Y_OFFSET, position.z);
+  const lookTarget = gate.position.clone().add(portalForward);
   gate.lookAt(lookTarget);
   scene.add(gate);
+
+  const portalPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+    portalForward,
+    new THREE.Vector3(position.x, pathSurfaceY, position.z)
+  );
+
+  return {
+    mesh: gate,
+    position: gate.position.clone(),
+    forward: portalForward.clone(),
+    plane: portalPlane,
+    entryDistance: PORTAL_ENTRY_DISTANCE,
+  };
 }
 
 function placePathGates() {
   const points = grid.pathWaypoints;
   if (!Array.isArray(points) || points.length < 2) {
-    return;
+    return null;
   }
 
   const spawnPoint = points[0];
   const spawnFacing = getPathDirection(points[0], points[1]);
-  placePathEndpointGate(spawnPoint, spawnFacing);
+  const spawnPortal = placePathEndpointGate(spawnPoint, spawnFacing);
 
   const endPoint = points[points.length - 1];
   const endFacing = getPathDirection(points[points.length - 2], points[points.length - 1]);
   placePathEndpointGate(endPoint, endFacing);
+
+  return spawnPortal;
 }
 
 function refreshBuildStatus() {
@@ -257,6 +369,12 @@ document.addEventListener("mouseup", (event) => {
 
 window.addEventListener("keydown", (event) => {
   if (!player || !towerSystem) return;
+  if (event.code === "Escape" && towerSystem.isBuildMode()) {
+    towerSystem.cancelPlacement();
+    refreshBuildStatus();
+    return;
+  }
+
   if (event.code === "Digit1") {
     towerSystem.selectTower("laser");
     refreshBuildStatus();
@@ -474,6 +592,7 @@ function showUpgradeMenu() {
 function animate() {
   const deltaSeconds = clock.getDelta();
   gameTime += deltaSeconds;
+  PORTAL_UNIFORMS.uTime.value = gameTime;
 
   if (!isPaused) {
     if (waveState === "PLAYING") {
@@ -508,9 +627,8 @@ function animate() {
 }
 
 // Start game
-async function initGame() {
-  await loadModels();
-  placePathGates();
+function initGame() {
+  const spawnPortal = placePathGates();
 
   player = createPlayer({
     scene,
@@ -523,13 +641,30 @@ async function initGame() {
       jetpackFuelFillEl,
       jetpackFuelPercentEl,
     },
-    getMovementObstacles: () => (towerSystem ? towerSystem.getMovementObstacles() : []),
+    getMovementObstacles: () => {
+      const terrainObstacles = Array.isArray(grid.heightObstacles) ? grid.heightObstacles : [];
+      const towerObstacles = towerSystem ? towerSystem.getMovementObstacles() : [];
+      if (terrainObstacles.length === 0) {
+        return towerObstacles;
+      }
+      if (towerObstacles.length === 0) {
+        return terrainObstacles;
+      }
+      return [...terrainObstacles, ...towerObstacles];
+    },
   });
 
-  enemySystem = createEnemySystem(scene, grid.pathWaypoints);
+  enemySystem = createEnemySystem(scene, grid.pathWaypoints, { spawnPortal });
   towerSystem = createTowerSystem({ scene, camera, grid });
 
-  player.controls.addEventListener("unlock", updatePauseState);
+  player.controls.addEventListener("unlock", () => {
+    updatePauseState();
+    isPrimaryDown = false;
+    if (towerSystem && towerSystem.isBuildMode()) {
+      towerSystem.cancelPlacement();
+      refreshBuildStatus();
+    }
+  });
   player.controls.addEventListener("lock", updatePauseState);
 
   // Debug API to let browser scripts skip UI

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-const TOWER_RANGE = 18;
+const TOWER_RANGE = 9;
 const TOWER_FIRE_INTERVAL = 0.75;
 const TOWER_BEAM_DAMAGE = 20;
 const TOWER_BEAM_HIT_RADIUS = 0.55;
@@ -20,6 +20,8 @@ const LASER_FLASH_BASE_OPACITY = 0.45;
 const LASER_FLASH_PULSE_OPACITY_BOOST = 0.45;
 const LASER_FLASH_BASE_SCALE = 0.82;
 const LASER_FLASH_PULSE_SCALE_BOOST = 0.52;
+const PATH_RANGE_HIGHLIGHT_VALID_COLOR = 0x7ffaff;
+const PATH_RANGE_HIGHLIGHT_INVALID_COLOR = 0xffa4a4;
 const LASER_CORNER_OFFSETS = [
   [1, 1],
   [1, -1],
@@ -33,6 +35,7 @@ export function createTowerSystem({ scene, camera, grid }) {
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -grid.tileTopY);
   const groundHit = new THREE.Vector3();
   const pathWaypoints = Array.isArray(grid.pathWaypoints) ? grid.pathWaypoints : [];
+  const terrainObstacles = Array.isArray(grid.heightObstacles) ? grid.heightObstacles : [];
   const pathHalfWidth = grid.cellSize * 0.47;
 
   const beamGeometry = new THREE.CylinderGeometry(0.055, 0.055, 1, 10, 1, true);
@@ -164,6 +167,82 @@ export function createTowerSystem({ scene, camera, grid }) {
     return root;
   }
 
+  function createPathRangeHighlights() {
+    const pathTiles = Array.isArray(grid.tiles)
+      ? grid.tiles.filter((tile) => tile?.userData?.isPath)
+      : [];
+
+    const highlightMaterial = new THREE.MeshBasicMaterial({
+      color: PATH_RANGE_HIGHLIGHT_VALID_COLOR,
+      transparent: true,
+      opacity: 0.34,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    highlightMaterial.toneMapped = false;
+
+    const entries = [];
+    for (const tile of pathTiles) {
+      const marker = new THREE.Mesh(tile.geometry, highlightMaterial);
+      marker.position.copy(tile.position);
+      marker.quaternion.copy(tile.quaternion);
+      marker.scale.copy(tile.scale);
+      marker.renderOrder = 6;
+      marker.visible = false;
+      scene.add(marker);
+
+      const centerY = typeof tile?.userData?.pathSurfaceY === "number"
+        ? tile.userData.pathSurfaceY
+        : tile.position.y;
+      entries.push({
+        mesh: marker,
+        center: new THREE.Vector3(tile.position.x, centerY, tile.position.z),
+      });
+    }
+
+    return {
+      entries,
+      material: highlightMaterial,
+    };
+  }
+
+  function setPathRangeHighlightValidityVisual(isValid) {
+    const material = pathRangeHighlights.material;
+    if (!material) {
+      return;
+    }
+
+    material.color.setHex(
+      isValid
+        ? PATH_RANGE_HIGHLIGHT_VALID_COLOR
+        : PATH_RANGE_HIGHLIGHT_INVALID_COLOR
+    );
+  }
+
+  function hidePathRangeHighlights() {
+    for (const entry of pathRangeHighlights.entries) {
+      entry.mesh.visible = false;
+    }
+  }
+
+  function updatePathRangeHighlights(origin) {
+    const previewTowerProbe = {
+      mesh: preview,
+      range: TOWER_RANGE,
+      halfSize: LASER_TOWER_HALF_SIZE,
+      height: LASER_TOWER_HEIGHT,
+      baseY: origin.y,
+      cornerIndex: null,
+    };
+
+    for (const entry of pathRangeHighlights.entries) {
+      previewTowerProbe.cornerIndex = null;
+      entry.mesh.visible = canTowerHitPoint(previewTowerProbe, entry.center);
+    }
+  }
+
   function setPreviewValidityVisual(isValid) {
     const materials = preview.userData.materials || [];
     const bodyMaterial = materials[0];
@@ -195,6 +274,8 @@ export function createTowerSystem({ scene, camera, grid }) {
   });
   preview.visible = false;
   scene.add(preview);
+
+  const pathRangeHighlights = createPathRangeHighlights();
 
   function distancePointToSegmentXZ(point, segStart, segEnd) {
     const sx = segStart.x;
@@ -264,6 +345,13 @@ export function createTowerSystem({ scene, camera, grid }) {
     return true;
   }
 
+  function getBuildSurfaceY(x, z) {
+    if (typeof grid.getBuildSurfaceYAtWorld === "function") {
+      return grid.getBuildSurfaceYAtWorld(x, z);
+    }
+    return grid.tileTopY;
+  }
+
   function selectTower() {
     if (towers.length >= maxTowers) {
       return false;
@@ -283,6 +371,8 @@ export function createTowerSystem({ scene, camera, grid }) {
     scene.add(preview);
 
     preview.visible = true;
+    setPathRangeHighlightValidityVisual(false);
+    hidePathRangeHighlights();
     previewValid = false;
     previewPosition = null;
     return true;
@@ -292,6 +382,7 @@ export function createTowerSystem({ scene, camera, grid }) {
     buildMode = false;
     selectedTowerType = null;
     preview.visible = false;
+    hidePathRangeHighlights();
     previewValid = false;
     previewPosition = null;
   }
@@ -299,15 +390,19 @@ export function createTowerSystem({ scene, camera, grid }) {
   function updatePreviewFromCamera() {
     if (!buildMode || towers.length >= maxTowers) {
       preview.visible = false;
+      hidePathRangeHighlights();
       previewValid = false;
       previewPosition = null;
       return;
     }
 
     raycaster.setFromCamera(aimPoint, camera);
-    const hit = raycaster.ray.intersectPlane(groundPlane, groundHit);
+    const hit = typeof grid.raycastBuildSurface === "function"
+      ? grid.raycastBuildSurface(raycaster.ray, groundHit)
+      : raycaster.ray.intersectPlane(groundPlane, groundHit);
     if (!hit) {
       preview.visible = false;
+      hidePathRangeHighlights();
       previewValid = false;
       previewPosition = null;
       return;
@@ -321,15 +416,18 @@ export function createTowerSystem({ scene, camera, grid }) {
       grid.moveBounds.maxZ - LASER_TOWER_RADIUS,
       Math.max(grid.moveBounds.minZ + LASER_TOWER_RADIUS, groundHit.z)
     );
+    const y = getBuildSurfaceY(x, z);
 
     preview.visible = true;
-    preview.position.set(x, grid.tileTopY, z);
+    preview.position.set(x, y, z);
     if (!previewPosition) {
       previewPosition = new THREE.Vector3();
     }
     previewPosition.copy(preview.position);
     previewValid = isPlacementValid(previewPosition);
     setPreviewValidityVisual(previewValid);
+    setPathRangeHighlightValidityVisual(previewValid);
+    updatePathRangeHighlights(previewPosition);
   }
 
   function placeSelectedTower() {
@@ -353,10 +451,11 @@ export function createTowerSystem({ scene, camera, grid }) {
       mesh: towerMesh,
       cooldown: 0,
       pulseTimer: 0,
+      range: TOWER_RANGE,
       radius: LASER_TOWER_RADIUS,
       halfSize: LASER_TOWER_HALF_SIZE,
       height: LASER_TOWER_HEIGHT,
-      baseY: grid.tileTopY,
+      baseY: previewPosition.y,
       beamVisual: null,
       cornerIndex: null,
     });
@@ -521,8 +620,66 @@ export function createTowerSystem({ scene, camera, grid }) {
     return false;
   }
 
+  function lineOfSightBlockedByTerrain(origin, targetPosition) {
+    for (const obstacle of terrainObstacles) {
+      const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
+      const obstacleHalfSize = obstacle?.halfSize;
+      const obstacleHeight = obstacle?.height;
+      const obstacleBaseY = obstacle?.baseY ?? 0;
+      if (!obstaclePos || typeof obstacleHalfSize !== "number" || typeof obstacleHeight !== "number") {
+        continue;
+      }
+
+      const shrink = Math.min(0.08, obstacleHalfSize * 0.08);
+      const halfSize = Math.max(0.2, obstacleHalfSize - shrink);
+      const minX = obstaclePos.x - halfSize;
+      const maxX = obstaclePos.x + halfSize;
+      const minZ = obstaclePos.z - halfSize;
+      const maxZ = obstaclePos.z + halfSize;
+      const minY = obstacleBaseY + 0.02;
+      const maxY = obstacleBaseY + obstacleHeight - 0.02;
+      if (maxY <= minY) {
+        continue;
+      }
+
+      if (
+        segmentIntersectsAabb(
+          origin,
+          targetPosition,
+          minX,
+          minY,
+          minZ,
+          maxX,
+          maxY,
+          maxZ
+        )
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function isPointInTowerRange(tower, targetPosition) {
+    const towerRange = tower.range ?? TOWER_RANGE;
+    return tower.mesh.position.distanceToSquared(targetPosition) <= (towerRange * towerRange);
+  }
+
+  function hasLineOfSightToPoint(tower, targetPosition) {
+    const origin = resolveCornerShotOrigin(tower, targetPosition);
+    return (
+      !lineOfSightBlockedByOtherTower(origin, targetPosition, tower) &&
+      !lineOfSightBlockedByTerrain(origin, targetPosition)
+    );
+  }
+
+  function canTowerHitPoint(tower, targetPosition) {
+    return isPointInTowerRange(tower, targetPosition) && hasLineOfSightToPoint(tower, targetPosition);
+  }
+
   function findTargetWithLineOfSight(tower, enemySystem) {
-    const maxRangeSq = TOWER_RANGE * TOWER_RANGE;
+    const towerRange = tower.range ?? TOWER_RANGE;
+    const maxRangeSq = towerRange * towerRange;
     let bestTarget = null;
     let bestDistSq = maxRangeSq;
 
@@ -539,8 +696,7 @@ export function createTowerSystem({ scene, camera, grid }) {
             continue;
           }
 
-          const origin = resolveCornerShotOrigin(tower, enemyMesh.position);
-          if (lineOfSightBlockedByOtherTower(origin, enemyMesh.position, tower)) {
+          if (!hasLineOfSightToPoint(tower, enemyMesh.position)) {
             continue;
           }
 
@@ -557,10 +713,9 @@ export function createTowerSystem({ scene, camera, grid }) {
     }
 
     if (typeof enemySystem.getTargetInRange === "function") {
-      const fallbackTarget = enemySystem.getTargetInRange(tower.mesh.position, TOWER_RANGE);
+      const fallbackTarget = enemySystem.getTargetInRange(tower.mesh.position, towerRange);
       if (fallbackTarget && fallbackTarget.position) {
-        const origin = resolveCornerShotOrigin(tower, fallbackTarget.position);
-        if (!lineOfSightBlockedByOtherTower(origin, fallbackTarget.position, tower)) {
+        if (hasLineOfSightToPoint(tower, fallbackTarget.position)) {
           return fallbackTarget;
         }
       }
@@ -721,7 +876,7 @@ export function createTowerSystem({ scene, camera, grid }) {
         return false;
       }
 
-      const towerPosition = new THREE.Vector3(x, grid.tileTopY, z);
+      const towerPosition = new THREE.Vector3(x, getBuildSurfaceY(x, z), z);
       if (!isPlacementValid(towerPosition)) {
         return false;
       }
@@ -738,10 +893,11 @@ export function createTowerSystem({ scene, camera, grid }) {
         mesh: towerMesh,
         cooldown: 0,
         pulseTimer: 0,
+        range: TOWER_RANGE,
         radius: LASER_TOWER_RADIUS,
         halfSize: LASER_TOWER_HALF_SIZE,
         height: LASER_TOWER_HEIGHT,
-        baseY: grid.tileTopY,
+        baseY: towerPosition.y,
         beamVisual: null,
         cornerIndex: null,
       });
