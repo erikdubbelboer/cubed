@@ -388,182 +388,16 @@ export const GAME_CONFIG = {
   },
 
   towers: {
-    // Combat tuning.
-    // Max beam reach in world units. Typical range: 4-20.
-    range: 9,
-    // Time between shots in seconds. Typical range: 0.1-2.0.
-    fireInterval: 0.95,
-    // AoE damage per hit. Typical range: 5-120.
-    beamDamage: 1,
-    // Beam hit radius in world units. Typical range: 0.1-2.0.
-    beamHitRadius: 0.55,
-
-    // Tower collision/build footprint.
-    radius: 1.35,
-    halfSize: 1.1,
-    height: 2.2,
+    // Shared tower placement and progression tuning.
     // Min gap between towers in world units. Typical range: 0-2.
     placementGap: 0.25,
-    // Starting tower cap. Typical range: 1-8.
-    baseMaxTowers: 1,
-    // Starting EMP tower stock. Typical range: 0-4.
-    baseEmpTowers: 0,
     // Path half-width estimate based on cell size. Typical range: 0.35-0.55.
     pathHalfWidthCellScale: 0.47,
-
-    // EMP tower combat tuning.
-    // Short-range pulse radius in world units. Typical range: 2.5-8.
-    empRange: 6,
-    // Time to emit one pulse while charging (seconds). Typical range: 0.4-2.5.
-    empPulseInterval: 1.12,
-    // Damage dealt once per enemy per pulse. Typical range: 8-120.
-    empPulseDamage: 1,
-    // Duration of pulse expansion from 0 -> max range (seconds). Typical range: 0.1-0.6.
-    empPulseDuration: 0.24,
-    // Thickness used for wavefront hit tests in world units. Typical range: 0.05-0.5.
-    empShellThickness: 0.16,
-
-    // EMP tower collision/build footprint.
-    empRadius: 1.1,
-    empHalfSize: 0.9,
-    empHeight: 2.0,
-
-    // EMP tower visuals.
-    empCoreRadius: 0.82,
-    empAuraRadius: 1.02,
-    empAuraOpacity: 0.38,
-    empHoverBaseY: 1.05,
-    empBobAmplitude: 0.14,
-    empBobFrequency: 3.4,
-    empIdleColor: 0x5d9bc8,
-    empChargeColor: 0xb9fff4,
-    empEmissiveIdle: 0x1a2d45,
-    empEmissiveCharge: 0x4ce5d8,
-
-    // EMP build preview + placed palette.
-    empPreviewColor: 0x79aed6,
-    empPreviewGlow: 0x6ce7df,
-    empPreviewInvalidColor: 0xb67373,
-    empPreviewInvalidGlow: 0xa04343,
-    empPlacedColor: 0x5386ad,
-    empPlacedGlow: 0x3fd8cb,
-
-    // EMP pulse visual.
-    empPulseColor: 0x8cf9ff,
-    empPulseOpacity: 0.74,
-    empPulseSegments: 20,
 
     // Upgrade increments.
     maxTowerUpgradeStep: 1,
     damageUpgradeAdd: 0.5,
     fireRateUpgradeMultiplier: 0.75,
-
-    // Beam/muzzle FX geometry.
-    beamRadius: 0.055,
-    beamRadialSegments: 10,
-    muzzleRadius: 0.1,
-    muzzleSegments: 10,
-    beamColor: 0x7cfff5,
-    beamOpacity: 0.95,
-    muzzleColor: 0xb8fffa,
-    muzzleOpacity: 0.9,
-
-    // Tower body/ring dimensions.
-    bodySize: 2.2,
-    edgeSize: 2.22,
-    bodyCenterY: 1.1,
-    ringHalfExtent: 1.16,
-    ringThickness: 0.08,
-    // Laser emission corners around ring anchor.
-    cornerOffsets: [
-      [1, 1],
-      [1, -1],
-      [-1, -1],
-      [-1, 1],
-    ],
-
-    // Tower material defaults.
-    bodyRoughness: 0.58,
-    bodyMetalness: 0.35,
-    bodyEmissive: 0x02080d,
-    bodyEmissiveIntensity: 0.2,
-    edgeColor: 0x91d7ff,
-    edgeOpaqueOpacity: 0.5,
-    ringRoughness: 0.22,
-    ringMetalness: 0.65,
-    ringEmissiveIntensity: 0.4,
-    ringLightColor: 0x7cfff5,
-    ringLightDistance: 4.4,
-
-    // Path highlight overlay.
-    rangeHighlightValidColor: 0x7ffaff,
-    rangeHighlightInvalidColor: 0xffa4a4,
-    rangeHighlightOpacity: 0.34,
-    rangeHighlightRenderOrder: 6,
-
-    // Build preview palette.
-    previewBodyColor: 0x4d6f8f,
-    previewEdgeColor: 0x93ffff,
-    previewRingColor: 0x73ebe2,
-    previewRingGlow: 0x2ab8bd,
-    previewOpacity: 0.55,
-    previewInvalidBodyColor: 0xa45a5a,
-    previewInvalidEdgeColor: 0xffb0b0,
-    previewInvalidRingColor: 0xe08d8d,
-    previewInvalidRingGlow: 0x9f3535,
-
-    // Final placed tower palette.
-    placedBodyColor: 0x445d79,
-    placedRingColor: 0x87f9f0,
-    placedRingGlow: 0x31bfc0,
-
-    // Pulse behavior for beam + glow.
-    pulseDuration: 0.2,
-    pulseExponent: 0.35,
-    activeGlowIntensity: 2.2,
-    idleGlowIntensity: 0.35,
-    // Beam alpha baseline/boost and cap.
-    beamBaseOpacity: 0.72,
-    beamPulseOpacityBoost: 0.26,
-    beamPulseWidthBoost: 0.34,
-    beamMaxOpacity: 0.98,
-    // Muzzle flash alpha baseline/boost and cap.
-    flashBaseOpacity: 0.45,
-    flashPulseOpacityBoost: 0.45,
-    flashMaxOpacity: 0.95,
-    flashBaseScale: 0.82,
-    flashPulseScaleBoost: 0.52,
-    // Extra ring/light response on pulse.
-    ringPulseBoost: 1.2,
-    flashLightBaseIntensity: 2.6,
-    flashLightPulseBoost: 2.2,
-
-    // Beam impact FX at enemy contact.
-    impactDuration: 0.2,
-    impactFlashRadius: 0.2,
-    impactFlashSegments: 10,
-    impactFlashColor: 0xb8fffa,
-    impactFlashOpacity: 0.9,
-    impactFlashExpand: 1.3,
-    impactRingInnerRadius: 0.08,
-    impactRingOuterRadius: 0.22,
-    impactRingSegments: 16,
-    impactRingColor: 0x8afffb,
-    impactRingOpacity: 0.85,
-    impactRingExpand: 1.9,
-    impactRingSpin: 9.5,
-    impactParticleCount: 12,
-    impactParticleSize: 0.07,
-    impactParticleOpacity: 0.95,
-    impactParticleLifeMin: 0.09,
-    impactParticleLifeMax: 0.2,
-    impactParticleSpeedMin: 2.8,
-    impactParticleSpeedMax: 6.8,
-    impactParticleDrag: 6.5,
-    impactParticleGravity: 10.0,
-    impactParticleSpread: 1.25,
-    impactPositionJitter: 0.06,
-    impactSurfaceInsetScale: 0.78,
 
     // Line-of-sight and self-intersection tuning.
     segmentEpsilon: 1e-6,
@@ -577,6 +411,184 @@ export const GAME_CONFIG = {
     terrainLosShrinkPercent: 0.08,
     terrainLosMinHalfSize: 0.2,
     terrainLosVerticalPadding: 0.02,
+
+    types: {
+      laser: {
+        // Starting laser stock. Typical range: 1-8.
+        baseStock: 1,
+
+        // Laser combat tuning.
+        // Max beam reach in world units. Typical range: 4-20.
+        range: 9,
+        // Time between shots in seconds. Typical range: 0.1-2.0.
+        fireInterval: 0.95,
+        // AoE damage per hit. Typical range: 5-120.
+        beamDamage: 1,
+        // Beam hit radius in world units. Typical range: 0.1-2.0.
+        beamHitRadius: 0.55,
+
+        // Laser collision/build footprint.
+        radius: 1.35,
+        halfSize: 1.1,
+        height: 2.2,
+
+        // Beam/muzzle FX geometry.
+        beamRadius: 0.055,
+        beamRadialSegments: 10,
+        muzzleRadius: 0.1,
+        muzzleSegments: 10,
+        beamColor: 0x7cfff5,
+        beamOpacity: 0.95,
+        muzzleColor: 0xb8fffa,
+        muzzleOpacity: 0.9,
+
+        // Tower body/ring dimensions.
+        bodySize: 2.2,
+        edgeSize: 2.22,
+        bodyCenterY: 1.1,
+        ringHalfExtent: 1.16,
+        ringThickness: 0.08,
+        // Laser emission corners around ring anchor.
+        cornerOffsets: [
+          [1, 1],
+          [1, -1],
+          [-1, -1],
+          [-1, 1],
+        ],
+
+        // Tower material defaults.
+        bodyRoughness: 0.58,
+        bodyMetalness: 0.35,
+        bodyEmissive: 0x02080d,
+        bodyEmissiveIntensity: 0.2,
+        edgeColor: 0x91d7ff,
+        edgeOpaqueOpacity: 0.5,
+        ringRoughness: 0.22,
+        ringMetalness: 0.65,
+        ringEmissiveIntensity: 0.4,
+        ringLightColor: 0x7cfff5,
+        ringLightDistance: 4.4,
+
+        // Path highlight overlay.
+        rangeHighlightValidColor: 0x7ffaff,
+        rangeHighlightInvalidColor: 0xffa4a4,
+        rangeHighlightOpacity: 0.34,
+        rangeHighlightRenderOrder: 6,
+
+        // Build preview palette.
+        previewBodyColor: 0x4d6f8f,
+        previewEdgeColor: 0x93ffff,
+        previewRingColor: 0x73ebe2,
+        previewRingGlow: 0x2ab8bd,
+        previewOpacity: 0.55,
+        previewInvalidBodyColor: 0xa45a5a,
+        previewInvalidEdgeColor: 0xffb0b0,
+        previewInvalidRingColor: 0xe08d8d,
+        previewInvalidRingGlow: 0x9f3535,
+
+        // Final placed tower palette.
+        placedBodyColor: 0x445d79,
+        placedRingColor: 0x87f9f0,
+        placedRingGlow: 0x31bfc0,
+
+        // Pulse behavior for beam + glow.
+        pulseDuration: 0.2,
+        pulseExponent: 0.35,
+        activeGlowIntensity: 2.2,
+        idleGlowIntensity: 0.35,
+        // Beam alpha baseline/boost and cap.
+        beamBaseOpacity: 0.72,
+        beamPulseOpacityBoost: 0.26,
+        beamPulseWidthBoost: 0.34,
+        beamMaxOpacity: 0.98,
+        // Muzzle flash alpha baseline/boost and cap.
+        flashBaseOpacity: 0.45,
+        flashPulseOpacityBoost: 0.45,
+        flashMaxOpacity: 0.95,
+        flashBaseScale: 0.82,
+        flashPulseScaleBoost: 0.52,
+        // Extra ring/light response on pulse.
+        ringPulseBoost: 1.2,
+        flashLightBaseIntensity: 2.6,
+        flashLightPulseBoost: 2.2,
+
+        // Beam impact FX at enemy contact.
+        impactDuration: 0.2,
+        impactFlashRadius: 0.2,
+        impactFlashSegments: 10,
+        impactFlashColor: 0xb8fffa,
+        impactFlashOpacity: 0.9,
+        impactFlashExpand: 1.3,
+        impactRingInnerRadius: 0.08,
+        impactRingOuterRadius: 0.22,
+        impactRingSegments: 16,
+        impactRingColor: 0x8afffb,
+        impactRingOpacity: 0.85,
+        impactRingExpand: 1.9,
+        impactRingSpin: 9.5,
+        impactParticleCount: 12,
+        impactParticleSize: 0.07,
+        impactParticleOpacity: 0.95,
+        impactParticleLifeMin: 0.09,
+        impactParticleLifeMax: 0.2,
+        impactParticleSpeedMin: 2.8,
+        impactParticleSpeedMax: 6.8,
+        impactParticleDrag: 6.5,
+        impactParticleGravity: 10.0,
+        impactParticleSpread: 1.25,
+        impactPositionJitter: 0.06,
+        impactSurfaceInsetScale: 0.78,
+      },
+
+      emp: {
+        // Starting EMP stock. Typical range: 0-4.
+        baseStock: 0,
+
+        // EMP combat tuning.
+        // Short-range pulse radius in world units. Typical range: 2.5-8.
+        range: 6,
+        // Time to emit one pulse while charging (seconds). Typical range: 0.4-2.5.
+        pulseInterval: 1.12,
+        // Damage dealt once per enemy per pulse. Typical range: 8-120.
+        pulseDamage: 1,
+        // Duration of pulse expansion from 0 -> max range (seconds). Typical range: 0.1-0.6.
+        pulseDuration: 0.24,
+        // Thickness used for wavefront hit tests in world units. Typical range: 0.05-0.5.
+        shellThickness: 0.16,
+
+        // EMP collision/build footprint.
+        radius: 1.1,
+        halfSize: 0.9,
+        height: 2.0,
+
+        // EMP visuals.
+        coreRadius: 0.82,
+        auraRadius: 1.02,
+        auraOpacity: 0.38,
+        hoverBaseY: 1.05,
+        bobAmplitude: 0.14,
+        bobFrequency: 3.4,
+        idleColor: 0x5d9bc8,
+        chargeColor: 0xb9fff4,
+        emissiveIdle: 0x1a2d45,
+        emissiveCharge: 0x4ce5d8,
+        lightDistance: 4.4,
+
+        // EMP build preview + placed palette.
+        previewColor: 0x79aed6,
+        previewGlow: 0x6ce7df,
+        previewOpacity: 0.55,
+        previewInvalidColor: 0xb67373,
+        previewInvalidGlow: 0xa04343,
+        placedColor: 0x5386ad,
+        placedGlow: 0x3fd8cb,
+
+        // EMP pulse visual.
+        pulseColor: 0x8cf9ff,
+        pulseOpacity: 0.74,
+        pulseSegments: 20,
+      },
+    },
   },
 
   enemies: {
@@ -729,9 +741,9 @@ export const GAME_CONFIG = {
 
     weapon: {
       // Shots per second are derived from this cooldown.
-      baseFireCooldown: 0.28,
+      baseFireCooldown: 3,
       // Projectile damage before upgrades.
-      projectileDamage: 34,
+      projectileDamage: 0.5,
       // Projectile cube size in world units. Typical range: 0.03-0.4.
       projectileSize: 0.1,
       // Projectile material palette.
