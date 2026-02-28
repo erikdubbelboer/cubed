@@ -205,6 +205,7 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
   const jetpackAcceleration = PLAYER_CONFIG.jetpack.acceleration;
   const jetpackMaxRiseSpeed = PLAYER_CONFIG.jetpack.maxRiseSpeed;
   let jetpackFuel = jetpackMaxFuel;
+  let hasInfiniteJetpackFuel = false;
 
   const projectileGeometry = new THREE.BoxGeometry(
     PLAYER_CONFIG.weapon.projectileSize,
@@ -422,11 +423,19 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
   }
 
   function getJetpackFuelRatio() {
+    if (hasInfiniteJetpackFuel) {
+      return 1;
+    }
     return Math.max(0, Math.min(1, jetpackFuel / jetpackMaxFuel));
   }
 
   function getJetpackFuelPercent() {
     return Math.round(getJetpackFuelRatio() * 100);
+  }
+
+  function disableJetpackFuelConsumption() {
+    hasInfiniteJetpackFuel = true;
+    jetpackFuel = jetpackMaxFuel;
   }
 
   function updateReloadBar(progress) {
@@ -714,16 +723,24 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     jumpQueued = false;
 
     const isTryingJetpack = jumpHeld && !isGrounded;
-    const usingJetpack = isTryingJetpack && jetpackFuel > 0;
+    const usingJetpack = isTryingJetpack && (hasInfiniteJetpackFuel || jetpackFuel > 0);
     if (usingJetpack) {
-      jetpackFuel = Math.max(0, jetpackFuel - jetpackBurnRate * deltaSeconds);
+      if (hasInfiniteJetpackFuel) {
+        jetpackFuel = jetpackMaxFuel;
+      } else {
+        jetpackFuel = Math.max(0, jetpackFuel - jetpackBurnRate * deltaSeconds);
+      }
       verticalVelocity = Math.min(
         jetpackMaxRiseSpeed,
         verticalVelocity + jetpackAcceleration * deltaSeconds
       );
     } else if (!isTryingJetpack) {
-      const rechargeRate = isGrounded ? jetpackGroundRechargeRate : jetpackAirRechargeRate;
-      jetpackFuel = Math.min(jetpackMaxFuel, jetpackFuel + rechargeRate * deltaSeconds);
+      if (hasInfiniteJetpackFuel) {
+        jetpackFuel = jetpackMaxFuel;
+      } else {
+        const rechargeRate = isGrounded ? jetpackGroundRechargeRate : jetpackAirRechargeRate;
+        jetpackFuel = Math.min(jetpackMaxFuel, jetpackFuel + rechargeRate * deltaSeconds);
+      }
     }
 
     verticalVelocity -= gravity * deltaSeconds;
@@ -847,5 +864,6 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     upgradePlayerDamage,
     upgradePlayerFireRate,
     setMenuMode,
+    disableJetpackFuelConsumption,
   };
 }

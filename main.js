@@ -330,6 +330,8 @@ let vCursorY = window.innerHeight / 2;
 let hoveredUpgradeIndex = -1;
 let currentUpgradeOptions = [];
 let lastTouchUiActionAt = -Infinity;
+let menuAdvancesWaveOnChoice = true;
+let menuResumeWaveState = "PLAYING";
 
 function updateMenuHoverFromVirtualCursor() {
   if (waveState !== "MENU") {
@@ -353,7 +355,13 @@ function applyUpgradeChoice(index) {
   currentUpgradeOptions = [];
   hoveredUpgradeIndex = -1;
   player.setMenuMode(false);
-  startWave(currentWave + 1);
+  if (menuAdvancesWaveOnChoice) {
+    startWave(currentWave + 1);
+  } else {
+    waveState = menuResumeWaveState;
+  }
+  menuAdvancesWaveOnChoice = true;
+  menuResumeWaveState = "PLAYING";
   return true;
 }
 
@@ -455,6 +463,33 @@ document.addEventListener("mouseup", (event) => {
 
 window.addEventListener("keydown", (event) => {
   if (!player || !towerSystem) return;
+
+  if (event.code === "KeyK" && !event.repeat) {
+    if (waveState === "MENU") {
+      showUpgradeMenu({
+        advanceWaveOnChoice: menuAdvancesWaveOnChoice,
+        resumeWaveState: menuResumeWaveState,
+      });
+      return;
+    }
+    const resumeWaveState = waveState === "DELAY" ? "DELAY" : "PLAYING";
+    waveState = "MENU";
+    showUpgradeMenu({
+      advanceWaveOnChoice: false,
+      resumeWaveState,
+    });
+    return;
+  }
+
+  if (event.code === "KeyL" && !event.repeat) {
+    addMoney(1000);
+    return;
+  }
+
+  if (event.code === "KeyM" && !event.repeat) {
+    player.disableJetpackFuelConsumption();
+    return;
+  }
 
   if (waveState === "MENU") {
     if (event.code === "Digit1" || event.code === "Digit2" || event.code === "Digit3") {
@@ -563,7 +598,14 @@ function startWave(wave) {
   enemySystem.startWave({ red: redCount, blue: blueCount });
 }
 
-function showUpgradeMenu() {
+function showUpgradeMenu(options = {}) {
+  const {
+    advanceWaveOnChoice = true,
+    resumeWaveState = "PLAYING",
+  } = options;
+  menuAdvancesWaveOnChoice = advanceWaveOnChoice;
+  menuResumeWaveState = resumeWaveState === "DELAY" ? "DELAY" : "PLAYING";
+
   player.setMenuMode(true);
   vCursorX = window.innerWidth * 0.5;
   vCursorY = window.innerHeight * 0.5;
