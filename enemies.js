@@ -7,12 +7,13 @@ const DISSOLVE_DEATH_DURATION = ENEMY_CONFIG.dissolveDuration;
 const DISSOLVE_EDGE_WIDTH = ENEMY_CONFIG.dissolveEdgeWidth;
 const DISSOLVE_NOISE_SCALE = ENEMY_CONFIG.dissolveNoiseScale;
 const ENEMY_TYPES = ENEMY_CONFIG.types;
+const FALLBACK_ENEMY_TYPE_KEY = Object.prototype.hasOwnProperty.call(ENEMY_TYPES, "red")
+  ? "red"
+  : (Object.keys(ENEMY_TYPES)[0] ?? null);
 const HIT_PULSE_DURATION = ENEMY_CONFIG.hitPulseDuration ?? 0.2;
 const HIT_PULSE_EXPONENT = ENEMY_CONFIG.hitPulseExponent ?? 0.4;
 const HIT_PULSE_EMISSIVE_BOOST = ENEMY_CONFIG.hitPulseEmissiveBoost ?? 1.2;
 const HIT_PULSE_SCALE_BOOST = ENEMY_CONFIG.hitPulseScaleBoost ?? 0.08;
-const HIT_PULSE_COLOR = new THREE.Color(ENEMY_CONFIG.hitPulseColor ?? 0xffffff);
-const HIT_PULSE_COLOR_MIX = ENEMY_CONFIG.hitPulseColorMix ?? 0.4;
 const HIT_PULSE_FREQUENCY = ENEMY_CONFIG.hitPulseFrequency ?? 30;
 const HIT_PULSE_STACK_ADD = ENEMY_CONFIG.hitPulseStackAdd ?? 0.75;
 
@@ -60,6 +61,42 @@ function applyVisualClipping(root, clippingPlane) {
   });
 }
 
+function normalizeEnemyType(rawType) {
+  if (!FALLBACK_ENEMY_TYPE_KEY) {
+    return null;
+  }
+  if (typeof rawType !== "string") {
+    return FALLBACK_ENEMY_TYPE_KEY;
+  }
+
+  let type = rawType.trim().toLowerCase();
+  if (!type) {
+    return FALLBACK_ENEMY_TYPE_KEY;
+  }
+
+  // Strip unsupported prefixes while preserving the underlying base type.
+  const unsupportedPrefixes = ["regrow-", "camo-", "invisible-"];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const prefix of unsupportedPrefixes) {
+      if (type.startsWith(prefix)) {
+        type = type.slice(prefix.length);
+        changed = true;
+      }
+    }
+  }
+
+  if (type.startsWith("r-")) {
+    type = type.slice(2);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(ENEMY_TYPES, type)) {
+    return type;
+  }
+  return FALLBACK_ENEMY_TYPE_KEY;
+}
+
 export function createEnemySystem(scene, pathWaypoints, options = {}) {
   if (!Array.isArray(pathWaypoints) || pathWaypoints.length < 2) {
     throw new Error("Enemy system requires at least two path waypoints.");
@@ -86,31 +123,117 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
   }
 
   const activeEnemies = [];
-  let enemiesToSpawn = [];
-  let spawnTimer = 0;
+  let scheduledSpawns = [];
+  let spawnEventCursor = 0;
+  let waveElapsedTime = 0;
   let enemySpeedMultiplier = 1;
 
   function upgradeSlowEnemies() {
     enemySpeedMultiplier *= ENEMY_CONFIG.slowUpgradeMultiplier;
   }
 
-  function startWave(counts) {
-    enemiesToSpawn = [];
-    for (let type in counts) {
-      for (let i = 0; i < counts[type]; i++) {
-        enemiesToSpawn.push(type);
+  function buildSpawnEventsFromSegments(segments) {
+    const events = [];
+    let sequence = 0;
+
+    for (const segment of segments) {
+      if (!segment || typeof segment !== "object") {
+        continue;
+      }
+      const type = normalizeEnemyType(segment.type);
+      if (!type) {
+        continue;
+      }
+
+      const count = Math.max(0, Math.floor(Number(segment.count) || 0));
+      if (count <= 0) {
+        continue;
+      }
+
+      let start = Number(segment.start);
+      let end = Number(segment.end);
+      if (!Number.isFinite(start)) {
+        start = 0;
+      }
+      if (!Number.isFinite(end)) {
+        end = start;
+      }
+      if (end < start) {
+        const swap = start;
+        start = end;
+        end = swap;
+      }
+
+      const step = count <= 1 ? 0 : (end - start) / (count - 1);
+      for (let i = 0; i < count; i += 1) {
+        events.push({
+          type,
+          time: start + (step * i),
+          order: sequence++,
+        });
       }
     }
-    // Shuffle slightly or keep in order. For now, order is fine or interleave them.
-    spawnTimer = ENEMY_CONFIG.waveStartSpawnDelay;
+
+    events.sort((a, b) => {
+      if (a.time !== b.time) {
+        return a.time - b.time;
+      }
+      return a.order - b.order;
+    });
+    return events;
+  }
+
+  function buildSpawnEventsFromCounts(counts) {
+    const events = [];
+    if (!counts || typeof counts !== "object") {
+      return events;
+    }
+
+    const startDelay = Math.max(0, Number(ENEMY_CONFIG.waveStartSpawnDelay) || 0);
+    const interval = Math.max(0, Number(ENEMY_CONFIG.spawnInterval) || 0);
+    let sequence = 0;
+    let spawnTime = startDelay;
+
+    for (const [rawType, rawCount] of Object.entries(counts)) {
+      const type = normalizeEnemyType(rawType);
+      if (!type) {
+        continue;
+      }
+      const count = Math.max(0, Math.floor(Number(rawCount) || 0));
+      for (let i = 0; i < count; i += 1) {
+        events.push({
+          type,
+          time: spawnTime,
+          order: sequence++,
+        });
+        spawnTime += interval;
+      }
+    }
+
+    return events;
+  }
+
+  function startWave(waveDefinition) {
+    if (Array.isArray(waveDefinition)) {
+      scheduledSpawns = buildSpawnEventsFromSegments(waveDefinition);
+    } else {
+      // Legacy adapter for old count-based wave format.
+      scheduledSpawns = buildSpawnEventsFromCounts(waveDefinition);
+    }
+    spawnEventCursor = 0;
+    waveElapsedTime = 0;
   }
 
   function isWaveClear() {
-    return activeEnemies.length === 0 && enemiesToSpawn.length === 0;
+    return activeEnemies.length === 0 && spawnEventCursor >= scheduledSpawns.length;
   }
 
   function createEnemyMesh(type) {
-    const enemyType = ENEMY_TYPES[type] ?? ENEMY_TYPES.basic;
+    const normalizedType = normalizeEnemyType(type);
+    const enemyType = normalizedType ? ENEMY_TYPES[normalizedType] : null;
+    if (!enemyType) {
+      throw new Error("No enemy types are configured.");
+    }
 
     const enemyMesh = new THREE.Group();
     const visualRoot = new THREE.Group();
@@ -194,7 +317,6 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       bodyMaterial,
       baseBodyColor: bodyMaterial.color.clone(),
       baseEmissiveIntensity: bodyMaterial.emissiveIntensity,
-      hitPulseColor: HIT_PULSE_COLOR.clone(),
       hitPulseTimer: 0,
       hitPulseClock: 0,
       healthBarRoot,
@@ -216,7 +338,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       deathDuration: DISSOLVE_DEATH_DURATION,
       dissolveUniforms: [],
       dissolveMaterials: [],
-      type
+      type: normalizedType
     };
   }
 
@@ -335,7 +457,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     const pulse = envelope * oscillation;
 
     enemy.bodyMaterial.emissiveIntensity = enemy.baseEmissiveIntensity + (pulse * HIT_PULSE_EMISSIVE_BOOST);
-    enemy.bodyMaterial.color.copy(enemy.baseBodyColor).lerp(enemy.hitPulseColor, pulse * HIT_PULSE_COLOR_MIX);
+    enemy.bodyMaterial.color.copy(enemy.baseBodyColor);
 
     const scaleXZ = 1 + (pulse * HIT_PULSE_SCALE_BOOST);
     const scaleY = 1 + (pulse * HIT_PULSE_SCALE_BOOST * 0.55);
@@ -389,12 +511,15 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
 
   function update(deltaSeconds, camera) {
     // Spawn new enemies
-    if (enemiesToSpawn.length > 0) {
-      spawnTimer -= deltaSeconds;
-      if (spawnTimer <= 0) {
-        const type = enemiesToSpawn.shift();
-        activeEnemies.push(createEnemyMesh(type));
-        spawnTimer = ENEMY_CONFIG.spawnInterval; // Delay between spawns
+    if (spawnEventCursor < scheduledSpawns.length) {
+      waveElapsedTime += deltaSeconds;
+      while (
+        spawnEventCursor < scheduledSpawns.length &&
+        scheduledSpawns[spawnEventCursor].time <= waveElapsedTime
+      ) {
+        const spawnEvent = scheduledSpawns[spawnEventCursor];
+        activeEnemies.push(createEnemyMesh(spawnEvent.type));
+        spawnEventCursor += 1;
       }
     }
 
@@ -568,7 +693,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     isWaveClear,
     upgradeSlowEnemies,
     forceSpawnEnemy: (type, spawnPos) => {
-      const enemy = createEnemyMesh(type);
+      const enemy = createEnemyMesh(normalizeEnemyType(type));
       enemy.mesh.position.copy(spawnPos || travelWaypoints[0]);
       activeEnemies.push(enemy);
     }

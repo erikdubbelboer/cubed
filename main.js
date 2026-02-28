@@ -11,6 +11,7 @@ const LIGHT_CONFIG = GAME_CONFIG.lights;
 const PORTAL_CONFIG = GAME_CONFIG.portal;
 const UI_CONFIG = GAME_CONFIG.ui;
 const WAVE_CONFIG = GAME_CONFIG.waves;
+const CONFIGURED_ROUNDS = Array.isArray(WAVE_CONFIG.rounds) ? WAVE_CONFIG.rounds : [];
 
 const app = document.getElementById("app");
 
@@ -487,16 +488,47 @@ let currentWave = WAVE_CONFIG.initialWave;
 let waveDelay = 0;
 let hasShownFirstUpgradeMenu = false;
 
+function getEffectiveWaveNumber(wave) {
+  if (CONFIGURED_ROUNDS.length === 0) {
+    return wave;
+  }
+  if (wave <= CONFIGURED_ROUNDS.length) {
+    return wave;
+  }
+  if (WAVE_CONFIG.afterLastRound === "stay_on_last") {
+    return CONFIGURED_ROUNDS.length;
+  }
+  return wave;
+}
+
+function getWaveSegmentsForWave(wave) {
+  if (CONFIGURED_ROUNDS.length === 0) {
+    return null;
+  }
+  const effectiveWave = getEffectiveWaveNumber(wave);
+  return CONFIGURED_ROUNDS[effectiveWave - 1] ?? [];
+}
+
 function startWave(wave) {
   currentWave = wave;
   waveState = "PLAYING";
 
-  const enemyCount = WAVE_CONFIG.basicBaseCount + Math.floor(wave * WAVE_CONFIG.basicPerWave);
-  const fastCount = wave >= WAVE_CONFIG.fastUnlockWave
-    ? Math.floor(wave * WAVE_CONFIG.fastPerWave)
-    : 0;
+  const waveSegments = getWaveSegmentsForWave(wave);
+  if (Array.isArray(waveSegments)) {
+    enemySystem.startWave(waveSegments);
+    return;
+  }
 
-  enemySystem.startWave({ basic: enemyCount, fast: fastCount });
+  // Legacy fallback if explicit rounds are not configured.
+  const basicBase = Number(WAVE_CONFIG.basicBaseCount) || 0;
+  const basicPerWave = Number(WAVE_CONFIG.basicPerWave) || 0;
+  const fastUnlockWave = Number(WAVE_CONFIG.fastUnlockWave) || Number.POSITIVE_INFINITY;
+  const fastPerWave = Number(WAVE_CONFIG.fastPerWave) || 0;
+  const redCount = basicBase + Math.floor(wave * basicPerWave);
+  const blueCount = wave >= fastUnlockWave
+    ? Math.floor(wave * fastPerWave)
+    : 0;
+  enemySystem.startWave({ red: redCount, blue: blueCount });
 }
 
 function showUpgradeMenu() {
@@ -629,7 +661,7 @@ function initGame() {
     placeBasicTower: (x, z) => {
       if (towerSystem) towerSystem.forcePlaceTower(x, z, "laser");
     },
-    spawnEnemy: (type = "basic") => {
+    spawnEnemy: (type = "red") => {
       if (enemySystem) {
         const spawner = grid.pathWaypoints[0];
         enemySystem.forceSpawnEnemy(type, spawner);

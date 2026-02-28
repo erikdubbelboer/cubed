@@ -67,13 +67,208 @@ export const GAME_CONFIG = {
     initialWave: 1,
     // Delay after clearing a wave before upgrade menu (seconds). Typical range: 0.5-4.
     upgradeDelaySeconds: 2.0,
-    // Basic enemies = base + floor(wave * multiplier). Typical base: 1-8, multiplier: 0.5-3.
-    basicBaseCount: 4,
-    basicPerWave: 1.5,
-    // Fast enemies start on/after this wave. Typical range: 2-8.
-    fastUnlockWave: 3,
-    // Fast enemies = floor(wave * multiplier) after unlock. Typical range: 0.3-2.5.
-    fastPerWave: 1.2,
+    // Behavior once the configured rounds are exhausted.
+    // "stay_on_last": keep replaying the final configured round.
+    afterLastRound: "stay_on_last",
+    // Explicit round definitions. Each round is an array of spawn segments.
+    // Segment shape: { type, count, start, end } where time is in seconds.
+    rounds: [
+      [
+        { type: "red", count: 20, start: 0.00, end: 17.51 },
+      ],
+      [
+        { type: "red", count: 35, start: 0.00, end: 19.00 },
+      ],
+      [
+        { type: "red", count: 10, start: 0.00, end: 5.10 },
+        { type: "blue", count: 5, start: 5.70, end: 7.95 },
+        { type: "red", count: 15, start: 9.71, end: 16.71 },
+      ],
+      [
+        { type: "red", count: 25, start: 0.00, end: 12.00 },
+        { type: "blue", count: 18, start: 7.90, end: 10.40 },
+        { type: "red", count: 10, start: 14.51, end: 17.31 },
+      ],
+      [
+        { type: "blue", count: 12, start: 0.00, end: 5.14 },
+        { type: "red", count: 5, start: 5.70, end: 7.98 },
+        { type: "blue", count: 15, start: 8.60, end: 16.50 },
+      ],
+      [
+        { type: "green", count: 4, start: 0.00, end: 1.71 },
+        { type: "red", count: 15, start: 5.33, end: 10.33 },
+        { type: "blue", count: 15, start: 10.80, end: 18.70 },
+      ],
+      [
+        { type: "blue", count: 10, start: 0.00, end: 5.14 },
+        { type: "green", count: 5, start: 5.70, end: 10.65 },
+        { type: "red", count: 20, start: 11.81, end: 22.65 },
+        { type: "blue", count: 10, start: 22.81, end: 26.80 },
+      ],
+      [
+        { type: "blue", count: 20, start: 0.00, end: 10.84 },
+        { type: "green", count: 2, start: 11.42, end: 11.99 },
+        { type: "red", count: 10, start: 14.03, end: 16.00 },
+        { type: "green", count: 12, start: 18.27, end: 28.87 },
+      ],
+      [
+        { type: "green", count: 30, start: 0.00, end: 18.95 },
+      ],
+      [
+        { type: "blue", count: 60, start: 0.00, end: 35.00 },
+        { type: "blue", count: 20, start: 35.00, end: 44.00 },
+        { type: "blue", count: 22, start: 44.00, end: 47.99 },
+      ],
+      [
+        { type: "yellow", count: 3, start: 0.00, end: 1.00 },
+        { type: "green", count: 12, start: 4.47, end: 10.75 },
+        { type: "blue", count: 10, start: 10.87, end: 14.67 },
+        { type: "red", count: 10, start: 14.59, end: 19.16 },
+      ],
+      [
+        { type: "green", count: 10, start: 0.00, end: 5.13 },
+        { type: "blue", count: 15, start: 5.70, end: 11.77 },
+        { type: "yellow", count: 5, start: 14.27, end: 17.39 },
+      ],
+      [
+        { type: "blue", count: 50, start: 0.00, end: 30.00 },
+        { type: "green", count: 23, start: 2.21, end: 32.21 },
+      ],
+      [
+        { type: "red", count: 18, start: 0.00, end: 9.71 },
+        { type: "blue", count: 5, start: 2.85, end: 3.97 },
+        { type: "green", count: 5, start: 5.71, end: 6.83 },
+        { type: "yellow", count: 4, start: 8.56, end: 9.51 },
+        { type: "red", count: 31, start: 9.50, end: 26.63 },
+        { type: "blue", count: 10, start: 15.96, end: 17.34 },
+        { type: "green", count: 5, start: 19.84, end: 21.22 },
+        { type: "yellow", count: 5, start: 23.71, end: 25.26 },
+      ],
+      [
+        { type: "red", count: 20, start: 0.00, end: 25.00 },
+        { type: "blue", count: 15, start: 2.78, end: 22.78 },
+        { type: "green", count: 12, start: 5.68, end: 20.68 },
+        { type: "yellow", count: 10, start: 8.87, end: 20.87 },
+        { type: "pink", count: 5, start: 17.55, end: 20.55 },
+      ],
+      [
+        { type: "green", count: 20, start: 0.00, end: 10.85 },
+        { type: "green", count: 20, start: 0.20, end: 11.05 },
+        { type: "yellow", count: 8, start: 14.59, end: 16.02 },
+      ],
+      [
+        { type: "r-yellow", count: 12, start: 0.00, end: 5.00 },
+      ],
+      [
+        { type: "green", count: 60, start: 0.00, end: 25.00 },
+        { type: "green", count: 20, start: 25.00, end: 26.82 },
+      ],
+      [
+        { type: "pink", count: 15, start: 0.00, end: 8.46 },
+        { type: "black", count: 15, start: 9.96, end: 19.02 },
+        { type: "pink", count: 15, start: 20.52, end: 28.25 },
+      ],
+      [
+        { type: "yellow", count: 25, start: 0.00, end: 15.00 },
+        { type: "white", count: 10, start: 18.37, end: 23.37 },
+      ],
+      [
+        { type: "yellow", count: 25, start: 0.00, end: 10.54 },
+        { type: "pink", count: 20, start: 12.44, end: 20.09 },
+        { type: "black", count: 8, start: 21.42, end: 27.26 },
+      ],
+      [
+        { type: "yellow", count: 35, start: 0.00, end: 13.20 },
+        { type: "yellow", count: 30, start: 15.66, end: 21.00 },
+        { type: "black", count: 2, start: 23.80, end: 25.00 },
+      ],
+      [
+        { type: "black", count: 10, start: 0.00, end: 1.00 },
+        { type: "pink", count: 20, start: 2.22, end: 4.42 },
+        { type: "black", count: 20, start: 5.64, end: 9.32 },
+        { type: "pink", count: 40, start: 10.79, end: 15.05 },
+        { type: "black", count: 10, start: 17.60, end: 18.62 },
+        { type: "pink", count: 20, start: 19.86, end: 22.06 },
+        { type: "black", count: 20, start: 23.29, end: 26.97 },
+        { type: "pink", count: 20, start: 28.44, end: 30.35 },
+      ],
+      [
+        { type: "white", count: 20, start: 0.00, end: 29.05 },
+        { type: "purple", count: 10, start: 1.43, end: 29.05 },
+      ],
+      [
+        { type: "zebra", count: 12, start: 0.00, end: 1.20 },
+        { type: "pink", count: 20, start: 2.65, end: 4.85 },
+        { type: "black", count: 20, start: 6.32, end: 9.27 },
+        { type: "pink", count: 20, start: 11.47, end: 13.42 },
+        { type: "black", count: 20, start: 15.37, end: 18.32 },
+      ],
+      [
+        { type: "lead", count: 15, start: 0.00, end: 6.00 },
+        { type: "black", count: 10, start: 7.90, end: 11.17 },
+        { type: "lead", count: 7, start: 11.20, end: 19.69 },
+      ],
+      [
+        { type: "zebra", count: 8, start: 0.00, end: 7.00 },
+        { type: "lead", count: 8, start: 9.32, end: 15.32 },
+      ],
+      [
+        { type: "lead", count: 6, start: 0.00, end: 5.00 },
+      ],
+      [
+        { type: "zebra", count: 15, start: 0.00, end: 13.45 },
+        { type: "zebra", count: 15, start: 15.09, end: 26.00 },
+        { type: "rainbow", count: 10, start: 27.19, end: 35.09 },
+      ],
+      [
+        { type: "black", count: 10, start: 0.00, end: 18.42 },
+        { type: "black", count: 10, start: 0.00, end: 20.42 },
+        { type: "black", count: 10, start: 3.52, end: 24.42 },
+        { type: "black", count: 10, start: 4.52, end: 24.42 },
+        { type: "zebra", count: 10, start: 7.00, end: 25.42 },
+        { type: "zebra", count: 10, start: 9.00, end: 25.42 },
+        { type: "rainbow", count: 10, start: 14.00, end: 25.42 },
+      ],
+      [
+        { type: "zebra", count: 25, start: 0.00, end: 9.42 },
+        { type: "rainbow", count: 15, start: 10.72, end: 22.44 },
+      ],
+      [
+        { type: "rainbow", count: 10, start: 0.00, end: 17.00 },
+        { type: "ceramic", count: 5, start: 21.00, end: 25.00 },
+      ],
+      [
+        { type: "ceramic", count: 10, start: 0.00, end: 30.00 },
+        { type: "ceramic", count: 10, start: 2.00, end: 28.00 },
+      ],
+      [
+        { type: "lead", count: 25, start: 0.00, end: 22.70 },
+        { type: "zebra", count: 10, start: 1.48, end: 7.57 },
+        { type: "purple", count: 20, start: 16.98, end: 22.70 },
+      ],
+      [
+        { type: "zebra", count: 30, start: 0.00, end: 30.00 },
+        { type: "ceramic", count: 10, start: 2.00, end: 28.00 },
+      ],
+      [
+        { type: "ceramic", count: 10, start: 0.00, end: 30.00 },
+        { type: "rainbow", count: 10, start: 1.00, end: 29.00 },
+        { type: "zebra", count: 10, start: 2.00, end: 28.00 },
+      ],
+      [
+        { type: "rainbow", count: 20, start: 0.00, end: 28.00 },
+        { type: "ceramic", count: 10, start: 2.00, end: 26.00 },
+      ],
+      [
+        { type: "ceramic", count: 10, start: 0.00, end: 28.00 },
+        { type: "zebra", count: 20, start: 1.00, end: 27.00 },
+        { type: "purple", count: 20, start: 2.00, end: 26.00 },
+      ],
+      [
+        { type: "ceramic", count: 15, start: 0.00, end: 26.00 },
+        { type: "rainbow", count: 15, start: 2.00, end: 24.00 },
+      ],
+    ],
   },
 
   portal: {
@@ -197,9 +392,9 @@ export const GAME_CONFIG = {
     // Max beam reach in world units. Typical range: 4-20.
     range: 9,
     // Time between shots in seconds. Typical range: 0.1-2.0.
-    fireInterval: 0.75,
+    fireInterval: 0.95,
     // AoE damage per hit. Typical range: 5-120.
-    beamDamage: 20,
+    beamDamage: 1,
     // Beam hit radius in world units. Typical range: 0.1-2.0.
     beamHitRadius: 0.55,
 
@@ -220,9 +415,9 @@ export const GAME_CONFIG = {
     // Short-range pulse radius in world units. Typical range: 2.5-8.
     empRange: 6,
     // Time to emit one pulse while charging (seconds). Typical range: 0.4-2.5.
-    empPulseInterval: 1.35,
+    empPulseInterval: 1.12,
     // Damage dealt once per enemy per pulse. Typical range: 8-120.
-    empPulseDamage: 34,
+    empPulseDamage: 1,
     // Duration of pulse expansion from 0 -> max range (seconds). Typical range: 0.1-0.6.
     empPulseDuration: 0.24,
     // Thickness used for wavefront hit tests in world units. Typical range: 0.05-0.5.
@@ -449,26 +644,18 @@ export const GAME_CONFIG = {
 
     // Enemy archetypes.
     types: {
-      basic: {
-        // Hit points. Typical range: 20-600.
-        health: 100,
-        // Multiplier over baseSpeed. Typical range: 0.5-3.
-        speedMultiplier: 1,
-        // Hit radius for AoE checks. Typical range: 0.2-2.
-        radius: 0.9,
-        // Visual cube size in world units. Typical range: 0.5-3.
-        size: 1.6,
-        color: 0x4fb6ff,
-        emissive: 0x102a3f,
-      },
-      fast: {
-        health: 60,
-        speedMultiplier: 3,
-        radius: 0.6,
-        size: 1.0,
-        color: 0xff6f6f,
-        emissive: 0x3d1010,
-      },
+      red: { health: 1, speedMultiplier: 1.0, radius: 0.7, size: 1.05, color: 0xff3a30, emissive: 0x4a0e0b },
+      blue: { health: 2, speedMultiplier: 1.4, radius: 0.72, size: 1.08, color: 0x2f66ff, emissive: 0x10214a },
+      green: { health: 3, speedMultiplier: 1.8, radius: 0.75, size: 1.12, color: 0x2fbf3b, emissive: 0x103b15 },
+      yellow: { health: 4, speedMultiplier: 3.2, radius: 0.78, size: 1.15, color: 0xffdf38, emissive: 0x4a3f0a },
+      pink: { health: 5, speedMultiplier: 3.5, radius: 0.8, size: 1.18, color: 0xff76cf, emissive: 0x4a173a },
+      black: { health: 11, speedMultiplier: 1.8, radius: 0.86, size: 1.24, color: 0x18181b, emissive: 0x2f2f34 },
+      white: { health: 11, speedMultiplier: 2.0, radius: 0.86, size: 1.24, color: 0xf5f7ff, emissive: 0x38445a },
+      purple: { health: 11, speedMultiplier: 3.0, radius: 0.86, size: 1.24, color: 0x8b5cf6, emissive: 0x261349 },
+      lead: { health: 23, speedMultiplier: 1.0, radius: 0.9, size: 1.3, color: 0x6e7681, emissive: 0x2e3239 },
+      zebra: { health: 23, speedMultiplier: 1.8, radius: 0.92, size: 1.33, color: 0xd4dae2, emissive: 0x2a2e36 },
+      rainbow: { health: 47, speedMultiplier: 2.2, radius: 0.97, size: 1.42, color: 0xff8f2e, emissive: 0x4a2910 },
+      ceramic: { health: 104, speedMultiplier: 2.8, radius: 1.02, size: 1.52, color: 0xa86b32, emissive: 0x3f2410 },
     },
   },
 
