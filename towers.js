@@ -1,33 +1,31 @@
 import * as THREE from "three";
+import { GAME_CONFIG } from "./config.js";
 
-const TOWER_RANGE = 9;
-const TOWER_FIRE_INTERVAL = 0.75;
-const TOWER_BEAM_DAMAGE = 20;
-const TOWER_BEAM_HIT_RADIUS = 0.55;
-const LASER_TOWER_RADIUS = 1.35;
-const LASER_TOWER_HALF_SIZE = 1.1;
-const LASER_TOWER_HEIGHT = 2.2;
-const TOWER_PLACEMENT_GAP = 0.25;
-const LASER_RING_HALF_EXTENT = 1.16;
-const LASER_RING_THICKNESS = 0.08;
-const LASER_ACTIVE_GLOW_INTENSITY = 2.2;
-const LASER_IDLE_GLOW_INTENSITY = 0.35;
-const LASER_PULSE_DURATION = 0.2;
-const LASER_BEAM_BASE_OPACITY = 0.72;
-const LASER_BEAM_PULSE_OPACITY_BOOST = 0.26;
-const LASER_BEAM_PULSE_WIDTH_BOOST = 0.34;
-const LASER_FLASH_BASE_OPACITY = 0.45;
-const LASER_FLASH_PULSE_OPACITY_BOOST = 0.45;
-const LASER_FLASH_BASE_SCALE = 0.82;
-const LASER_FLASH_PULSE_SCALE_BOOST = 0.52;
-const PATH_RANGE_HIGHLIGHT_VALID_COLOR = 0x7ffaff;
-const PATH_RANGE_HIGHLIGHT_INVALID_COLOR = 0xffa4a4;
-const LASER_CORNER_OFFSETS = [
-  [1, 1],
-  [1, -1],
-  [-1, -1],
-  [-1, 1],
-];
+const TOWER_CONFIG = GAME_CONFIG.towers;
+
+const TOWER_RANGE = TOWER_CONFIG.range;
+const TOWER_FIRE_INTERVAL = TOWER_CONFIG.fireInterval;
+const TOWER_BEAM_DAMAGE = TOWER_CONFIG.beamDamage;
+const TOWER_BEAM_HIT_RADIUS = TOWER_CONFIG.beamHitRadius;
+const LASER_TOWER_RADIUS = TOWER_CONFIG.radius;
+const LASER_TOWER_HALF_SIZE = TOWER_CONFIG.halfSize;
+const LASER_TOWER_HEIGHT = TOWER_CONFIG.height;
+const TOWER_PLACEMENT_GAP = TOWER_CONFIG.placementGap;
+const LASER_RING_HALF_EXTENT = TOWER_CONFIG.ringHalfExtent;
+const LASER_RING_THICKNESS = TOWER_CONFIG.ringThickness;
+const LASER_ACTIVE_GLOW_INTENSITY = TOWER_CONFIG.activeGlowIntensity;
+const LASER_IDLE_GLOW_INTENSITY = TOWER_CONFIG.idleGlowIntensity;
+const LASER_PULSE_DURATION = TOWER_CONFIG.pulseDuration;
+const LASER_BEAM_BASE_OPACITY = TOWER_CONFIG.beamBaseOpacity;
+const LASER_BEAM_PULSE_OPACITY_BOOST = TOWER_CONFIG.beamPulseOpacityBoost;
+const LASER_BEAM_PULSE_WIDTH_BOOST = TOWER_CONFIG.beamPulseWidthBoost;
+const LASER_FLASH_BASE_OPACITY = TOWER_CONFIG.flashBaseOpacity;
+const LASER_FLASH_PULSE_OPACITY_BOOST = TOWER_CONFIG.flashPulseOpacityBoost;
+const LASER_FLASH_BASE_SCALE = TOWER_CONFIG.flashBaseScale;
+const LASER_FLASH_PULSE_SCALE_BOOST = TOWER_CONFIG.flashPulseScaleBoost;
+const PATH_RANGE_HIGHLIGHT_VALID_COLOR = TOWER_CONFIG.rangeHighlightValidColor;
+const PATH_RANGE_HIGHLIGHT_INVALID_COLOR = TOWER_CONFIG.rangeHighlightInvalidColor;
+const LASER_CORNER_OFFSETS = TOWER_CONFIG.cornerOffsets;
 
 export function createTowerSystem({ scene, camera, grid }) {
   const raycaster = new THREE.Raycaster();
@@ -36,22 +34,33 @@ export function createTowerSystem({ scene, camera, grid }) {
   const groundHit = new THREE.Vector3();
   const pathWaypoints = Array.isArray(grid.pathWaypoints) ? grid.pathWaypoints : [];
   const terrainObstacles = Array.isArray(grid.heightObstacles) ? grid.heightObstacles : [];
-  const pathHalfWidth = grid.cellSize * 0.47;
+  const pathHalfWidth = grid.cellSize * TOWER_CONFIG.pathHalfWidthCellScale;
 
-  const beamGeometry = new THREE.CylinderGeometry(0.055, 0.055, 1, 10, 1, true);
+  const beamGeometry = new THREE.CylinderGeometry(
+    TOWER_CONFIG.beamRadius,
+    TOWER_CONFIG.beamRadius,
+    1,
+    TOWER_CONFIG.beamRadialSegments,
+    1,
+    true
+  );
   const beamMaterial = new THREE.MeshBasicMaterial({
-    color: 0x7cfff5,
+    color: TOWER_CONFIG.beamColor,
     transparent: true,
-    opacity: 0.95,
+    opacity: TOWER_CONFIG.beamOpacity,
     depthWrite: false,
   });
   beamMaterial.toneMapped = false;
 
-  const muzzleFlashGeometry = new THREE.SphereGeometry(0.1, 10, 10);
+  const muzzleFlashGeometry = new THREE.SphereGeometry(
+    TOWER_CONFIG.muzzleRadius,
+    TOWER_CONFIG.muzzleSegments,
+    TOWER_CONFIG.muzzleSegments
+  );
   const muzzleFlashMaterial = new THREE.MeshBasicMaterial({
-    color: 0xb8fffa,
+    color: TOWER_CONFIG.muzzleColor,
     transparent: true,
-    opacity: 0.9,
+    opacity: TOWER_CONFIG.muzzleOpacity,
     depthWrite: false,
   });
   muzzleFlashMaterial.toneMapped = false;
@@ -63,7 +72,7 @@ export function createTowerSystem({ scene, camera, grid }) {
 
   let selectedTowerType = null;
   let buildMode = false;
-  let maxTowers = 1;
+  let maxTowers = TOWER_CONFIG.baseMaxTowers;
   const towers = [];
   let previewValid = false;
   let previewPosition = null;
@@ -71,9 +80,9 @@ export function createTowerSystem({ scene, camera, grid }) {
   let towerDamageMultiplier = 1;
   let towerFireRateMultiplier = 1;
 
-  function upgradeMaxTowers() { maxTowers += 1; }
-  function upgradeTowerDamage() { towerDamageMultiplier += 0.5; }
-  function upgradeTowerFireRate() { towerFireRateMultiplier *= 0.75; }
+  function upgradeMaxTowers() { maxTowers += TOWER_CONFIG.maxTowerUpgradeStep; }
+  function upgradeTowerDamage() { towerDamageMultiplier += TOWER_CONFIG.damageUpgradeAdd; }
+  function upgradeTowerFireRate() { towerFireRateMultiplier *= TOWER_CONFIG.fireRateUpgradeMultiplier; }
 
   function applyShadowSettings(object) {
     object.traverse((child) => {
@@ -95,36 +104,39 @@ export function createTowerSystem({ scene, camera, grid }) {
 
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: bodyColor,
-      roughness: 0.58,
-      metalness: 0.35,
+      roughness: TOWER_CONFIG.bodyRoughness,
+      metalness: TOWER_CONFIG.bodyMetalness,
       opacity,
       transparent,
-      emissive: 0x02080d,
-      emissiveIntensity: 0.2,
+      emissive: TOWER_CONFIG.bodyEmissive,
+      emissiveIntensity: TOWER_CONFIG.bodyEmissiveIntensity,
     });
 
     const edgeMaterial = new THREE.LineBasicMaterial({
-      color: 0x91d7ff,
+      color: TOWER_CONFIG.edgeColor,
       transparent,
-      opacity: transparent ? opacity : 0.5,
+      opacity: transparent ? opacity : TOWER_CONFIG.edgeOpaqueOpacity,
     });
 
     const ringMaterial = new THREE.MeshStandardMaterial({
       color: ringColor,
       emissive: ringGlowColor,
-      emissiveIntensity: 0.4,
-      roughness: 0.22,
-      metalness: 0.65,
+      emissiveIntensity: TOWER_CONFIG.ringEmissiveIntensity,
+      roughness: TOWER_CONFIG.ringRoughness,
+      metalness: TOWER_CONFIG.ringMetalness,
       opacity,
       transparent,
     });
 
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.2, 2.2), bodyMaterial);
-    body.position.y = 1.1;
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(TOWER_CONFIG.bodySize, TOWER_CONFIG.bodySize, TOWER_CONFIG.bodySize),
+      bodyMaterial
+    );
+    body.position.y = TOWER_CONFIG.bodyCenterY;
     root.add(body);
 
     const edges = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.BoxGeometry(2.22, 2.22, 2.22)),
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(TOWER_CONFIG.edgeSize, TOWER_CONFIG.edgeSize, TOWER_CONFIG.edgeSize)),
       edgeMaterial
     );
     edges.position.copy(body.position);
@@ -154,7 +166,7 @@ export function createTowerSystem({ scene, camera, grid }) {
     ringRight.position.x = LASER_RING_HALF_EXTENT;
     ringAnchor.add(ringRight);
 
-    const glowLight = new THREE.PointLight(0x7cfff5, 0, 4.4);
+    const glowLight = new THREE.PointLight(TOWER_CONFIG.ringLightColor, 0, TOWER_CONFIG.ringLightDistance);
     glowLight.position.copy(ringAnchor.position);
     root.add(glowLight);
 
@@ -175,7 +187,7 @@ export function createTowerSystem({ scene, camera, grid }) {
     const highlightMaterial = new THREE.MeshBasicMaterial({
       color: PATH_RANGE_HIGHLIGHT_VALID_COLOR,
       transparent: true,
-      opacity: 0.34,
+      opacity: TOWER_CONFIG.rangeHighlightOpacity,
       depthWrite: false,
       polygonOffset: true,
       polygonOffsetFactor: -1,
@@ -189,7 +201,7 @@ export function createTowerSystem({ scene, camera, grid }) {
       marker.position.copy(tile.position);
       marker.quaternion.copy(tile.quaternion);
       marker.scale.copy(tile.scale);
-      marker.renderOrder = 6;
+      marker.renderOrder = TOWER_CONFIG.rangeHighlightRenderOrder;
       marker.visible = false;
       scene.add(marker);
 
@@ -253,23 +265,23 @@ export function createTowerSystem({ scene, camera, grid }) {
     }
 
     if (isValid) {
-      bodyMaterial.color.setHex(0x4d6f8f);
-      edgeMaterial.color.setHex(0x93ffff);
-      ringMaterial.color.setHex(0x73ebe2);
-      ringMaterial.emissive.setHex(0x2ab8bd);
+      bodyMaterial.color.setHex(TOWER_CONFIG.previewBodyColor);
+      edgeMaterial.color.setHex(TOWER_CONFIG.previewEdgeColor);
+      ringMaterial.color.setHex(TOWER_CONFIG.previewRingColor);
+      ringMaterial.emissive.setHex(TOWER_CONFIG.previewRingGlow);
     } else {
-      bodyMaterial.color.setHex(0xa45a5a);
-      edgeMaterial.color.setHex(0xffb0b0);
-      ringMaterial.color.setHex(0xe08d8d);
-      ringMaterial.emissive.setHex(0x9f3535);
+      bodyMaterial.color.setHex(TOWER_CONFIG.previewInvalidBodyColor);
+      edgeMaterial.color.setHex(TOWER_CONFIG.previewInvalidEdgeColor);
+      ringMaterial.color.setHex(TOWER_CONFIG.previewInvalidRingColor);
+      ringMaterial.emissive.setHex(TOWER_CONFIG.previewInvalidRingGlow);
     }
   }
 
   let preview = createLaserTowerMesh({
-    bodyColor: 0x4d6f8f,
-    ringColor: 0x73ebe2,
-    ringGlowColor: 0x2ab8bd,
-    opacity: 0.55,
+    bodyColor: TOWER_CONFIG.previewBodyColor,
+    ringColor: TOWER_CONFIG.previewRingColor,
+    ringGlowColor: TOWER_CONFIG.previewRingGlow,
+    opacity: TOWER_CONFIG.previewOpacity,
     transparent: true,
   });
   preview.visible = false;
@@ -286,7 +298,7 @@ export function createTowerSystem({ scene, camera, grid }) {
     const dz = ez - sz;
     const lengthSq = dx * dx + dz * dz;
 
-    if (lengthSq < 1e-6) {
+    if (lengthSq < TOWER_CONFIG.segmentEpsilon) {
       return Math.hypot(point.x - sx, point.z - sz);
     }
 
@@ -362,10 +374,10 @@ export function createTowerSystem({ scene, camera, grid }) {
 
     scene.remove(preview);
     preview = createLaserTowerMesh({
-      bodyColor: 0x4d6f8f,
-      ringColor: 0x73ebe2,
-      ringGlowColor: 0x2ab8bd,
-      opacity: 0.55,
+      bodyColor: TOWER_CONFIG.previewBodyColor,
+      ringColor: TOWER_CONFIG.previewRingColor,
+      ringGlowColor: TOWER_CONFIG.previewRingGlow,
+      opacity: TOWER_CONFIG.previewOpacity,
       transparent: true,
     });
     scene.add(preview);
@@ -438,9 +450,9 @@ export function createTowerSystem({ scene, camera, grid }) {
     }
 
     const towerMesh = createLaserTowerMesh({
-      bodyColor: 0x445d79,
-      ringColor: 0x87f9f0,
-      ringGlowColor: 0x31bfc0,
+      bodyColor: TOWER_CONFIG.placedBodyColor,
+      ringColor: TOWER_CONFIG.placedRingColor,
+      ringGlowColor: TOWER_CONFIG.placedRingGlow,
       opacity: 1,
       transparent: false,
     });
@@ -483,7 +495,7 @@ export function createTowerSystem({ scene, camera, grid }) {
     let tMax = 1;
 
     const dx = end.x - start.x;
-    if (Math.abs(dx) < 1e-6) {
+    if (Math.abs(dx) < TOWER_CONFIG.segmentEpsilon) {
       if (start.x < minX || start.x > maxX) return false;
     } else {
       const inv = 1 / dx;
@@ -496,7 +508,7 @@ export function createTowerSystem({ scene, camera, grid }) {
     }
 
     const dy = end.y - start.y;
-    if (Math.abs(dy) < 1e-6) {
+    if (Math.abs(dy) < TOWER_CONFIG.segmentEpsilon) {
       if (start.y < minY || start.y > maxY) return false;
     } else {
       const inv = 1 / dy;
@@ -509,7 +521,7 @@ export function createTowerSystem({ scene, camera, grid }) {
     }
 
     const dz = end.z - start.z;
-    if (Math.abs(dz) < 1e-6) {
+    if (Math.abs(dz) < TOWER_CONFIG.segmentEpsilon) {
       if (start.z < minZ || start.z > maxZ) return false;
     } else {
       const inv = 1 / dz;
@@ -527,9 +539,15 @@ export function createTowerSystem({ scene, camera, grid }) {
   function beamWouldGoThroughTower(tower, cornerIndex, targetPosition) {
     getCornerWorldPosition(tower.mesh, cornerIndex, tempVecA);
 
-    const innerHalfSize = Math.max(0.25, (tower.halfSize ?? LASER_TOWER_HALF_SIZE) - 0.04);
-    const baseY = (tower.baseY ?? grid.tileTopY) + 0.04;
-    const topY = baseY + Math.max(0.4, (tower.height ?? LASER_TOWER_HEIGHT) - 0.08);
+    const innerHalfSize = Math.max(
+      TOWER_CONFIG.selfBlockMinHalfSize,
+      (tower.halfSize ?? LASER_TOWER_HALF_SIZE) - TOWER_CONFIG.selfBlockInset
+    );
+    const baseY = (tower.baseY ?? grid.tileTopY) + TOWER_CONFIG.selfBlockBaseOffsetY;
+    const topY = baseY + Math.max(
+      TOWER_CONFIG.selfBlockMinHeight,
+      (tower.height ?? LASER_TOWER_HEIGHT) - TOWER_CONFIG.selfBlockTopInset
+    );
     const minX = tower.mesh.position.x - innerHalfSize;
     const maxX = tower.mesh.position.x + innerHalfSize;
     const minZ = tower.mesh.position.z - innerHalfSize;
@@ -630,14 +648,14 @@ export function createTowerSystem({ scene, camera, grid }) {
         continue;
       }
 
-      const shrink = Math.min(0.08, obstacleHalfSize * 0.08);
-      const halfSize = Math.max(0.2, obstacleHalfSize - shrink);
+      const shrink = Math.min(TOWER_CONFIG.terrainLosShrinkMax, obstacleHalfSize * TOWER_CONFIG.terrainLosShrinkPercent);
+      const halfSize = Math.max(TOWER_CONFIG.terrainLosMinHalfSize, obstacleHalfSize - shrink);
       const minX = obstaclePos.x - halfSize;
       const maxX = obstaclePos.x + halfSize;
       const minZ = obstaclePos.z - halfSize;
       const maxZ = obstaclePos.z + halfSize;
-      const minY = obstacleBaseY + 0.02;
-      const maxY = obstacleBaseY + obstacleHeight - 0.02;
+      const minY = obstacleBaseY + TOWER_CONFIG.terrainLosVerticalPadding;
+      const maxY = obstacleBaseY + obstacleHeight - TOWER_CONFIG.terrainLosVerticalPadding;
       if (maxY <= minY) {
         continue;
       }
@@ -727,7 +745,7 @@ export function createTowerSystem({ scene, camera, grid }) {
   function updateBeamTransform(beamMesh, origin, targetPosition) {
     const dir = targetPosition.clone().sub(origin);
     const length = dir.length();
-    if (length < 1e-5) {
+    if (length < TOWER_CONFIG.beamLengthEpsilon) {
       return false;
     }
     dir.divideScalar(length);
@@ -793,7 +811,7 @@ export function createTowerSystem({ scene, camera, grid }) {
         tower.beamVisual = createLaserBeamVisual();
       }
       const pulseT = tower.pulseTimer > 0 ? (tower.pulseTimer / LASER_PULSE_DURATION) : 0;
-      const pulseBoost = pulseT > 0 ? Math.pow(pulseT, 0.35) : 0;
+      const pulseBoost = pulseT > 0 ? Math.pow(pulseT, TOWER_CONFIG.pulseExponent) : 0;
 
       if (tower.beamVisual) {
         updateBeamTransform(tower.beamVisual.beam, origin, targetPoint);
@@ -801,11 +819,11 @@ export function createTowerSystem({ scene, camera, grid }) {
         tower.beamVisual.beam.scale.x = 1 + (pulseBoost * LASER_BEAM_PULSE_WIDTH_BOOST);
         tower.beamVisual.beam.scale.z = 1 + (pulseBoost * LASER_BEAM_PULSE_WIDTH_BOOST);
         tower.beamVisual.beam.material.opacity = Math.min(
-          0.98,
+          TOWER_CONFIG.beamMaxOpacity,
           LASER_BEAM_BASE_OPACITY + (pulseBoost * LASER_BEAM_PULSE_OPACITY_BOOST)
         );
         tower.beamVisual.flash.material.opacity = Math.min(
-          0.95,
+          TOWER_CONFIG.flashMaxOpacity,
           LASER_FLASH_BASE_OPACITY + (pulseBoost * LASER_FLASH_PULSE_OPACITY_BOOST)
         );
         tower.beamVisual.flash.scale.setScalar(
@@ -814,10 +832,10 @@ export function createTowerSystem({ scene, camera, grid }) {
       }
 
       if (ringMaterial) {
-        ringMaterial.emissiveIntensity = LASER_ACTIVE_GLOW_INTENSITY + (pulseBoost * 1.2);
+        ringMaterial.emissiveIntensity = LASER_ACTIVE_GLOW_INTENSITY + (pulseBoost * TOWER_CONFIG.ringPulseBoost);
       }
       if (flashLight) {
-        flashLight.intensity = 2.6 + (pulseBoost * 2.2);
+        flashLight.intensity = TOWER_CONFIG.flashLightBaseIntensity + (pulseBoost * TOWER_CONFIG.flashLightPulseBoost);
       }
 
       if (tower.cooldown <= 0) {
@@ -882,9 +900,9 @@ export function createTowerSystem({ scene, camera, grid }) {
       }
 
       const towerMesh = createLaserTowerMesh({
-        bodyColor: 0x445d79,
-        ringColor: 0x87f9f0,
-        ringGlowColor: 0x31bfc0,
+        bodyColor: TOWER_CONFIG.placedBodyColor,
+        ringColor: TOWER_CONFIG.placedRingColor,
+        ringGlowColor: TOWER_CONFIG.placedRingGlow,
       });
 
       towerMesh.position.copy(towerPosition);

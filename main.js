@@ -3,6 +3,13 @@ import { createGrid } from "./grid.js";
 import { createPlayer } from "./player.js";
 import { createEnemySystem, getLargestEnemySize } from "./enemies.js";
 import { createTowerSystem } from "./towers.js";
+import { GAME_CONFIG } from "./config.js";
+
+const SCENE_CONFIG = GAME_CONFIG.scene;
+const LIGHT_CONFIG = GAME_CONFIG.lights;
+const PORTAL_CONFIG = GAME_CONFIG.portal;
+const UI_CONFIG = GAME_CONFIG.ui;
+const WAVE_CONFIG = GAME_CONFIG.waves;
 
 const app = document.getElementById("app");
 const overlayEl = document.getElementById("overlay");
@@ -31,48 +38,69 @@ if (isTouchDevice) {
 }
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xffffff);
-scene.fog = new THREE.Fog(0xffffff, 20, 120);
+scene.background = new THREE.Color(SCENE_CONFIG.backgroundColor);
+scene.fog = new THREE.Fog(
+  SCENE_CONFIG.fogColor,
+  SCENE_CONFIG.fogNear,
+  SCENE_CONFIG.fogFar
+);
 
 let gameTime = 0;
 
 const camera = new THREE.PerspectiveCamera(
-  75,
+  SCENE_CONFIG.cameraFov,
   window.innerWidth / window.innerHeight,
-  0.1,
-  500
+  SCENE_CONFIG.cameraNear,
+  SCENE_CONFIG.cameraFar
 );
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, SCENE_CONFIG.maxPixelRatio));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.localClippingEnabled = true;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMappingExposure = SCENE_CONFIG.toneMappingExposure;
 app.appendChild(renderer.domElement);
 
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.95);
+const ambientLight = new THREE.AmbientLight(
+  LIGHT_CONFIG.ambient.color,
+  LIGHT_CONFIG.ambient.intensity
+);
 scene.add(ambientLight);
 
-const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0xffffff, 0.55);
+const hemisphereLight = new THREE.HemisphereLight(
+  LIGHT_CONFIG.hemisphere.skyColor,
+  LIGHT_CONFIG.hemisphere.groundColor,
+  LIGHT_CONFIG.hemisphere.intensity
+);
 scene.add(hemisphereLight);
 
-const directionalLight = new THREE.DirectionalLight(0xffffff, 0.85);
-directionalLight.position.set(18, 28, 14);
+const directionalLight = new THREE.DirectionalLight(
+  LIGHT_CONFIG.directional.color,
+  LIGHT_CONFIG.directional.intensity
+);
+directionalLight.position.set(
+  LIGHT_CONFIG.directional.positionX,
+  LIGHT_CONFIG.directional.positionY,
+  LIGHT_CONFIG.directional.positionZ
+);
 directionalLight.castShadow = true;
-directionalLight.shadow.mapSize.set(2048, 2048);
-directionalLight.shadow.camera.near = 1;
-directionalLight.shadow.camera.far = 120;
-directionalLight.shadow.camera.left = -46;
-directionalLight.shadow.camera.right = 46;
-directionalLight.shadow.camera.top = 46;
-directionalLight.shadow.camera.bottom = -46;
-directionalLight.shadow.normalBias = 0.015;
+directionalLight.shadow.mapSize.set(
+  LIGHT_CONFIG.directional.shadowMapSize,
+  LIGHT_CONFIG.directional.shadowMapSize
+);
+directionalLight.shadow.camera.near = LIGHT_CONFIG.directional.shadowNear;
+directionalLight.shadow.camera.far = LIGHT_CONFIG.directional.shadowFar;
+directionalLight.shadow.camera.left = LIGHT_CONFIG.directional.shadowLeft;
+directionalLight.shadow.camera.right = LIGHT_CONFIG.directional.shadowRight;
+directionalLight.shadow.camera.top = LIGHT_CONFIG.directional.shadowTop;
+directionalLight.shadow.camera.bottom = LIGHT_CONFIG.directional.shadowBottom;
+directionalLight.shadow.normalBias = LIGHT_CONFIG.directional.shadowNormalBias;
 scene.add(directionalLight);
 
 const grid = createGrid(scene);
-camera.position.set(0, grid.eyeHeight, grid.moveBounds.maxZ - 3);
+camera.position.set(0, grid.eyeHeight, grid.moveBounds.maxZ - SCENE_CONFIG.cameraStartOffsetZ);
 camera.lookAt(0, grid.eyeHeight, 0);
 
 let player;
@@ -80,20 +108,20 @@ let enemySystem;
 let towerSystem;
 
 const LARGEST_ENEMY_SIZE = getLargestEnemySize();
-const PORTAL_FACE_SIZE = LARGEST_ENEMY_SIZE * 1.5;
+const PORTAL_FACE_SIZE = LARGEST_ENEMY_SIZE * PORTAL_CONFIG.faceSizeFromLargestEnemy;
 const PORTAL_WIDTH = PORTAL_FACE_SIZE;
 const PORTAL_HEIGHT = PORTAL_FACE_SIZE;
-const PORTAL_THICKNESS = 0.22;
-const PORTAL_Y_OFFSET = 0.02;
-const PORTAL_ENTRY_DISTANCE = PORTAL_FACE_SIZE * 0.8;
+const PORTAL_THICKNESS = PORTAL_CONFIG.thickness;
+const PORTAL_Y_OFFSET = PORTAL_CONFIG.yOffset;
+const PORTAL_ENTRY_DISTANCE = PORTAL_FACE_SIZE * PORTAL_CONFIG.entryDistanceFromFaceSize;
 const PORTAL_GEOMETRY = new THREE.BoxGeometry(PORTAL_WIDTH, PORTAL_HEIGHT, PORTAL_THICKNESS);
 
 const PORTAL_UNIFORMS = {
   uTime: { value: 0 },
-  uColorA: { value: new THREE.Color(0x3dcfff) },
-  uColorB: { value: new THREE.Color(0x2042ff) },
-  uEdgeColor: { value: new THREE.Color(0x7bf7ff) },
-  uOpacity: { value: 0.78 },
+  uColorA: { value: new THREE.Color(PORTAL_CONFIG.colorA) },
+  uColorB: { value: new THREE.Color(PORTAL_CONFIG.colorB) },
+  uEdgeColor: { value: new THREE.Color(PORTAL_CONFIG.edgeColor) },
+  uOpacity: { value: PORTAL_CONFIG.opacity },
 };
 
 const PORTAL_MATERIAL = new THREE.ShaderMaterial({
@@ -412,7 +440,7 @@ function bindMovePad() {
     return;
   }
 
-  const radius = 45;
+  const radius = UI_CONFIG.movePadRadiusPx;
   let pointerId = null;
   let centerX = 0;
   let centerY = 0;
@@ -544,15 +572,17 @@ const ALL_UPGRADES = [
 ];
 
 let waveState = "PLAYING";
-let currentWave = 1;
+let currentWave = WAVE_CONFIG.initialWave;
 let waveDelay = 0;
 
 function startWave(wave) {
   currentWave = wave;
   waveState = "PLAYING";
 
-  const enemyCount = 4 + Math.floor(wave * 1.5);
-  const fastCount = wave > 2 ? Math.floor(wave * 1.2) : 0;
+  const enemyCount = WAVE_CONFIG.basicBaseCount + Math.floor(wave * WAVE_CONFIG.basicPerWave);
+  const fastCount = wave >= WAVE_CONFIG.fastUnlockWave
+    ? Math.floor(wave * WAVE_CONFIG.fastPerWave)
+    : 0;
 
   enemySystem.startWave({ basic: enemyCount, fast: fastCount });
 }
@@ -571,7 +601,7 @@ function showUpgradeMenu() {
   upgradeOptionsEl.innerHTML = "";
 
   const shuffled = [...ALL_UPGRADES].sort(() => 0.5 - Math.random());
-  const selected = shuffled.slice(0, 3);
+  const selected = shuffled.slice(0, UI_CONFIG.upgradesShown);
 
   selected.forEach(upgrade => {
     const btn = document.createElement("button");
@@ -598,7 +628,7 @@ function animate() {
     if (waveState === "PLAYING") {
       if (enemySystem.isWaveClear()) {
         waveState = "DELAY";
-        waveDelay = 2.0;
+        waveDelay = WAVE_CONFIG.upgradeDelaySeconds;
       }
     } else if (waveState === "DELAY") {
       waveDelay -= deltaSeconds;
@@ -687,7 +717,7 @@ function initGame() {
     }
   };
 
-  startWave(1);
+  startWave(WAVE_CONFIG.initialWave);
   animate();
 }
 

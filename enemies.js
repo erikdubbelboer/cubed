@@ -1,32 +1,17 @@
 import * as THREE from "three";
+import { GAME_CONFIG } from "./config.js";
 
-const BASE_SPEED = 2.5;
-const DISSOLVE_DEATH_DURATION = 0.65;
-const DISSOLVE_EDGE_WIDTH = 0.16;
-const DISSOLVE_NOISE_SCALE = 5.4;
-const ENEMY_TYPES = {
-  basic: {
-    health: 100,
-    speedMultiplier: 1,
-    radius: 0.9,
-    size: 1.6,
-    color: 0x4fb6ff,
-    emissive: 0x102a3f,
-  },
-  fast: {
-    health: 60,
-    speedMultiplier: 1.8,
-    radius: 0.6,
-    size: 1.0,
-    color: 0xff6f6f,
-    emissive: 0x3d1010,
-  },
-};
+const ENEMY_CONFIG = GAME_CONFIG.enemies;
+const BASE_SPEED = ENEMY_CONFIG.baseSpeed;
+const DISSOLVE_DEATH_DURATION = ENEMY_CONFIG.dissolveDuration;
+const DISSOLVE_EDGE_WIDTH = ENEMY_CONFIG.dissolveEdgeWidth;
+const DISSOLVE_NOISE_SCALE = ENEMY_CONFIG.dissolveNoiseScale;
+const ENEMY_TYPES = ENEMY_CONFIG.types;
 
 function getDirectionOnPlane(from, to) {
   const direction = to.clone().sub(from);
   direction.y = 0;
-  if (direction.lengthSq() < 1e-6) {
+  if (direction.lengthSq() < ENEMY_CONFIG.directionEpsilon) {
     return new THREE.Vector3(0, 0, 1);
   }
   return direction.normalize();
@@ -83,7 +68,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     ? (spawnPortalConfig.plane?.clone() ?? null)
     : null;
   const spawnEntryDistance = hasSpawnPortal
-    ? (spawnPortalConfig.entryDistance ?? (maxEnemyRadius * 2.6))
+    ? (spawnPortalConfig.entryDistance ?? (maxEnemyRadius * ENEMY_CONFIG.portalEntryDistanceFromRadius))
     : 0;
 
   const travelWaypoints = pathWaypoints.map((waypoint) => waypoint.clone());
@@ -98,7 +83,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
   let enemySpeedMultiplier = 1;
 
   function upgradeSlowEnemies() {
-    enemySpeedMultiplier *= 0.8;
+    enemySpeedMultiplier *= ENEMY_CONFIG.slowUpgradeMultiplier;
   }
 
   function startWave(counts) {
@@ -109,7 +94,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       }
     }
     // Shuffle slightly or keep in order. For now, order is fine or interleave them.
-    spawnTimer = 1.0;
+    spawnTimer = ENEMY_CONFIG.waveStartSpawnDelay;
   }
 
   function isWaveClear() {
@@ -128,34 +113,55 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       new THREE.MeshStandardMaterial({
         color: enemyType.color,
         emissive: enemyType.emissive,
-        emissiveIntensity: 0.45,
-        roughness: 0.65,
-        metalness: 0.15,
+        emissiveIntensity: ENEMY_CONFIG.bodyEmissiveIntensity,
+        roughness: ENEMY_CONFIG.bodyRoughness,
+        metalness: ENEMY_CONFIG.bodyMetalness,
       })
     );
     bodyMesh.castShadow = true;
     bodyMesh.receiveShadow = true;
-    bodyMesh.position.y = enemyType.size * 0.5 - 0.65;
+    bodyMesh.position.y = enemyType.size * 0.5 + ENEMY_CONFIG.bodyYOffset;
     visualRoot.add(bodyMesh);
 
-    const healthBarBgWidth = Math.max(1.2, enemyType.size * 1.5);
-    const healthBarFgWidth = Math.max(1.0, healthBarBgWidth - 0.2);
+    const healthBarBgWidth = Math.max(
+      ENEMY_CONFIG.healthBarBgMinWidth,
+      enemyType.size * ENEMY_CONFIG.healthBarWidthFromEnemySize
+    );
+    const healthBarFgWidth = Math.max(
+      ENEMY_CONFIG.healthBarFgMinWidth,
+      healthBarBgWidth - ENEMY_CONFIG.healthBarFgInset
+    );
 
     const healthBarRoot = new THREE.Group();
     const healthBarBg = new THREE.Mesh(
-      new THREE.PlaneGeometry(healthBarBgWidth, 0.28),
-      new THREE.MeshBasicMaterial({ color: 0x1f2835, transparent: true, opacity: 0.9, depthTest: false })
+      new THREE.PlaneGeometry(healthBarBgWidth, ENEMY_CONFIG.healthBarBgHeight),
+      new THREE.MeshBasicMaterial({
+        color: ENEMY_CONFIG.healthBarBgColor,
+        transparent: true,
+        opacity: ENEMY_CONFIG.healthBarBgOpacity,
+        depthTest: false,
+      })
     );
     const healthBarFg = new THREE.Mesh(
-      new THREE.PlaneGeometry(healthBarFgWidth, 0.16),
-      new THREE.MeshBasicMaterial({ color: 0x6bf4ad, transparent: true, depthTest: false })
+      new THREE.PlaneGeometry(healthBarFgWidth, ENEMY_CONFIG.healthBarFgHeight),
+      new THREE.MeshBasicMaterial({
+        color: ENEMY_CONFIG.healthBarFgColor,
+        transparent: true,
+        depthTest: false,
+      })
     );
-    healthBarBg.renderOrder = 20;
-    healthBarFg.renderOrder = 21;
-    healthBarFg.position.z = 0.01;
+    healthBarBg.renderOrder = ENEMY_CONFIG.healthBarBgRenderOrder;
+    healthBarFg.renderOrder = ENEMY_CONFIG.healthBarFgRenderOrder;
+    healthBarFg.position.z = ENEMY_CONFIG.healthBarFgOffsetZ;
     healthBarRoot.add(healthBarBg);
     healthBarRoot.add(healthBarFg);
-    healthBarRoot.position.set(0, bodyMesh.position.y + enemyType.size * 0.75 + 0.35, 0);
+    healthBarRoot.position.set(
+      0,
+      bodyMesh.position.y
+      + enemyType.size * ENEMY_CONFIG.healthBarYOffsetFromEnemySize
+      + ENEMY_CONFIG.healthBarYOffset,
+      0
+    );
     enemyMesh.add(healthBarRoot);
 
     if (spawnPortalPlane) {
@@ -166,7 +172,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     enemyMesh.position.copy(travelWaypoints[0]);
 
     const initiallyBehindPortal = spawnPortalPlane
-      ? spawnPortalPlane.distanceToPoint(enemyMesh.position) < enemyType.radius * 0.45
+      ? spawnPortalPlane.distanceToPoint(enemyMesh.position) < enemyType.radius * ENEMY_CONFIG.portalRevealRadiusFactor
       : false;
     healthBarRoot.visible = !initiallyBehindPortal;
 
@@ -197,9 +203,13 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
 
   function updateHealthBar(enemy) {
     const ratio = Math.max(0, Math.min(1, enemy.health / enemy.maxHealth));
-    enemy.healthBarFg.scale.x = Math.max(0.001, ratio);
+    enemy.healthBarFg.scale.x = Math.max(ENEMY_CONFIG.healthBarMinScaleX, ratio);
     enemy.healthBarFg.position.x = -(1 - ratio) * (enemy.healthBarFgWidth / 2);
-    enemy.healthBarFg.material.color.setHSL(0.28 * ratio, 0.85, 0.55);
+    enemy.healthBarFg.material.color.setHSL(
+      ENEMY_CONFIG.healthBarHueAtFullHealth * ratio,
+      ENEMY_CONFIG.healthBarSaturation,
+      ENEMY_CONFIG.healthBarLightness
+    );
   }
 
   function createDissolveMaterial(sourceMaterial) {
@@ -219,7 +229,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       uEdgeWidth: { value: DISSOLVE_EDGE_WIDTH },
       uBaseColor: { value: baseColor },
       uEmissiveColor: { value: emissiveColor },
-      uEdgeColor: { value: new THREE.Color(0xff7f2a) },
+      uEdgeColor: { value: new THREE.Color(ENEMY_CONFIG.dissolveEdgeColor) },
       uOpacity: { value: opacity },
     };
 
@@ -260,7 +270,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
           }
 
           float edgeMask = smoothstep(uDissolve, uDissolve + uEdgeWidth, noise);
-          vec3 base = uBaseColor + (uEmissiveColor * 0.6);
+          vec3 base = uBaseColor + (uEmissiveColor * ${ENEMY_CONFIG.dissolveEmissiveMix.toFixed(3)});
           vec3 finalColor = mix(uEdgeColor, base, edgeMask);
           float alpha = max(0.0, (1.0 - uDissolve) * uOpacity) * edgeMask;
           gl_FragColor = vec4(finalColor, alpha);
@@ -317,7 +327,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       if (spawnTimer <= 0) {
         const type = enemiesToSpawn.shift();
         activeEnemies.push(createEnemyMesh(type));
-        spawnTimer = 1.2; // Delay between spawns
+        spawnTimer = ENEMY_CONFIG.spawnInterval; // Delay between spawns
       }
     }
 
@@ -337,8 +347,8 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
           dissolveUniform.value = dissolveValue;
         }
         if (enemy.visualRoot) {
-          enemy.visualRoot.position.y -= deltaSeconds * 0.35;
-          enemy.visualRoot.rotation.x += deltaSeconds * 0.9;
+          enemy.visualRoot.position.y -= deltaSeconds * ENEMY_CONFIG.dissolveSinkSpeed;
+          enemy.visualRoot.rotation.x += deltaSeconds * ENEMY_CONFIG.dissolveRollSpeed;
         }
 
         if (dissolveValue >= 1) {
@@ -381,7 +391,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
 
           const dx = end.x - enemy.mesh.position.x;
           const dz = end.z - enemy.mesh.position.z;
-          if ((dx * dx + dz * dz) > 1e-4) {
+          if ((dx * dx + dz * dz) > ENEMY_CONFIG.lookAtEpsilon) {
             const lookTarget = end.clone();
             lookTarget.y = enemy.mesh.position.y;
             enemy.mesh.lookAt(lookTarget);
@@ -391,7 +401,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
 
       if (enemy.alive && enemy.portalClippingActive && enemy.portalPlane) {
         const portalDistance = enemy.portalPlane.distanceToPoint(enemy.mesh.position);
-        if (portalDistance > enemy.radius * 0.45) {
+        if (portalDistance > enemy.radius * ENEMY_CONFIG.portalRevealRadiusFactor) {
           enemy.portalClippingActive = false;
           applyVisualClipping(enemy.visualRoot, null);
           if (enemy.healthBarRoot && !enemy.dying) {

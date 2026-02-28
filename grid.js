@@ -1,59 +1,23 @@
 import * as THREE from "three";
+import { GAME_CONFIG } from "./config.js";
 
-const GRID_SIZE = 12;
-const CELL_SIZE = 4;
-const PLATFORM_HEIGHT = 1.0;
-const TILE_HEIGHT = 0.4;
-const FLOOR_Y = 0;
+const GRID_CONFIG = GAME_CONFIG.grid;
+
+const GRID_SIZE = GRID_CONFIG.size;
+const CELL_SIZE = GRID_CONFIG.cellSize;
+const PLATFORM_HEIGHT = GRID_CONFIG.platformHeight;
+const TILE_HEIGHT = GRID_CONFIG.tileHeight;
+const FLOOR_Y = GRID_CONFIG.floorY;
 const PATH_TILE_TOP_Y = FLOOR_Y + TILE_HEIGHT;
-const ENEMY_PATH_Y_OFFSET = 0.65;
-const ALTITUDE_BLOCK = Object.freeze({
-  startX: 1,
-  startZ: 4,
-  width: 2,
-  depth: 3,
-  height: 2,
-});
+const ENEMY_PATH_Y_OFFSET = GRID_CONFIG.enemyPathYOffset;
+const ALTITUDE_BLOCK = Object.freeze({ ...GRID_CONFIG.altitudeBlock });
 const ALTITUDE_CUBE_SIZE = CELL_SIZE;
-const WALL_PATH_TILE_SIZE = CELL_SIZE * 0.76;
-const WALL_PATH_TILE_THICKNESS = TILE_HEIGHT * 0.5;
+const WALL_PATH_TILE_SIZE = CELL_SIZE * GRID_CONFIG.wallPathTileSizeScale;
+const WALL_PATH_TILE_THICKNESS = TILE_HEIGHT * GRID_CONFIG.wallPathTileThicknessScale;
 const TERRAIN_OBSTACLE_HALF_SIZE = CELL_SIZE * 0.5;
-const WALL_CLIMB_PATH_OFFSET = 1.25;
-const WALL_PATH_TILE_VISUAL_OFFSET = WALL_PATH_TILE_THICKNESS * 0.65;
-
-const PATH_CELLS = [
-  [0, 1],
-  [1, 1],
-  [2, 1],
-  [3, 1],
-  [3, 2],
-  [3, 3],
-  [2, 3],
-  [1, 3],
-  [1, 4],
-  [1, 5],
-  [2, 5],
-  [3, 5],
-  [4, 5],
-  [5, 5],
-  [6, 5],
-  [6, 6],
-  [6, 7],
-  [5, 7],
-  [4, 7],
-  [3, 7],
-  [2, 7],
-  [2, 8],
-  [2, 9],
-  [3, 9],
-  [4, 9],
-  [5, 9],
-  [6, 9],
-  [7, 9],
-  [8, 9],
-  [9, 9],
-  [10, 9],
-];
+const WALL_CLIMB_PATH_OFFSET = GRID_CONFIG.wallClimbPathOffset;
+const WALL_PATH_TILE_VISUAL_OFFSET = WALL_PATH_TILE_THICKNESS * GRID_CONFIG.wallPathVisualOffsetScale;
+const PATH_CELLS = GRID_CONFIG.pathCells;
 
 function isInsideAltitudeBlock(cellX, cellZ) {
   return (
@@ -84,13 +48,13 @@ function cellToWorld(cellX, cellZ, pathSurfaceY = getPathSurfaceY(cellX, cellZ))
 
 export function createGrid(scene) {
   const farFloor = new THREE.Mesh(
-    new THREE.PlaneGeometry(2400, 2400),
+    new THREE.PlaneGeometry(GRID_CONFIG.farFloorSize, GRID_CONFIG.farFloorSize),
     new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      emissive: 0xffffff,
-      emissiveIntensity: 0.24,
-      roughness: 1.0,
-      metalness: 0.0,
+      color: GRID_CONFIG.farFloorColor,
+      emissive: GRID_CONFIG.farFloorEmissive,
+      emissiveIntensity: GRID_CONFIG.farFloorEmissiveIntensity,
+      roughness: GRID_CONFIG.farFloorRoughness,
+      metalness: GRID_CONFIG.farFloorMetalness,
     })
   );
   farFloor.rotation.x = -Math.PI * 0.5;
@@ -99,16 +63,20 @@ export function createGrid(scene) {
   scene.add(farFloor);
 
   const platform = new THREE.Mesh(
-    new THREE.BoxGeometry(GRID_SIZE * CELL_SIZE + 2, PLATFORM_HEIGHT, GRID_SIZE * CELL_SIZE + 2),
+    new THREE.BoxGeometry(
+      GRID_SIZE * CELL_SIZE + GRID_CONFIG.platformPadding,
+      PLATFORM_HEIGHT,
+      GRID_SIZE * CELL_SIZE + GRID_CONFIG.platformPadding
+    ),
     new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      emissive: 0xffffff,
-      emissiveIntensity: 0.2,
-      roughness: 0.98,
-      metalness: 0.0,
+      color: GRID_CONFIG.platformColor,
+      emissive: GRID_CONFIG.platformEmissive,
+      emissiveIntensity: GRID_CONFIG.platformEmissiveIntensity,
+      roughness: GRID_CONFIG.platformRoughness,
+      metalness: GRID_CONFIG.platformMetalness,
     })
   );
-  platform.position.y = FLOOR_Y - (PLATFORM_HEIGHT / 2) - 0.08;
+  platform.position.y = FLOOR_Y - (PLATFORM_HEIGHT / 2) - GRID_CONFIG.platformSink;
   platform.receiveShadow = true;
   scene.add(platform);
 
@@ -127,7 +95,9 @@ export function createGrid(scene) {
     for (let dx = 0; dx < ALTITUDE_BLOCK.width; dx += 1) {
       const cellX = ALTITUDE_BLOCK.startX + dx;
       const cellZ = ALTITUDE_BLOCK.startZ + dz;
-      const checkerOffset = ((dx + dz) & 1) === 0 ? 0.03 : -0.03;
+      const checkerOffset = ((dx + dz) & 1) === 0
+        ? GRID_CONFIG.checkerLightnessOffset
+        : -GRID_CONFIG.checkerLightnessOffset;
       const worldX = -half + cellX * CELL_SIZE + CELL_SIZE / 2;
       const worldZ = -half + cellZ * CELL_SIZE + CELL_SIZE / 2;
       const surfaceY = pathSet.has(`${cellX},${cellZ}`)
@@ -149,16 +119,22 @@ export function createGrid(scene) {
       });
 
       for (let level = 0; level < ALTITUDE_BLOCK.height; level += 1) {
-        const lightness = 0.3 + checkerOffset + level * 0.05;
-        const color = new THREE.Color().setHSL(0.57, 0.22, lightness);
+        const lightness = GRID_CONFIG.altitudeBaseLightness
+          + checkerOffset
+          + level * GRID_CONFIG.altitudePerLevelLightnessStep;
+        const color = new THREE.Color().setHSL(
+          GRID_CONFIG.altitudeHue,
+          GRID_CONFIG.altitudeSaturation,
+          lightness
+        );
         const cube = new THREE.Mesh(
           altitudeCubeGeo,
           new THREE.MeshStandardMaterial({
             color,
-            emissive: color.clone().multiplyScalar(0.28),
-            emissiveIntensity: 0.18,
-            roughness: 0.72,
-            metalness: 0.12,
+            emissive: color.clone().multiplyScalar(GRID_CONFIG.altitudeEmissiveScale),
+            emissiveIntensity: GRID_CONFIG.altitudeEmissiveIntensity,
+            roughness: GRID_CONFIG.altitudeRoughness,
+            metalness: GRID_CONFIG.altitudeMetalness,
           })
         );
 
@@ -174,18 +150,22 @@ export function createGrid(scene) {
     }
   }
 
-  const tileGeo = new THREE.BoxGeometry(CELL_SIZE * 0.94, TILE_HEIGHT, CELL_SIZE * 0.94);
+  const tileGeo = new THREE.BoxGeometry(
+    CELL_SIZE * GRID_CONFIG.pathTileScale,
+    TILE_HEIGHT,
+    CELL_SIZE * GRID_CONFIG.pathTileScale
+  );
   const pathTileMat = new THREE.MeshStandardMaterial({
-    color: 0xe9d5ab,
-    roughness: 0.64,
-    metalness: 0.08,
+    color: GRID_CONFIG.pathTileColor,
+    roughness: GRID_CONFIG.pathTileRoughness,
+    metalness: GRID_CONFIG.pathTileMetalness,
   });
   const wallPathTileMat = new THREE.MeshStandardMaterial({
-    color: 0xe9d5ab,
-    emissive: 0x6b4c27,
-    emissiveIntensity: 0.16,
-    roughness: 0.66,
-    metalness: 0.05,
+    color: GRID_CONFIG.wallPathTileColor,
+    emissive: GRID_CONFIG.wallPathTileEmissive,
+    emissiveIntensity: GRID_CONFIG.wallPathTileEmissiveIntensity,
+    roughness: GRID_CONFIG.wallPathTileRoughness,
+    metalness: GRID_CONFIG.wallPathTileMetalness,
   });
   const wallPathTileGeo = new THREE.BoxGeometry(
     WALL_PATH_TILE_SIZE,
@@ -245,7 +225,13 @@ export function createGrid(scene) {
     const dz = current.point.z - previous.point.z;
     const dy = current.point.y - previous.point.y;
 
-    if (Math.abs(dy) > 1e-5 && (Math.abs(dx) > 1e-5 || Math.abs(dz) > 1e-5)) {
+    if (
+      Math.abs(dy) > GRID_CONFIG.pathHeightEpsilon
+      && (
+        Math.abs(dx) > GRID_CONFIG.pathHeightEpsilon
+        || Math.abs(dz) > GRID_CONFIG.pathHeightEpsilon
+      )
+    ) {
       const wallX = previous.point.x + (dx * 0.5);
       const wallZ = previous.point.z + (dz * 0.5);
       const previousIsLower = previous.surfaceY <= current.surfaceY;
@@ -276,7 +262,7 @@ export function createGrid(scene) {
       continue;
     }
 
-    if (Math.abs(dy) > 1e-5) {
+    if (Math.abs(dy) > GRID_CONFIG.pathHeightEpsilon) {
       pathWaypoints.push(new THREE.Vector3(previous.point.x, current.point.y, previous.point.z));
     }
     pathWaypoints.push(current.point.clone());
@@ -284,7 +270,7 @@ export function createGrid(scene) {
 
   for (const climb of wallClimbSections) {
     const climbHeight = climb.highY - climb.lowY;
-    if (climbHeight <= 1e-5) {
+    if (climbHeight <= GRID_CONFIG.pathHeightEpsilon) {
       continue;
     }
     const squareCount = Math.max(1, Math.round(climbHeight / ALTITUDE_CUBE_SIZE));
@@ -309,7 +295,7 @@ export function createGrid(scene) {
       scene.add(wallTile);
     }
   }
-  const moveInset = CELL_SIZE * 0.5;
+  const moveInset = CELL_SIZE * GRID_CONFIG.moveInsetCellScale;
   const moveBounds = {
     minX: -half + moveInset,
     maxX: half - moveInset,
@@ -345,7 +331,7 @@ export function createGrid(scene) {
     if (!ray || !ray.origin || !ray.direction) {
       return false;
     }
-    if (Math.abs(ray.direction.y) < 1e-6) {
+    if (Math.abs(ray.direction.y) < GRID_CONFIG.rayParallelEpsilon) {
       return false;
     }
 
@@ -399,7 +385,7 @@ export function createGrid(scene) {
   return {
     pathWaypoints,
     moveBounds,
-    eyeHeight: 1.7,
+    eyeHeight: GRID_CONFIG.eyeHeight,
     tileTopY: FLOOR_Y,
     pathTileTopY: PATH_TILE_TOP_Y,
     cellSize: CELL_SIZE,

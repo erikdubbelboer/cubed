@@ -1,17 +1,19 @@
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import * as THREE from "three";
+import { GAME_CONFIG } from "./config.js";
 
-const MAX_PITCH = Math.PI * 0.5 - 0.05;
-const PLAYER_COLLISION_RADIUS = 0.55;
-const MIN_COLLISION_DISTANCE_SQ = 1e-6;
-const PLAYER_HEAD_CLEARANCE = 0.2;
-const TOWER_TOP_SNAP_DOWN = 0.9;
-const TOWER_TOP_SNAP_UP = 0.22;
+const PLAYER_CONFIG = GAME_CONFIG.player;
+const MAX_PITCH = PLAYER_CONFIG.look.maxPitch;
+const PLAYER_COLLISION_RADIUS = PLAYER_CONFIG.collision.radius;
+const MIN_COLLISION_DISTANCE_SQ = PLAYER_CONFIG.collision.minDistanceSq;
+const PLAYER_HEAD_CLEARANCE = PLAYER_CONFIG.collision.headClearance;
+const TOWER_TOP_SNAP_DOWN = PLAYER_CONFIG.collision.towerTopSnapDown;
+const TOWER_TOP_SNAP_UP = PLAYER_CONFIG.collision.towerTopSnapUp;
 
 export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight, ui, getMovementObstacles }) {
   const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
   const controls = new PointerLockControls(camera, domElement);
-  controls.pointerSpeed = 0.75;
+  controls.pointerSpeed = PLAYER_CONFIG.controls.pointerSpeed;
   let lockRequestPending = false;
   let lockRetryPending = false;
   let lastUnlockTime = -Infinity;
@@ -21,67 +23,84 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
   // Hand-held cube weapon
   const gunGroup = new THREE.Group();
   const gunBodyMaterial = new THREE.MeshStandardMaterial({
-    color: 0x2f3d4c,
-    emissive: 0x06121c,
-    emissiveIntensity: 0.35,
-    roughness: 0.35,
-    metalness: 0.65,
+    color: PLAYER_CONFIG.gun.bodyColor,
+    emissive: PLAYER_CONFIG.gun.bodyEmissive,
+    emissiveIntensity: PLAYER_CONFIG.gun.bodyEmissiveIntensity,
+    roughness: PLAYER_CONFIG.gun.bodyRoughness,
+    metalness: PLAYER_CONFIG.gun.bodyMetalness,
   });
   const gunCoreMaterial = new THREE.MeshStandardMaterial({
-    color: 0x74ffd2,
-    emissive: 0x1abf93,
-    emissiveIntensity: 0.65,
-    roughness: 0.22,
-    metalness: 0.25,
+    color: PLAYER_CONFIG.gun.coreColor,
+    emissive: PLAYER_CONFIG.gun.coreEmissive,
+    emissiveIntensity: PLAYER_CONFIG.gun.coreEmissiveIntensity,
+    roughness: PLAYER_CONFIG.gun.coreRoughness,
+    metalness: PLAYER_CONFIG.gun.coreMetalness,
     transparent: true,
-    opacity: 0.8,
+    opacity: PLAYER_CONFIG.gun.coreOpacity,
   });
 
-  const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.24), gunBodyMaterial);
+  const gunBody = new THREE.Mesh(
+    new THREE.BoxGeometry(PLAYER_CONFIG.gun.bodySize, PLAYER_CONFIG.gun.bodySize, PLAYER_CONFIG.gun.bodySize),
+    gunBodyMaterial
+  );
   gunBody.castShadow = true;
   gunBody.receiveShadow = true;
   gunGroup.add(gunBody);
 
-  const gunCore = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), gunCoreMaterial);
-  gunCore.position.set(0, 0, -0.1);
+  const gunCore = new THREE.Mesh(
+    new THREE.BoxGeometry(PLAYER_CONFIG.gun.coreSize, PLAYER_CONFIG.gun.coreSize, PLAYER_CONFIG.gun.coreSize),
+    gunCoreMaterial
+  );
+  gunCore.position.set(0, 0, PLAYER_CONFIG.gun.coreOffsetZ);
   gunGroup.add(gunCore);
 
   const gunFlashMaterial = new THREE.MeshBasicMaterial({
-    color: 0x8efff6,
+    color: PLAYER_CONFIG.gun.flashColor,
     transparent: true,
     opacity: 0,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
   gunFlashMaterial.toneMapped = false;
-  const gunFlashMesh = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.22), gunFlashMaterial);
+  const gunFlashMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(PLAYER_CONFIG.gun.flashSize, PLAYER_CONFIG.gun.flashSize, PLAYER_CONFIG.gun.flashSize),
+    gunFlashMaterial
+  );
   gunFlashMesh.position.copy(gunCore.position);
   gunGroup.add(gunFlashMesh);
 
   const gunEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.BoxGeometry(0.25, 0.25, 0.25)),
-    new THREE.LineBasicMaterial({ color: 0xa6f8ff, transparent: true, opacity: 0.8 })
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(PLAYER_CONFIG.gun.edgeSize, PLAYER_CONFIG.gun.edgeSize, PLAYER_CONFIG.gun.edgeSize)),
+    new THREE.LineBasicMaterial({
+      color: PLAYER_CONFIG.gun.edgeColor,
+      transparent: true,
+      opacity: PLAYER_CONFIG.gun.edgeOpacity,
+    })
   );
   gunGroup.add(gunEdges);
 
   const gunBarrel = new THREE.Object3D();
-  gunBarrel.position.set(0, 0, -0.17);
+  gunBarrel.position.set(0, 0, PLAYER_CONFIG.gun.barrelOffsetZ);
   gunGroup.add(gunBarrel);
 
-  const gunLight = new THREE.PointLight(0x8efff6, 0, 1.8);
-  gunLight.position.set(0, 0, -0.14);
+  const gunLight = new THREE.PointLight(PLAYER_CONFIG.gun.lightColor, 0, PLAYER_CONFIG.gun.lightDistance);
+  gunLight.position.set(0, 0, PLAYER_CONFIG.gun.lightOffsetZ);
   gunGroup.add(gunLight);
 
-  const gunFlashDuration = 0.4;
+  const gunFlashDuration = PLAYER_CONFIG.gun.flashDuration;
   let gunFlashTimer = 0;
 
   // Attach to camera
-  gunGroup.position.set(0.35, -0.3, -0.42);
+  gunGroup.position.set(
+    PLAYER_CONFIG.gun.offsetX,
+    PLAYER_CONFIG.gun.offsetY,
+    PLAYER_CONFIG.gun.offsetZ
+  );
   camera.add(gunGroup);
   scene.add(camera);
 
-  const lookNoiseThreshold = 1;
-  const touchLookSensitivity = 0.0022;
+  const lookNoiseThreshold = PLAYER_CONFIG.look.lookNoiseThresholdPx;
+  const touchLookSensitivity = PLAYER_CONFIG.look.touchSensitivity;
   let yaw = camera.rotation.y;
   let pitch = camera.rotation.x;
   let lookDeltaX = 0;
@@ -99,52 +118,64 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     forward: 0,
   };
 
-  const moveSpeed = 6;
-  const sprintMultiplier = 1.6;
-  const gravity = 24;
-  const jumpVelocity = 10.8;
+  const moveSpeed = PLAYER_CONFIG.movement.moveSpeed;
+  const sprintMultiplier = PLAYER_CONFIG.movement.sprintMultiplier;
+  const gravity = PLAYER_CONFIG.movement.gravity;
+  const jumpVelocity = PLAYER_CONFIG.movement.jumpVelocity;
   let verticalVelocity = 0;
   let jumpQueued = false;
   let jumpHeld = false;
 
-  const jetpackMaxFuel = 4.5;
-  const jetpackBurnRate = 1;
-  const jetpackGroundRechargeRate = 0.42;
-  const jetpackAirRechargeRate = 0.14;
-  const jetpackAcceleration = 32;
-  const jetpackMaxRiseSpeed = 8.2;
+  const jetpackMaxFuel = PLAYER_CONFIG.jetpack.maxFuel;
+  const jetpackBurnRate = PLAYER_CONFIG.jetpack.burnRate;
+  const jetpackGroundRechargeRate = PLAYER_CONFIG.jetpack.groundRechargeRate;
+  const jetpackAirRechargeRate = PLAYER_CONFIG.jetpack.airRechargeRate;
+  const jetpackAcceleration = PLAYER_CONFIG.jetpack.acceleration;
+  const jetpackMaxRiseSpeed = PLAYER_CONFIG.jetpack.maxRiseSpeed;
   let jetpackFuel = jetpackMaxFuel;
 
-  const projectileGeometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+  const projectileGeometry = new THREE.BoxGeometry(
+    PLAYER_CONFIG.weapon.projectileSize,
+    PLAYER_CONFIG.weapon.projectileSize,
+    PLAYER_CONFIG.weapon.projectileSize
+  );
   const projectileMaterial = new THREE.MeshStandardMaterial({
-    color: 0x74ffd2,
-    emissive: 0x13a479,
-    emissiveIntensity: 0.9,
-    roughness: 0.2,
-    metalness: 0.12,
+    color: PLAYER_CONFIG.weapon.projectileColor,
+    emissive: PLAYER_CONFIG.weapon.projectileEmissive,
+    emissiveIntensity: PLAYER_CONFIG.weapon.projectileEmissiveIntensity,
+    roughness: PLAYER_CONFIG.weapon.projectileRoughness,
+    metalness: PLAYER_CONFIG.weapon.projectileMetalness,
   });
   const projectileVelocity = new THREE.Vector3();
   const projectileDirection = new THREE.Vector3();
   const projectiles = [];
   const projectileImpacts = [];
-  const projectileSpeed = 45;
-  const projectileLifetime = 2.4;
-  const projectileDamage = 34;
-  const projectileHitRadius = 0.36;
-  const projectileGravity = 0;
-  const projectileImpactDuration = 0.16;
-  const projectileImpactFlashGeometry = new THREE.SphereGeometry(0.06, 8, 8);
-  const projectileImpactRingGeometry = new THREE.RingGeometry(0.02, 0.08, 16);
-  const despawnMargin = 4;
-  const baseFireCooldown = 0.28;
+  const projectileSpeed = PLAYER_CONFIG.weapon.projectileSpeed;
+  const projectileLifetime = PLAYER_CONFIG.weapon.projectileLifetime;
+  const projectileDamage = PLAYER_CONFIG.weapon.projectileDamage;
+  const projectileHitRadius = PLAYER_CONFIG.weapon.projectileHitRadius;
+  const projectileGravity = PLAYER_CONFIG.weapon.projectileGravity;
+  const projectileImpactDuration = PLAYER_CONFIG.projectileImpact.duration;
+  const projectileImpactFlashGeometry = new THREE.SphereGeometry(
+    PLAYER_CONFIG.projectileImpact.flashRadius,
+    PLAYER_CONFIG.projectileImpact.flashSegments,
+    PLAYER_CONFIG.projectileImpact.flashSegments
+  );
+  const projectileImpactRingGeometry = new THREE.RingGeometry(
+    PLAYER_CONFIG.projectileImpact.ringInnerRadius,
+    PLAYER_CONFIG.projectileImpact.ringOuterRadius,
+    PLAYER_CONFIG.projectileImpact.ringSegments
+  );
+  const despawnMargin = PLAYER_CONFIG.weapon.despawnMargin;
+  const baseFireCooldown = PLAYER_CONFIG.weapon.baseFireCooldown;
 
   let fireCooldownRemaining = 0;
 
   let playerDamageMultiplier = 1;
   let playerFireRateMultiplier = 1;
 
-  function upgradePlayerDamage() { playerDamageMultiplier += 0.5; }
-  function upgradePlayerFireRate() { playerFireRateMultiplier *= 0.75; }
+  function upgradePlayerDamage() { playerDamageMultiplier += PLAYER_CONFIG.upgrades.damageUpgradeAdd; }
+  function upgradePlayerFireRate() { playerFireRateMultiplier *= PLAYER_CONFIG.upgrades.fireRateUpgradeMultiplier; }
 
   function setMovementKey(code, isDown) {
     switch (code) {
@@ -223,7 +254,7 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     }
 
     maybePromise.catch((error) => {
-      const recentlyUnlocked = performance.now() - lastUnlockTime < 250;
+      const recentlyUnlocked = performance.now() - lastUnlockTime < PLAYER_CONFIG.controls.lockRetryWindowMs;
       const shouldRetry = error?.name === "SecurityError" && attempt === 0 && recentlyUnlocked;
       if (shouldRetry) {
         lockRetryPending = true;
@@ -326,15 +357,15 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
   function updateGunVisuals(deltaSeconds) {
     gunFlashTimer = Math.max(0, gunFlashTimer - deltaSeconds);
     const flash = gunFlashTimer > 0 ? (gunFlashTimer / gunFlashDuration) : 0;
-    const flashBoost = flash > 0 ? Math.pow(flash, 0.3) : 0;
+    const flashBoost = flash > 0 ? Math.pow(flash, PLAYER_CONFIG.gun.flashExponent) : 0;
 
-    gunBodyMaterial.emissiveIntensity = 0.35 + flashBoost * 2.2;
-    gunCoreMaterial.emissiveIntensity = 0.65 + flashBoost * 5.8;
-    gunCoreMaterial.opacity = 0.8 + flashBoost * 0.2;
-    gunCore.scale.setScalar(1 + flashBoost * 0.34);
-    gunFlashMaterial.opacity = flashBoost * 0.26;
-    gunFlashMesh.scale.setScalar(1 + flashBoost * 0.22);
-    gunLight.intensity = flashBoost * 6.8;
+    gunBodyMaterial.emissiveIntensity = PLAYER_CONFIG.gun.bodyEmissiveIntensity + flashBoost * PLAYER_CONFIG.gun.bodyFlashBoost;
+    gunCoreMaterial.emissiveIntensity = PLAYER_CONFIG.gun.coreEmissiveIntensity + flashBoost * PLAYER_CONFIG.gun.coreFlashBoost;
+    gunCoreMaterial.opacity = PLAYER_CONFIG.gun.coreOpacity + flashBoost * PLAYER_CONFIG.gun.coreOpacityBoost;
+    gunCore.scale.setScalar(1 + flashBoost * PLAYER_CONFIG.gun.coreScaleBoost);
+    gunFlashMaterial.opacity = flashBoost * PLAYER_CONFIG.gun.flashOpacityBoost;
+    gunFlashMesh.scale.setScalar(1 + flashBoost * PLAYER_CONFIG.gun.flashScaleBoost);
+    gunLight.intensity = flashBoost * PLAYER_CONFIG.gun.lightFlashBoost;
   }
 
   function tryShoot() {
@@ -347,7 +378,7 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     gunBarrel.getWorldPosition(spawnWorldPos);
 
     // Slight offset forward from the visual tip
-    spawnWorldPos.addScaledVector(projectileDirection, 0.2);
+    spawnWorldPos.addScaledVector(projectileDirection, PLAYER_CONFIG.weapon.spawnForwardOffset);
 
     const projectileMesh = new THREE.Mesh(projectileGeometry, projectileMaterial);
     projectileMesh.position.copy(spawnWorldPos);
@@ -376,9 +407,9 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     root.position.copy(position);
 
     const flashMaterial = new THREE.MeshBasicMaterial({
-      color: 0x9bffe0,
+      color: PLAYER_CONFIG.projectileImpact.flashColor,
       transparent: true,
-      opacity: 0.9,
+      opacity: PLAYER_CONFIG.projectileImpact.flashOpacity,
       depthWrite: false,
     });
     flashMaterial.toneMapped = false;
@@ -386,16 +417,16 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     root.add(flash);
 
     const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0xb8fff2,
+      color: PLAYER_CONFIG.projectileImpact.ringColor,
       transparent: true,
-      opacity: 0.82,
+      opacity: PLAYER_CONFIG.projectileImpact.ringOpacity,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
     ringMaterial.toneMapped = false;
     const ring = new THREE.Mesh(projectileImpactRingGeometry, ringMaterial);
     ring.rotation.x = -Math.PI * 0.5;
-    ring.position.y = 0.01;
+    ring.position.y = PLAYER_CONFIG.projectileImpact.ringYOffset;
     root.add(ring);
 
     scene.add(root);
@@ -415,10 +446,10 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
       const t = Math.max(0, impact.life / impact.maxLife);
       const invT = 1 - t;
 
-      impact.flash.material.opacity = 0.9 * t;
-      impact.ring.material.opacity = 0.82 * t;
-      impact.flash.scale.setScalar(1 + invT * 1.2);
-      impact.ring.scale.setScalar(1 + invT * 2.0);
+      impact.flash.material.opacity = PLAYER_CONFIG.projectileImpact.flashOpacity * t;
+      impact.ring.material.opacity = PLAYER_CONFIG.projectileImpact.ringOpacity * t;
+      impact.flash.scale.setScalar(1 + invT * PLAYER_CONFIG.projectileImpact.flashExpand);
+      impact.ring.scale.setScalar(1 + invT * PLAYER_CONFIG.projectileImpact.ringExpand);
 
       if (impact.life <= 0) {
         scene.remove(impact.root);
@@ -435,7 +466,7 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
       : [];
 
     function projectileHitsTower(position) {
-      const towerHitPadding = 0.06;
+      const towerHitPadding = PLAYER_CONFIG.weapon.towerHitPadding;
       for (const obstacle of obstacles) {
         const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
         const halfSize = obstacle?.halfSize;
@@ -483,8 +514,8 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
         projectile.mesh.position.x > moveBounds.maxX + despawnMargin ||
         projectile.mesh.position.z < moveBounds.minZ - despawnMargin ||
         projectile.mesh.position.z > moveBounds.maxZ + despawnMargin ||
-        projectile.mesh.position.y < -3 ||
-        projectile.mesh.position.y > 22;
+        projectile.mesh.position.y < PLAYER_CONFIG.weapon.despawnMinY ||
+        projectile.mesh.position.y > PLAYER_CONFIG.weapon.despawnMaxY;
 
       const hitTower = projectileHitsTower(projectile.mesh.position);
 
@@ -535,8 +566,10 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
         }
 
         const topY = obstacleBaseY + obstacleHeight;
-        const withinTopX = Math.abs(x - obstaclePos.x) <= (obstacleHalfSize - PLAYER_COLLISION_RADIUS * 0.1);
-        const withinTopZ = Math.abs(z - obstaclePos.z) <= (obstacleHalfSize - PLAYER_COLLISION_RADIUS * 0.1);
+        const withinTopX = Math.abs(x - obstaclePos.x)
+          <= (obstacleHalfSize - PLAYER_COLLISION_RADIUS * PLAYER_CONFIG.collision.towerTopInsetFromRadius);
+        const withinTopZ = Math.abs(z - obstaclePos.z)
+          <= (obstacleHalfSize - PLAYER_COLLISION_RADIUS * PLAYER_CONFIG.collision.towerTopInsetFromRadius);
         const nearTop = feetY >= (topY - TOWER_TOP_SNAP_DOWN) && feetY <= (topY + TOWER_TOP_SNAP_UP);
         if (withinTopX && withinTopZ && nearTop) {
           supportY = Math.max(supportY, topY + eyeHeight);
@@ -549,7 +582,8 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     const keyboardForward = Number(moveState.forward) - Number(moveState.backward);
     const keyboardStrafe = Number(moveState.right) - Number(moveState.left);
     const usingVirtual =
-      Math.abs(virtualState.forward) > 0.01 || Math.abs(virtualState.strafe) > 0.01;
+      Math.abs(virtualState.forward) > PLAYER_CONFIG.movement.virtualDeadzone
+      || Math.abs(virtualState.strafe) > PLAYER_CONFIG.movement.virtualDeadzone;
     const canMove = controls.isLocked || usingVirtual;
 
     if (canMove) {
@@ -565,7 +599,7 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     }
 
     const currentSupportY = getSupportCameraYAtPosition(camera.position.x, camera.position.z, camera.position.y);
-    const isGrounded = camera.position.y <= currentSupportY + 0.001;
+    const isGrounded = camera.position.y <= currentSupportY + PLAYER_CONFIG.movement.groundedEpsilon;
     if (jumpQueued && isGrounded) {
       verticalVelocity = jumpVelocity;
     }
@@ -597,7 +631,7 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     camera.position.z = Math.min(moveBounds.maxZ, Math.max(moveBounds.minZ, camera.position.z));
 
     if (obstacles.length > 0) {
-      for (let pass = 0; pass < 2; pass += 1) {
+      for (let pass = 0; pass < PLAYER_CONFIG.movement.collisionPasses; pass += 1) {
         for (const obstacle of obstacles) {
           const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
           const obstacleHalfSize = obstacle?.halfSize;
