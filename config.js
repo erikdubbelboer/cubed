@@ -102,7 +102,7 @@ export const GAME_CONFIG = {
     // Base floor world Y level.
     floorY: 0,
     // Path tile thickness in world units. Typical range: 0.1-1.0.
-    tileHeight: 0.4,
+    tileHeight: 0.2,
     // Enemy center height above path surface. Typical range: 0.2-1.4.
     enemyPathYOffset: 0.65,
     // Player eye height returned from grid. Typical range: 1.4-2.1.

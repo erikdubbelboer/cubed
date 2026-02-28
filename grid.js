@@ -291,14 +291,16 @@ export function createGrid(scene) {
       const worldX = -half + cellX * CELL_SIZE + CELL_SIZE / 2;
       const worldZ = -half + cellZ * CELL_SIZE + CELL_SIZE / 2;
       const supportHeight = cellHeightLevels * ALTITUDE_CUBE_SIZE;
-      const surfaceY = pathSet.has(cellKey(cellX, cellZ))
+      const isPathCell = pathSet.has(cellKey(cellX, cellZ));
+      const surfaceY = isPathCell
         ? getPathSurfaceY(cellX, cellZ)
         : FLOOR_Y + supportHeight;
 
       altitudeObstacles.push({
         position: new THREE.Vector3(worldX, FLOOR_Y, worldZ),
         halfSize: TERRAIN_OBSTACLE_HALF_SIZE,
-        height: surfaceY - FLOOR_Y,
+        // Path tiles are visual overlays; keep collision at the support-cube top.
+        height: supportHeight,
         baseY: FLOOR_Y,
       });
       altitudeSurfaceCells.push({
