@@ -6,13 +6,7 @@ const loader = new GLTFLoader();
 export const models = {};
 
 const modelPaths = {
-    weapon_gun: "./kenney_space-kit/Models/GLTF format/weapon_gun.glb",
-    weapon_rifle: "./kenney_space-kit/Models/GLTF format/weapon_rifle.glb", // just in case
-    turret_single: "./kenney_space-kit/Models/GLTF format/turret_single.glb",
-    turret_double: "./kenney_space-kit/Models/GLTF format/turret_double.glb",
-    machine_barrelLarge: "./kenney_space-kit/Models/GLTF format/machine_barrelLarge.glb",
     gate_complex: "./kenney_space-kit/Models/GLTF format/gate_complex.glb",
-    craft_miner: "./kenney_space-kit/Models/GLTF format/craft_miner.glb",
 };
 
 export async function loadModels() {

@@ -280,32 +280,44 @@
       box-shadow: 0 0 15px rgba(107, 244, 173, 0.3);
     }
 
-    .inv-item img {
-      width: 120%;
-      height: 120%;
-      object-fit: contain;
-      filter: drop-shadow(0 0 6px rgba(107, 244, 173, 0.5));
-      transition: transform 0.3s ease;
+    .cube-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 6px;
+      background:
+        linear-gradient(145deg, rgba(138, 255, 246, 0.95), rgba(76, 117, 153, 0.95));
+      border: 2px solid rgba(182, 255, 246, 0.85);
+      box-shadow:
+        0 0 15px rgba(116, 255, 222, 0.45),
+        inset 0 0 20px rgba(17, 39, 53, 0.45);
+      position: relative;
+      transition: transform 0.25s ease, box-shadow 0.25s ease;
     }
 
-    .inv-item:hover img {
-      transform: scale(1.1) rotate(2deg);
+    .cube-icon::before {
+      content: "";
+      position: absolute;
+      inset: 21px -5px;
+      border-radius: 999px;
+      border: 2px solid rgba(148, 255, 245, 0.95);
+      box-shadow: 0 0 10px rgba(124, 255, 245, 0.8);
+    }
+
+    .inv-item:hover .cube-icon {
+      transform: scale(1.08);
+      box-shadow:
+        0 0 18px rgba(116, 255, 222, 0.65),
+        inset 0 0 24px rgba(17, 39, 53, 0.55);
     }
   </style>
 
   <div id="inventory-ui"
     style="position: fixed; left: 30px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 15px; z-index: 4;">
     <div id="inv-basic" class="inv-item">
-      <img src="./kenney_space-kit/Isometric/turret_single_SE.png" />
+      <div class="cube-icon"></div>
       <div
         style="position: absolute; bottom: 6px; right: 10px; font-weight: bold; font-size: 14px; color: #6bf4ad; text-shadow: 0 0 4px rgba(0,0,0,0.8);">
         [1]</div>
-    </div>
-    <div id="inv-mortar" class="inv-item">
-      <img src="./kenney_space-kit/Isometric/turret_double_SE.png" />
-      <div
-        style="position: absolute; bottom: 6px; right: 10px; font-weight: bold; font-size: 14px; color: #6bf4ad; text-shadow: 0 0 4px rgba(0,0,0,0.8);">
-        [2]</div>
     </div>
   </div>
 
@@ -348,8 +360,7 @@
     <div id="mobile-buttons">
       <button id="btn-jump" type="button">Jump</button>
       <button id="btn-shoot" type="button">Shoot</button>
-      <button id="btn-build" type="button">Basic Tower</button>
-      <button id="btn-build-mortar" type="button">Mortar Tower</button>
+      <button id="btn-build" type="button">Laser Tower</button>
       <button id="btn-place" type="button">Place</button>
       <button id="btn-cancel" type="button">Cancel</button>
     </div>

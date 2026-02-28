@@ -17,7 +17,6 @@ const lookPadEl = document.getElementById("look-pad");
 const jumpButtonEl = document.getElementById("btn-jump");
 const shootButtonEl = document.getElementById("btn-shoot");
 const buildButtonEl = document.getElementById("btn-build");
-const buildMortarButtonEl = document.getElementById("btn-build-mortar");
 const placeButtonEl = document.getElementById("btn-place");
 const cancelButtonEl = document.getElementById("btn-cancel");
 const waveCounterEl = document.getElementById("wave-counter");
@@ -227,7 +226,7 @@ window.addEventListener("mousedown", (event) => {
   }
 
   if (event.button === 2) {
-    towerSystem.selectTower("basic");
+    towerSystem.selectTower("laser");
     refreshBuildStatus();
     return;
   }
@@ -259,13 +258,7 @@ document.addEventListener("mouseup", (event) => {
 window.addEventListener("keydown", (event) => {
   if (!player || !towerSystem) return;
   if (event.code === "Digit1") {
-    towerSystem.selectTower("basic");
-    refreshBuildStatus();
-    return;
-  }
-
-  if (event.code === "Digit2") {
-    towerSystem.selectTower("mortar");
+    towerSystem.selectTower("laser");
     refreshBuildStatus();
     return;
   }
@@ -404,14 +397,7 @@ bindActionButton(shootButtonEl, () => handlePrimaryAction());
 bindActionButton(
   buildButtonEl,
   () => {
-    towerSystem.selectTower("basic");
-  },
-  true
-);
-bindActionButton(
-  buildMortarButtonEl,
-  () => {
-    towerSystem.selectTower("mortar");
+    towerSystem.selectTower("laser");
   },
   true
 );
@@ -552,10 +538,7 @@ async function initGame() {
       if (player) player.controls.getObject().position.set(x, player.eyeHeight, z);
     },
     placeBasicTower: (x, z) => {
-      if (towerSystem) towerSystem.forcePlaceTower(x, z, "basic");
-    },
-    placeMortarTower: (x, z) => {
-      if (towerSystem) towerSystem.forcePlaceTower(x, z, "mortar");
+      if (towerSystem) towerSystem.forcePlaceTower(x, z, "laser");
     },
     spawnEnemy: (type = "basic") => {
       if (enemySystem) {

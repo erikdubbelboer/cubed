@@ -1,25 +1,31 @@
 import * as THREE from "three";
-import { getModel } from "./models.js";
 
 const TOWER_RANGE = 18;
 const TOWER_FIRE_INTERVAL = 0.75;
-const TOWER_PROJECTILE_SPEED = 40;
-const TOWER_PROJECTILE_LIFE = 3;
-const TOWER_PROJECTILE_DAMAGE = 20;
-const TOWER_PROJECTILE_HIT_RADIUS = 0.4;
-const MORTAR_UPWARD_SPEED = 12;
-const MORTAR_GRAVITY = 20;
-const MORTAR_INITIAL_LATERAL_SPEED = 3;
-const MORTAR_HOMING_TURN_RATE = 7;
-const MORTAR_MIN_LATERAL_SPEED = 7;
-const MORTAR_MAX_LATERAL_SPEED = 20;
-const MORTAR_DIRECT_HIT_RADIUS = 0.7;
-const MORTAR_EXPLOSION_DURATION = 0.42;
-const MORTAR_EXPLOSION_RADIUS = 13.2;
-const MORTAR_EXPLOSION_SPARK_COUNT = 10;
-const BASIC_TOWER_RADIUS = 1.35;
-const MORTAR_TOWER_RADIUS = 1.7;
+const TOWER_BEAM_DAMAGE = 20;
+const TOWER_BEAM_HIT_RADIUS = 0.55;
+const LASER_TOWER_RADIUS = 1.35;
+const LASER_TOWER_HALF_SIZE = 1.1;
+const LASER_TOWER_HEIGHT = 2.2;
 const TOWER_PLACEMENT_GAP = 0.25;
+const LASER_RING_HALF_EXTENT = 1.16;
+const LASER_RING_THICKNESS = 0.08;
+const LASER_ACTIVE_GLOW_INTENSITY = 2.2;
+const LASER_IDLE_GLOW_INTENSITY = 0.35;
+const LASER_PULSE_DURATION = 0.2;
+const LASER_BEAM_BASE_OPACITY = 0.72;
+const LASER_BEAM_PULSE_OPACITY_BOOST = 0.26;
+const LASER_BEAM_PULSE_WIDTH_BOOST = 0.34;
+const LASER_FLASH_BASE_OPACITY = 0.45;
+const LASER_FLASH_PULSE_OPACITY_BOOST = 0.45;
+const LASER_FLASH_BASE_SCALE = 0.82;
+const LASER_FLASH_PULSE_SCALE_BOOST = 0.52;
+const LASER_CORNER_OFFSETS = [
+  [1, 1],
+  [1, -1],
+  [-1, -1],
+  [-1, 1],
+];
 
 export function createTowerSystem({ scene, camera, grid }) {
   const raycaster = new THREE.Raycaster();
@@ -28,21 +34,29 @@ export function createTowerSystem({ scene, camera, grid }) {
   const groundHit = new THREE.Vector3();
   const pathWaypoints = Array.isArray(grid.pathWaypoints) ? grid.pathWaypoints : [];
   const pathHalfWidth = grid.cellSize * 0.47;
-  const despawnMargin = 4;
-  const projectileGravity = 0;
 
-  const towerProjectileGeometry = new THREE.SphereGeometry(0.06, 8, 8);
-  const towerProjectileMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffd36b,
-    emissive: 0x5a3b07,
-    roughness: 0.4,
-    metalness: 0.05,
+  const beamGeometry = new THREE.CylinderGeometry(0.055, 0.055, 1, 10, 1, true);
+  const beamMaterial = new THREE.MeshBasicMaterial({
+    color: 0x7cfff5,
+    transparent: true,
+    opacity: 0.95,
+    depthWrite: false,
   });
-  const towerProjectiles = [];
-  const mortarExplosions = [];
-  const explosionFlashGeometry = new THREE.SphereGeometry(0.24, 12, 12);
-  const explosionRingGeometry = new THREE.RingGeometry(0.2, 0.3, 24);
-  const explosionSparkGeometry = new THREE.SphereGeometry(0.05, 6, 6);
+  beamMaterial.toneMapped = false;
+
+  const muzzleFlashGeometry = new THREE.SphereGeometry(0.1, 10, 10);
+  const muzzleFlashMaterial = new THREE.MeshBasicMaterial({
+    color: 0xb8fffa,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+  });
+  muzzleFlashMaterial.toneMapped = false;
+
+  const tempVecA = new THREE.Vector3();
+  const tempVecB = new THREE.Vector3();
+  const tempVecC = new THREE.Vector3();
+  const upVector = new THREE.Vector3(0, 1, 0);
 
   let selectedTowerType = null;
   let buildMode = false;
@@ -54,6 +68,10 @@ export function createTowerSystem({ scene, camera, grid }) {
   let towerDamageMultiplier = 1;
   let towerFireRateMultiplier = 1;
 
+  function upgradeMaxTowers() { maxTowers += 1; }
+  function upgradeTowerDamage() { towerDamageMultiplier += 0.5; }
+  function upgradeTowerFireRate() { towerFireRateMultiplier *= 0.75; }
+
   function applyShadowSettings(object) {
     object.traverse((child) => {
       if (child.isMesh) {
@@ -63,175 +81,120 @@ export function createTowerSystem({ scene, camera, grid }) {
     });
   }
 
-  function upgradeMaxTowers() { maxTowers += 1; }
-  function upgradeTowerDamage() { towerDamageMultiplier += 0.5; }
-  function upgradeTowerFireRate() { towerFireRateMultiplier *= 0.75; }
-
-  let preview = createTowerMesh({
-    baseColor: 0x58c89a,
-    accentColor: 0xa9fff9,
-    opacity: 0.55,
-    transparent: true,
-  });
-  preview.visible = false;
-  scene.add(preview);
-
-  function createMortarMesh({ baseColor, accentColor, opacity = 1, transparent = false }) {
+  function createLaserTowerMesh({
+    bodyColor,
+    ringColor,
+    ringGlowColor,
+    opacity = 1,
+    transparent = false,
+  }) {
     const root = new THREE.Group();
-    const model = getModel("machine_barrelLarge");
 
-    if (model) {
-      model.scale.set(3.5, 3.5, 3.5);
-      root.add(model);
-      root.userData.turret = null;
-      root.userData.muzzleNode = root;
-      root.userData.muzzleLocal = new THREE.Vector3(0, 1.95, 0);
-      root.userData.materials = [];
-
-      if (transparent) {
-        model.traverse(child => {
-          if (child.isMesh) {
-            child.material = child.material.clone();
-            child.material.transparent = true;
-            child.material.opacity = opacity;
-          }
-        });
-      }
-      applyShadowSettings(root);
-      return root;
-    }
-
-    // Fallback procedural
-    const baseMaterial = new THREE.MeshStandardMaterial({
-      color: baseColor, roughness: 0.75, metalness: 0.1, opacity, transparent,
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color: bodyColor,
+      roughness: 0.58,
+      metalness: 0.35,
+      opacity,
+      transparent,
+      emissive: 0x02080d,
+      emissiveIntensity: 0.2,
     });
-    const topMaterial = new THREE.MeshStandardMaterial({
-      color: accentColor, roughness: 0.55, metalness: 0.2, opacity, transparent,
+
+    const edgeMaterial = new THREE.LineBasicMaterial({
+      color: 0x91d7ff,
+      transparent,
+      opacity: transparent ? opacity : 0.5,
     });
-    const base = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.8, 2.8), baseMaterial);
-    base.position.y = 0.4;
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.4, 1.6, 12), topMaterial);
-    body.position.y = 1.6;
 
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.7, 1.8, 12), topMaterial);
-    barrel.position.y = 3.1;
+    const ringMaterial = new THREE.MeshStandardMaterial({
+      color: ringColor,
+      emissive: ringGlowColor,
+      emissiveIntensity: 0.4,
+      roughness: 0.22,
+      metalness: 0.65,
+      opacity,
+      transparent,
+    });
 
-    root.add(base);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.2, 2.2), bodyMaterial);
+    body.position.y = 1.1;
     root.add(body);
-    root.add(barrel);
 
-    root.userData.materials = [baseMaterial, topMaterial];
-    root.userData.turret = null;
-    root.userData.muzzleNode = root;
-    root.userData.muzzleLocal = new THREE.Vector3(0, 4.0, 0);
-    applyShadowSettings(root);
-    return root;
-  }
+    const edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(2.22, 2.22, 2.22)),
+      edgeMaterial
+    );
+    edges.position.copy(body.position);
+    root.add(edges);
 
-  function createTowerMesh({ baseColor, accentColor, opacity = 1, transparent = false }) {
-    const root = new THREE.Group();
-    const model = getModel("turret_single");
+    const ringAnchor = new THREE.Object3D();
+    ringAnchor.position.y = body.position.y;
+    root.add(ringAnchor);
 
-    const turretGroup = new THREE.Group();
+    const ringSpan = (LASER_RING_HALF_EXTENT * 2) + LASER_RING_THICKNESS;
+    const ringXGeometry = new THREE.BoxGeometry(ringSpan, LASER_RING_THICKNESS, LASER_RING_THICKNESS);
+    const ringZGeometry = new THREE.BoxGeometry(LASER_RING_THICKNESS, LASER_RING_THICKNESS, ringSpan);
 
-    if (model) {
-      model.rotation.y = Math.PI;
-      model.scale.set(4.5, 4.5, 4.5);
-      root.add(model);
+    const ringFront = new THREE.Mesh(ringXGeometry, ringMaterial);
+    ringFront.position.z = LASER_RING_HALF_EXTENT;
+    ringAnchor.add(ringFront);
 
-      const turretNode = model.getObjectByName("turret") || model;
-      root.userData.turret = turretNode;
-      root.userData.muzzleNode = turretNode;
-      root.userData.turretYawOffset = Math.PI;
-      root.userData.muzzleLocal = turretNode === model
-        ? new THREE.Vector3(0, 3.0, 1.5)
-        : new THREE.Vector3(0, 0.03, 0.23);
-      root.userData.materials = [];
+    const ringBack = new THREE.Mesh(ringXGeometry, ringMaterial);
+    ringBack.position.z = -LASER_RING_HALF_EXTENT;
+    ringAnchor.add(ringBack);
 
-      if (transparent) {
-        model.traverse(child => {
-          if (child.isMesh) {
-            child.material = child.material.clone();
-            child.material.transparent = true;
-            child.material.opacity = opacity;
-          }
-        });
-      }
-      applyShadowSettings(root);
-      return root;
-    }
+    const ringLeft = new THREE.Mesh(ringZGeometry, ringMaterial);
+    ringLeft.position.x = -LASER_RING_HALF_EXTENT;
+    ringAnchor.add(ringLeft);
 
-    // Fallback procedural
-    const baseMaterial = new THREE.MeshStandardMaterial({
-      color: baseColor,
-      roughness: 0.75,
-      metalness: 0.1,
-      opacity,
-      transparent,
-    });
-    const topMaterial = new THREE.MeshStandardMaterial({
-      color: accentColor,
-      roughness: 0.55,
-      metalness: 0.2,
-      opacity,
-      transparent,
-    });
+    const ringRight = new THREE.Mesh(ringZGeometry, ringMaterial);
+    ringRight.position.x = LASER_RING_HALF_EXTENT;
+    ringAnchor.add(ringRight);
 
-    const base = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.8, 2.8), baseMaterial);
-    base.position.y = 0.4;
+    const glowLight = new THREE.PointLight(0x7cfff5, 0, 4.4);
+    glowLight.position.copy(ringAnchor.position);
+    root.add(glowLight);
 
-    const column = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.2, 1.6), topMaterial);
-    column.position.y = 1.4;
+    root.userData.materials = [bodyMaterial, edgeMaterial, ringMaterial];
+    root.userData.ringMaterial = ringMaterial;
+    root.userData.ringNode = ringAnchor;
+    root.userData.flashLight = glowLight;
 
-    turretGroup.position.y = 2.2;
-
-    const turret = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 1.2, 16), topMaterial);
-
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 2.4, 8), topMaterial);
-    barrel.rotation.x = Math.PI * 0.5;
-    barrel.position.set(0, 0, 1.2);
-
-    turretGroup.add(turret);
-    turretGroup.add(barrel);
-
-    root.add(base);
-    root.add(column);
-    root.add(turretGroup);
-
-    root.userData.materials = [baseMaterial, topMaterial];
-    root.userData.turret = turretGroup;
-    root.userData.muzzleNode = turretGroup;
-    root.userData.turretYawOffset = 0;
-    root.userData.muzzleLocal = new THREE.Vector3(0, 0, 2.4);
     applyShadowSettings(root);
     return root;
   }
 
   function setPreviewValidityVisual(isValid) {
-    if (preview.userData.materials && preview.userData.materials.length > 0) {
-      // Procedural fallback
-      const [baseMaterial, topMaterial] = preview.userData.materials;
-      if (isValid) {
-        baseMaterial.color.setHex(0x58c89a);
-        topMaterial.color.setHex(0xa9fff9);
-      } else {
-        baseMaterial.color.setHex(0xc86666);
-        topMaterial.color.setHex(0xff9f9f);
-      }
+    const materials = preview.userData.materials || [];
+    const bodyMaterial = materials[0];
+    const edgeMaterial = materials[1];
+    const ringMaterial = materials[2];
+    if (!bodyMaterial || !edgeMaterial || !ringMaterial) {
+      return;
+    }
+
+    if (isValid) {
+      bodyMaterial.color.setHex(0x4d6f8f);
+      edgeMaterial.color.setHex(0x93ffff);
+      ringMaterial.color.setHex(0x73ebe2);
+      ringMaterial.emissive.setHex(0x2ab8bd);
     } else {
-      // GLTF model preview 
-      const colorHex = isValid ? 0x58c89a : 0xc86666;
-      preview.traverse(child => {
-        if (child.isMesh && child.material) {
-          child.material.color.setHex(colorHex);
-        }
-      });
+      bodyMaterial.color.setHex(0xa45a5a);
+      edgeMaterial.color.setHex(0xffb0b0);
+      ringMaterial.color.setHex(0xe08d8d);
+      ringMaterial.emissive.setHex(0x9f3535);
     }
   }
 
-  function getTowerRadius(type) {
-    return type === "mortar" ? MORTAR_TOWER_RADIUS : BASIC_TOWER_RADIUS;
-  }
+  let preview = createLaserTowerMesh({
+    bodyColor: 0x4d6f8f,
+    ringColor: 0x73ebe2,
+    ringGlowColor: 0x2ab8bd,
+    opacity: 0.55,
+    transparent: true,
+  });
+  preview.visible = false;
+  scene.add(preview);
 
   function distancePointToSegmentXZ(point, segStart, segEnd) {
     const sx = segStart.x;
@@ -252,11 +215,11 @@ export function createTowerSystem({ scene, camera, grid }) {
     return Math.hypot(point.x - closestX, point.z - closestZ);
   }
 
-  function overlapsTrack(position, towerRadius) {
+  function overlapsTrack(position) {
     if (pathWaypoints.length < 2) {
       return false;
     }
-    const minDistanceFromPath = pathHalfWidth + towerRadius;
+    const minDistanceFromPath = pathHalfWidth + LASER_TOWER_RADIUS;
     for (let i = 0; i < pathWaypoints.length - 1; i += 1) {
       const start = pathWaypoints[i];
       const end = pathWaypoints[i + 1];
@@ -267,10 +230,9 @@ export function createTowerSystem({ scene, camera, grid }) {
     return false;
   }
 
-  function overlapsOtherTower(position, towerRadius) {
+  function overlapsOtherTower(position) {
     for (const tower of towers) {
-      const otherRadius = tower.radius ?? BASIC_TOWER_RADIUS;
-      const minDistance = towerRadius + otherRadius + TOWER_PLACEMENT_GAP;
+      const minDistance = LASER_TOWER_RADIUS + (tower.radius ?? LASER_TOWER_RADIUS) + TOWER_PLACEMENT_GAP;
       const dx = position.x - tower.mesh.position.x;
       const dz = position.z - tower.mesh.position.z;
       if ((dx * dx + dz * dz) < (minDistance * minDistance)) {
@@ -280,41 +242,43 @@ export function createTowerSystem({ scene, camera, grid }) {
     return false;
   }
 
-  function isInsideBuildBounds(position, towerRadius) {
+  function isInsideBuildBounds(position) {
     return (
-      position.x >= grid.moveBounds.minX + towerRadius &&
-      position.x <= grid.moveBounds.maxX - towerRadius &&
-      position.z >= grid.moveBounds.minZ + towerRadius &&
-      position.z <= grid.moveBounds.maxZ - towerRadius
+      position.x >= grid.moveBounds.minX + LASER_TOWER_RADIUS &&
+      position.x <= grid.moveBounds.maxX - LASER_TOWER_RADIUS &&
+      position.z >= grid.moveBounds.minZ + LASER_TOWER_RADIUS &&
+      position.z <= grid.moveBounds.maxZ - LASER_TOWER_RADIUS
     );
   }
 
-  function isPlacementValid(position, type) {
-    const towerRadius = getTowerRadius(type);
-    if (!isInsideBuildBounds(position, towerRadius)) {
+  function isPlacementValid(position) {
+    if (!isInsideBuildBounds(position)) {
       return false;
     }
-    if (overlapsTrack(position, towerRadius)) {
+    if (overlapsTrack(position)) {
       return false;
     }
-    if (overlapsOtherTower(position, towerRadius)) {
+    if (overlapsOtherTower(position)) {
       return false;
     }
     return true;
   }
 
-  function selectTower(type = "basic") {
+  function selectTower() {
     if (towers.length >= maxTowers) {
       return false;
     }
-    selectedTowerType = type === "mortar" ? "mortar" : "basic";
+
+    selectedTowerType = "laser";
     buildMode = true;
 
     scene.remove(preview);
-    preview = selectedTowerType === "mortar" ? createMortarMesh({
-      baseColor: 0x58c89a, accentColor: 0xa9fff9, opacity: 0.55, transparent: true,
-    }) : createTowerMesh({
-      baseColor: 0x58c89a, accentColor: 0xa9fff9, opacity: 0.55, transparent: true,
+    preview = createLaserTowerMesh({
+      bodyColor: 0x4d6f8f,
+      ringColor: 0x73ebe2,
+      ringGlowColor: 0x2ab8bd,
+      opacity: 0.55,
+      transparent: true,
     });
     scene.add(preview);
 
@@ -349,14 +313,13 @@ export function createTowerSystem({ scene, camera, grid }) {
       return;
     }
 
-    const towerRadius = getTowerRadius(selectedTowerType);
     const x = Math.min(
-      grid.moveBounds.maxX - towerRadius,
-      Math.max(grid.moveBounds.minX + towerRadius, groundHit.x)
+      grid.moveBounds.maxX - LASER_TOWER_RADIUS,
+      Math.max(grid.moveBounds.minX + LASER_TOWER_RADIUS, groundHit.x)
     );
     const z = Math.min(
-      grid.moveBounds.maxZ - towerRadius,
-      Math.max(grid.moveBounds.minZ + towerRadius, groundHit.z)
+      grid.moveBounds.maxZ - LASER_TOWER_RADIUS,
+      Math.max(grid.moveBounds.minZ + LASER_TOWER_RADIUS, groundHit.z)
     );
 
     preview.visible = true;
@@ -365,7 +328,7 @@ export function createTowerSystem({ scene, camera, grid }) {
       previewPosition = new THREE.Vector3();
     }
     previewPosition.copy(preview.position);
-    previewValid = isPlacementValid(previewPosition, selectedTowerType);
+    previewValid = isPlacementValid(previewPosition);
     setPreviewValidityVisual(previewValid);
   }
 
@@ -376,11 +339,12 @@ export function createTowerSystem({ scene, camera, grid }) {
       return false;
     }
 
-    const towerRadius = getTowerRadius(selectedTowerType);
-    const towerMesh = selectedTowerType === "mortar" ? createMortarMesh({
-      baseColor: 0x506c97, accentColor: 0x9dd9ff, opacity: 1, transparent: false,
-    }) : createTowerMesh({
-      baseColor: 0x506c97, accentColor: 0x9dd9ff, opacity: 1, transparent: false,
+    const towerMesh = createLaserTowerMesh({
+      bodyColor: 0x445d79,
+      ringColor: 0x87f9f0,
+      ringGlowColor: 0x31bfc0,
+      opacity: 1,
+      transparent: false,
     });
     towerMesh.position.copy(previewPosition);
     scene.add(towerMesh);
@@ -388,8 +352,13 @@ export function createTowerSystem({ scene, camera, grid }) {
     towers.push({
       mesh: towerMesh,
       cooldown: 0,
-      type: selectedTowerType,
-      radius: towerRadius,
+      pulseTimer: 0,
+      radius: LASER_TOWER_RADIUS,
+      halfSize: LASER_TOWER_HALF_SIZE,
+      height: LASER_TOWER_HEIGHT,
+      baseY: grid.tileTopY,
+      beamVisual: null,
+      cornerIndex: null,
     });
 
     if (towers.length >= maxTowers) {
@@ -398,238 +367,312 @@ export function createTowerSystem({ scene, camera, grid }) {
     return true;
   }
 
-  function spawnTowerProjectile(origin, target, type) {
-    const isMortar = type === "mortar";
-    const projGeo = isMortar ? new THREE.SphereGeometry(0.2, 8, 8) : towerProjectileGeometry;
-    const projMat = isMortar ? new THREE.MeshStandardMaterial({ color: 0xff3b3b, emissive: 0x5a0707, roughness: 0.4 }) : towerProjectileMaterial;
-
-    const projectile = new THREE.Mesh(projGeo, projMat);
-    projectile.position.copy(origin);
-    scene.add(projectile);
-
-    const velocity = target.position.clone().sub(origin).normalize().multiplyScalar(TOWER_PROJECTILE_SPEED);
-    if (isMortar) {
-      velocity.set(0, MORTAR_UPWARD_SPEED, 0);
-      const lateralToTarget = target.position.clone().sub(origin);
-      lateralToTarget.y = 0;
-      if (lateralToTarget.lengthSq() > 0.0001) {
-        lateralToTarget.normalize().multiplyScalar(MORTAR_INITIAL_LATERAL_SPEED);
-        velocity.x = lateralToTarget.x;
-        velocity.z = lateralToTarget.z;
-      }
-    }
-
-    towerProjectiles.push({
-      mesh: projectile,
-      velocity,
-      life: isMortar ? 5 : TOWER_PROJECTILE_LIFE,
-      damage: TOWER_PROJECTILE_DAMAGE * towerDamageMultiplier * (isMortar ? 2.5 : 1),
-      target,
-      isMortar,
-      homingTurnRate: MORTAR_HOMING_TURN_RATE,
-      hitRadius: isMortar ? MORTAR_DIRECT_HIT_RADIUS : TOWER_PROJECTILE_HIT_RADIUS,
-    });
+  function getCornerWorldPosition(towerMesh, cornerIndex, out) {
+    const ringNode = towerMesh.userData.ringNode || towerMesh;
+    ringNode.getWorldPosition(tempVecA);
+    const corner = LASER_CORNER_OFFSETS[cornerIndex] || LASER_CORNER_OFFSETS[0];
+    out.set(
+      tempVecA.x + corner[0] * LASER_RING_HALF_EXTENT,
+      tempVecA.y,
+      tempVecA.z + corner[1] * LASER_RING_HALF_EXTENT
+    );
+    return out;
   }
 
-  function spawnMortarExplosion(position) {
-    const root = new THREE.Group();
-    root.position.copy(position);
-    root.position.y = Math.max(root.position.y, grid.tileTopY + 0.05);
+  function segmentIntersectsAabb(start, end, minX, minY, minZ, maxX, maxY, maxZ) {
+    let tMin = 0;
+    let tMax = 1;
 
-    const flashMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffb25a,
-      transparent: true,
-      opacity: 0.92,
-      depthWrite: false,
-    });
-    const flash = new THREE.Mesh(explosionFlashGeometry, flashMaterial);
-    root.add(flash);
-
-    const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff6f2c,
-      transparent: true,
-      opacity: 0.8,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const ring = new THREE.Mesh(explosionRingGeometry, ringMaterial);
-    ring.rotation.x = -Math.PI * 0.5;
-    ring.position.y = 0.04;
-    root.add(ring);
-
-    const light = new THREE.PointLight(0xff7d33, 2.6, 6.5);
-    light.position.set(0, 0.5, 0);
-    root.add(light);
-
-    const sparks = [];
-    for (let i = 0; i < MORTAR_EXPLOSION_SPARK_COUNT; i += 1) {
-      const sparkMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffd08a,
-        transparent: true,
-        opacity: 0.95,
-        depthWrite: false,
-      });
-      const spark = new THREE.Mesh(explosionSparkGeometry, sparkMaterial);
-      const dir = new THREE.Vector3(
-        Math.random() * 2 - 1,
-        0.25 + Math.random() * 0.95,
-        Math.random() * 2 - 1
-      ).normalize();
-      const speed = 2.6 + Math.random() * 2.2;
-      sparks.push({ mesh: spark, velocity: dir.multiplyScalar(speed) });
-      root.add(spark);
+    const dx = end.x - start.x;
+    if (Math.abs(dx) < 1e-6) {
+      if (start.x < minX || start.x > maxX) return false;
+    } else {
+      const inv = 1 / dx;
+      let t1 = (minX - start.x) * inv;
+      let t2 = (maxX - start.x) * inv;
+      if (t1 > t2) [t1, t2] = [t2, t1];
+      tMin = Math.max(tMin, t1);
+      tMax = Math.min(tMax, t2);
+      if (tMin > tMax) return false;
     }
 
-    scene.add(root);
-    mortarExplosions.push({
-      root,
-      flash,
-      ring,
-      light,
-      sparks,
-      life: 0,
-      duration: MORTAR_EXPLOSION_DURATION,
-    });
+    const dy = end.y - start.y;
+    if (Math.abs(dy) < 1e-6) {
+      if (start.y < minY || start.y > maxY) return false;
+    } else {
+      const inv = 1 / dy;
+      let t1 = (minY - start.y) * inv;
+      let t2 = (maxY - start.y) * inv;
+      if (t1 > t2) [t1, t2] = [t2, t1];
+      tMin = Math.max(tMin, t1);
+      tMax = Math.min(tMax, t2);
+      if (tMin > tMax) return false;
+    }
+
+    const dz = end.z - start.z;
+    if (Math.abs(dz) < 1e-6) {
+      if (start.z < minZ || start.z > maxZ) return false;
+    } else {
+      const inv = 1 / dz;
+      let t1 = (minZ - start.z) * inv;
+      let t2 = (maxZ - start.z) * inv;
+      if (t1 > t2) [t1, t2] = [t2, t1];
+      tMin = Math.max(tMin, t1);
+      tMax = Math.min(tMax, t2);
+      if (tMin > tMax) return false;
+    }
+
+    return true;
   }
 
-  function updateMortarExplosions(deltaSeconds) {
-    for (let i = mortarExplosions.length - 1; i >= 0; i -= 1) {
-      const explosion = mortarExplosions[i];
-      explosion.life += deltaSeconds;
-      const t = Math.min(1, explosion.life / explosion.duration);
-      const easeOut = 1 - Math.pow(1 - t, 2);
+  function beamWouldGoThroughTower(tower, cornerIndex, targetPosition) {
+    getCornerWorldPosition(tower.mesh, cornerIndex, tempVecA);
 
-      const flashScale = 1 + easeOut * MORTAR_EXPLOSION_RADIUS;
-      explosion.flash.scale.setScalar(flashScale);
-      explosion.flash.material.opacity = 0.92 * (1 - t);
+    const innerHalfSize = Math.max(0.25, (tower.halfSize ?? LASER_TOWER_HALF_SIZE) - 0.04);
+    const baseY = (tower.baseY ?? grid.tileTopY) + 0.04;
+    const topY = baseY + Math.max(0.4, (tower.height ?? LASER_TOWER_HEIGHT) - 0.08);
+    const minX = tower.mesh.position.x - innerHalfSize;
+    const maxX = tower.mesh.position.x + innerHalfSize;
+    const minZ = tower.mesh.position.z - innerHalfSize;
+    const maxZ = tower.mesh.position.z + innerHalfSize;
 
-      const ringScale = 1 + easeOut * (MORTAR_EXPLOSION_RADIUS * 1.15);
-      explosion.ring.scale.setScalar(ringScale);
-      explosion.ring.material.opacity = 0.8 * (1 - t);
+    return segmentIntersectsAabb(
+      tempVecA,
+      targetPosition,
+      minX,
+      baseY,
+      minZ,
+      maxX,
+      topY,
+      maxZ
+    );
+  }
 
-      explosion.light.intensity = 2.6 * (1 - t);
-
-      for (const spark of explosion.sparks) {
-        spark.velocity.y -= 8.5 * deltaSeconds;
-        spark.mesh.position.addScaledVector(spark.velocity, deltaSeconds);
-        spark.mesh.material.opacity = Math.max(0, 0.95 * (1 - t));
-      }
-
-      if (t >= 1) {
-        scene.remove(explosion.root);
-        explosion.flash.material.dispose();
-        explosion.ring.material.dispose();
-        for (const spark of explosion.sparks) {
-          spark.mesh.material.dispose();
+  function resolveCornerShotOrigin(tower, targetPosition) {
+    if (tower.cornerIndex == null) {
+      // First lock-on picks whichever corner is closest to current target.
+      let bestIdx = 0;
+      let bestDistSq = Infinity;
+      for (let i = 0; i < LASER_CORNER_OFFSETS.length; i += 1) {
+        getCornerWorldPosition(tower.mesh, i, tempVecA);
+        const distSq = tempVecA.distanceToSquared(targetPosition);
+        if (distSq < bestDistSq) {
+          bestDistSq = distSq;
+          bestIdx = i;
         }
-        mortarExplosions.splice(i, 1);
+      }
+      tower.cornerIndex = bestIdx;
+    }
+
+    const currentIndex = tower.cornerIndex;
+    if (beamWouldGoThroughTower(tower, currentIndex, targetPosition)) {
+      let replacementIndex = currentIndex;
+      let replacementDistSq = Infinity;
+      for (let i = 0; i < LASER_CORNER_OFFSETS.length; i += 1) {
+        if (i === currentIndex) {
+          continue;
+        }
+        if (beamWouldGoThroughTower(tower, i, targetPosition)) {
+          continue;
+        }
+        getCornerWorldPosition(tower.mesh, i, tempVecB);
+        const distSq = tempVecB.distanceToSquared(targetPosition);
+        if (distSq < replacementDistSq) {
+          replacementDistSq = distSq;
+          replacementIndex = i;
+        }
+      }
+      tower.cornerIndex = replacementIndex;
+    }
+
+    getCornerWorldPosition(tower.mesh, tower.cornerIndex, tempVecC);
+    return tempVecC;
+  }
+
+  function lineOfSightBlockedByOtherTower(origin, targetPosition, sourceTower) {
+    for (const otherTower of towers) {
+      if (otherTower === sourceTower) {
+        continue;
+      }
+
+      const halfSize = otherTower.halfSize ?? LASER_TOWER_HALF_SIZE;
+      const baseY = otherTower.baseY ?? grid.tileTopY;
+      const topY = baseY + (otherTower.height ?? LASER_TOWER_HEIGHT);
+      const minX = otherTower.mesh.position.x - halfSize;
+      const maxX = otherTower.mesh.position.x + halfSize;
+      const minZ = otherTower.mesh.position.z - halfSize;
+      const maxZ = otherTower.mesh.position.z + halfSize;
+
+      if (
+        segmentIntersectsAabb(
+          origin,
+          targetPosition,
+          minX,
+          baseY,
+          minZ,
+          maxX,
+          topY,
+          maxZ
+        )
+      ) {
+        return true;
       }
     }
+    return false;
+  }
+
+  function findTargetWithLineOfSight(tower, enemySystem) {
+    const maxRangeSq = TOWER_RANGE * TOWER_RANGE;
+    let bestTarget = null;
+    let bestDistSq = maxRangeSq;
+
+    if (typeof enemySystem.getEnemies === "function") {
+      const enemyMeshes = enemySystem.getEnemies();
+      if (Array.isArray(enemyMeshes)) {
+        for (const enemyMesh of enemyMeshes) {
+          if (!enemyMesh || !enemyMesh.visible) {
+            continue;
+          }
+
+          const distSq = tower.mesh.position.distanceToSquared(enemyMesh.position);
+          if (distSq > bestDistSq) {
+            continue;
+          }
+
+          const origin = resolveCornerShotOrigin(tower, enemyMesh.position);
+          if (lineOfSightBlockedByOtherTower(origin, enemyMesh.position, tower)) {
+            continue;
+          }
+
+          bestDistSq = distSq;
+          bestTarget = {
+            mesh: enemyMesh,
+            position: enemyMesh.position,
+          };
+        }
+        if (bestTarget) {
+          return bestTarget;
+        }
+      }
+    }
+
+    if (typeof enemySystem.getTargetInRange === "function") {
+      const fallbackTarget = enemySystem.getTargetInRange(tower.mesh.position, TOWER_RANGE);
+      if (fallbackTarget && fallbackTarget.position) {
+        const origin = resolveCornerShotOrigin(tower, fallbackTarget.position);
+        if (!lineOfSightBlockedByOtherTower(origin, fallbackTarget.position, tower)) {
+          return fallbackTarget;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function updateBeamTransform(beamMesh, origin, targetPosition) {
+    const dir = targetPosition.clone().sub(origin);
+    const length = dir.length();
+    if (length < 1e-5) {
+      return false;
+    }
+    dir.divideScalar(length);
+    beamMesh.position.copy(origin).addScaledVector(dir, length * 0.5);
+    beamMesh.quaternion.setFromUnitVectors(upVector, dir);
+    beamMesh.scale.set(1, length, 1);
+    return true;
+  }
+
+  function createLaserBeamVisual() {
+    const beam = new THREE.Mesh(beamGeometry, beamMaterial.clone());
+    beam.material.toneMapped = false;
+    scene.add(beam);
+
+    const muzzleFlash = new THREE.Mesh(muzzleFlashGeometry, muzzleFlashMaterial.clone());
+    muzzleFlash.material.toneMapped = false;
+    scene.add(muzzleFlash);
+
+    return {
+      beam,
+      flash: muzzleFlash,
+    };
+  }
+
+  function destroyLaserBeamVisual(beamVisual) {
+    if (!beamVisual) {
+      return;
+    }
+    scene.remove(beamVisual.beam);
+    scene.remove(beamVisual.flash);
+    beamVisual.beam.material.dispose();
+    beamVisual.flash.material.dispose();
   }
 
   function updateTowerCombat(deltaSeconds, enemySystem) {
-    for (const t of towers) {
-      t.cooldown = Math.max(0, t.cooldown - deltaSeconds);
+    for (const tower of towers) {
+      tower.cooldown = Math.max(0, tower.cooldown - deltaSeconds);
+      tower.pulseTimer = Math.max(0, (tower.pulseTimer || 0) - deltaSeconds);
 
-      const range = t.type === "mortar" ? TOWER_RANGE * 1.5 : TOWER_RANGE;
-      const target = enemySystem.getTargetInRange(t.mesh.position, range);
-      if (target) {
-        if (t.type !== "mortar" && t.mesh.userData.turret) {
-          const turretWorldPos = new THREE.Vector3();
-          t.mesh.userData.turret.getWorldPosition(turretWorldPos);
-          const targetPos = target.position.clone();
-          targetPos.y = turretWorldPos.y;
-          t.mesh.userData.turret.lookAt(targetPos);
-          const yawOffset = t.mesh.userData.turretYawOffset || 0;
-          if (yawOffset !== 0) {
-            t.mesh.userData.turret.rotateY(yawOffset);
-          }
+      const ringMaterial = tower.mesh.userData.ringMaterial;
+      const flashLight = tower.mesh.userData.flashLight;
+
+      const target = findTargetWithLineOfSight(tower, enemySystem);
+      if (!target || !target.mesh || !target.mesh.visible) {
+        if (tower.beamVisual) {
+          destroyLaserBeamVisual(tower.beamVisual);
+          tower.beamVisual = null;
         }
-
-        if (t.cooldown <= 0) {
-          const muzzleNode = t.mesh.userData.muzzleNode || t.mesh.userData.turret || t.mesh;
-          const muzzleWorld = muzzleNode.localToWorld(t.mesh.userData.muzzleLocal.clone());
-          spawnTowerProjectile(muzzleWorld, target, t.type);
-          t.cooldown = TOWER_FIRE_INTERVAL * towerFireRateMultiplier * (t.type === "mortar" ? 3 : 1);
+        tower.pulseTimer = 0;
+        if (ringMaterial) {
+          ringMaterial.emissiveIntensity = LASER_IDLE_GLOW_INTENSITY;
         }
-      }
-    }
-  }
-
-  function updateTowerProjectiles(deltaSeconds, enemySystem) {
-    for (let i = towerProjectiles.length - 1; i >= 0; i -= 1) {
-      const projectile = towerProjectiles[i];
-      let impact = false;
-      let impactPoint = null;
-
-      if (!projectile.isMortar && projectile.target && projectile.target.mesh.visible) {
-        const dir = projectile.target.mesh.position.clone().sub(projectile.mesh.position).normalize();
-        projectile.velocity.copy(dir).multiplyScalar(TOWER_PROJECTILE_SPEED);
-      } else if (projectile.isMortar && projectile.target && projectile.target.mesh && projectile.target.mesh.visible) {
-        const toTarget = projectile.target.mesh.position.clone().sub(projectile.mesh.position);
-        const horizontalDistance = Math.hypot(toTarget.x, toTarget.z);
-        if (horizontalDistance > 0.0001) {
-          const lateralSpeed = Math.min(
-            MORTAR_MAX_LATERAL_SPEED,
-            Math.max(MORTAR_MIN_LATERAL_SPEED, horizontalDistance * 2.4)
-          );
-          const desiredVx = (toTarget.x / horizontalDistance) * lateralSpeed;
-          const desiredVz = (toTarget.z / horizontalDistance) * lateralSpeed;
-          const blend = Math.min(1, projectile.homingTurnRate * deltaSeconds);
-          projectile.velocity.x += (desiredVx - projectile.velocity.x) * blend;
-          projectile.velocity.z += (desiredVz - projectile.velocity.z) * blend;
+        if (flashLight) {
+          flashLight.intensity = 0;
         }
+        continue;
       }
 
-      const gravityToApply = projectile.isMortar ? MORTAR_GRAVITY : projectileGravity;
-      projectile.velocity.y -= gravityToApply * deltaSeconds;
-      projectile.mesh.position.addScaledVector(projectile.velocity, deltaSeconds);
-      projectile.life -= deltaSeconds;
+      const targetPoint = target.position.clone();
+      const origin = resolveCornerShotOrigin(tower, targetPoint);
 
-      let hit = false;
-      if (projectile.isMortar) {
-        if (projectile.target && projectile.target.mesh && projectile.target.mesh.visible) {
-          const tPos = projectile.target.mesh.position;
-          const horizontalDistance = Math.hypot(
-            projectile.mesh.position.x - tPos.x,
-            projectile.mesh.position.z - tPos.z
-          );
-          if (projectile.velocity.y <= 0 && horizontalDistance <= projectile.hitRadius) {
-            impact = true;
-            impactPoint = new THREE.Vector3(tPos.x, grid.tileTopY, tPos.z);
-          }
-        }
-        if (!impact && projectile.mesh.position.y <= grid.tileTopY) {
-          impact = true; // hit ground
-          impactPoint = projectile.mesh.position.clone();
-        }
-      } else {
-        hit = enemySystem.applyDamageAtPoint(
-          projectile.mesh.position,
-          TOWER_PROJECTILE_HIT_RADIUS,
-          projectile.damage
+      if (!tower.beamVisual) {
+        tower.beamVisual = createLaserBeamVisual();
+      }
+      const pulseT = tower.pulseTimer > 0 ? (tower.pulseTimer / LASER_PULSE_DURATION) : 0;
+      const pulseBoost = pulseT > 0 ? Math.pow(pulseT, 0.35) : 0;
+
+      if (tower.beamVisual) {
+        updateBeamTransform(tower.beamVisual.beam, origin, targetPoint);
+        tower.beamVisual.flash.position.copy(origin);
+        tower.beamVisual.beam.scale.x = 1 + (pulseBoost * LASER_BEAM_PULSE_WIDTH_BOOST);
+        tower.beamVisual.beam.scale.z = 1 + (pulseBoost * LASER_BEAM_PULSE_WIDTH_BOOST);
+        tower.beamVisual.beam.material.opacity = Math.min(
+          0.98,
+          LASER_BEAM_BASE_OPACITY + (pulseBoost * LASER_BEAM_PULSE_OPACITY_BOOST)
+        );
+        tower.beamVisual.flash.material.opacity = Math.min(
+          0.95,
+          LASER_FLASH_BASE_OPACITY + (pulseBoost * LASER_FLASH_PULSE_OPACITY_BOOST)
+        );
+        tower.beamVisual.flash.scale.setScalar(
+          LASER_FLASH_BASE_SCALE + (pulseBoost * LASER_FLASH_PULSE_SCALE_BOOST)
         );
       }
 
-      const outOfBounds =
-        projectile.mesh.position.x < grid.moveBounds.minX - despawnMargin ||
-        projectile.mesh.position.x > grid.moveBounds.maxX + despawnMargin ||
-        projectile.mesh.position.z < grid.moveBounds.minZ - despawnMargin ||
-        projectile.mesh.position.z > grid.moveBounds.maxZ + despawnMargin ||
-        projectile.mesh.position.y < -3 ||
-        projectile.mesh.position.y > 22;
+      if (ringMaterial) {
+        ringMaterial.emissiveIntensity = LASER_ACTIVE_GLOW_INTENSITY + (pulseBoost * 1.2);
+      }
+      if (flashLight) {
+        flashLight.intensity = 2.6 + (pulseBoost * 2.2);
+      }
 
-      if (hit || impact || projectile.life <= 0 || outOfBounds) {
-        if (impact) {
-          // Mortar splash damage
-          const splashRadius = 3.5;
-          const splashCenter = impactPoint || projectile.mesh.position;
-          projectile.mesh.position.copy(splashCenter);
-          enemySystem.applyDamageAtPoint(splashCenter, splashRadius, projectile.damage);
-          spawnMortarExplosion(splashCenter);
-        }
-        scene.remove(projectile.mesh);
-        towerProjectiles.splice(i, 1);
+      if (tower.cooldown <= 0) {
+        enemySystem.applyDamageAtPoint(
+          target.position,
+          TOWER_BEAM_HIT_RADIUS,
+          TOWER_BEAM_DAMAGE * towerDamageMultiplier
+        );
+        tower.cooldown = TOWER_FIRE_INTERVAL * towerFireRateMultiplier;
+        tower.pulseTimer = LASER_PULSE_DURATION;
       }
     }
   }
@@ -637,8 +680,6 @@ export function createTowerSystem({ scene, camera, grid }) {
   function update(deltaSeconds, enemySystem) {
     updatePreviewFromCamera();
     updateTowerCombat(deltaSeconds, enemySystem);
-    updateTowerProjectiles(deltaSeconds, enemySystem);
-    updateMortarExplosions(deltaSeconds);
   }
 
   function isBuildMode() {
@@ -648,7 +689,7 @@ export function createTowerSystem({ scene, camera, grid }) {
   function getStatusText() {
     if (buildMode) {
       if (previewValid) {
-        return `Build mode: place ${selectedTowerType} tower`;
+        return "Build mode: place laser cube turret";
       }
       return "Build mode: invalid location";
     }
@@ -675,28 +716,34 @@ export function createTowerSystem({ scene, camera, grid }) {
     upgradeMaxTowers,
     upgradeTowerDamage,
     upgradeTowerFireRate,
-    forcePlaceTower: (x, z, type = "basic") => {
-      const towerType = type === "mortar" ? "mortar" : "basic";
+    forcePlaceTower: (x, z) => {
       if (towers.length >= maxTowers) {
         return false;
       }
 
       const towerPosition = new THREE.Vector3(x, grid.tileTopY, z);
-      if (!isPlacementValid(towerPosition, towerType)) {
+      if (!isPlacementValid(towerPosition)) {
         return false;
       }
 
-      const towerMesh = towerType === "mortar"
-        ? createMortarMesh({ baseColor: 0x82a5c9, accentColor: 0x6ca3e6 })
-        : createTowerMesh({ baseColor: 0x82a5c9, accentColor: 0x6ca3e6 });
+      const towerMesh = createLaserTowerMesh({
+        bodyColor: 0x445d79,
+        ringColor: 0x87f9f0,
+        ringGlowColor: 0x31bfc0,
+      });
 
       towerMesh.position.copy(towerPosition);
       scene.add(towerMesh);
       towers.push({
         mesh: towerMesh,
         cooldown: 0,
-        type: towerType,
-        radius: getTowerRadius(towerType),
+        pulseTimer: 0,
+        radius: LASER_TOWER_RADIUS,
+        halfSize: LASER_TOWER_HALF_SIZE,
+        height: LASER_TOWER_HEIGHT,
+        baseY: grid.tileTopY,
+        beamVisual: null,
+        cornerIndex: null,
       });
       return true;
     }
