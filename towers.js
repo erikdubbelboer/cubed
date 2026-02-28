@@ -54,6 +54,15 @@ export function createTowerSystem({ scene, camera, grid }) {
   let towerDamageMultiplier = 1;
   let towerFireRateMultiplier = 1;
 
+  function applyShadowSettings(object) {
+    object.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+  }
+
   function upgradeMaxTowers() { maxTowers += 1; }
   function upgradeTowerDamage() { towerDamageMultiplier += 0.5; }
   function upgradeTowerFireRate() { towerFireRateMultiplier *= 0.75; }
@@ -88,6 +97,7 @@ export function createTowerSystem({ scene, camera, grid }) {
           }
         });
       }
+      applyShadowSettings(root);
       return root;
     }
 
@@ -114,6 +124,7 @@ export function createTowerSystem({ scene, camera, grid }) {
     root.userData.turret = null;
     root.userData.muzzleNode = root;
     root.userData.muzzleLocal = new THREE.Vector3(0, 4.0, 0);
+    applyShadowSettings(root);
     return root;
   }
 
@@ -146,6 +157,7 @@ export function createTowerSystem({ scene, camera, grid }) {
           }
         });
       }
+      applyShadowSettings(root);
       return root;
     }
 
@@ -191,6 +203,7 @@ export function createTowerSystem({ scene, camera, grid }) {
     root.userData.muzzleNode = turretGroup;
     root.userData.turretYawOffset = 0;
     root.userData.muzzleLocal = new THREE.Vector3(0, 0, 2.4);
+    applyShadowSettings(root);
     return root;
   }
 

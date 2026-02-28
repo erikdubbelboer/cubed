@@ -31,41 +31,8 @@ if (isTouchDevice) {
 }
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x020205);
-
-const starsGeometry = new THREE.BufferGeometry();
-const starsCount = 2000;
-const posArray = new Float32Array(starsCount * 3);
-const STAR_FIELD_SIZE = 400;
-const STAR_MIN_LEVEL_DISTANCE = 70;
-for (let i = 0; i < starsCount; i++) {
-  let x = 0;
-  let y = 0;
-  let z = 0;
-  let attempts = 0;
-  do {
-    x = (Math.random() - 0.5) * STAR_FIELD_SIZE;
-    y = (Math.random() - 0.5) * STAR_FIELD_SIZE;
-    z = (Math.random() - 0.5) * STAR_FIELD_SIZE;
-    attempts += 1;
-  } while (
-    x * x + y * y + z * z < STAR_MIN_LEVEL_DISTANCE * STAR_MIN_LEVEL_DISTANCE &&
-    attempts < 20
-  );
-  const baseIndex = i * 3;
-  posArray[baseIndex] = x;
-  posArray[baseIndex + 1] = y;
-  posArray[baseIndex + 2] = z;
-}
-starsGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
-const starsMaterial = new THREE.PointsMaterial({
-  size: 0.8,
-  color: 0xffffff,
-  transparent: true,
-  opacity: 0.8
-});
-const starMesh = new THREE.Points(starsGeometry, starsMaterial);
-scene.add(starMesh);
+scene.background = new THREE.Color(0xffffff);
+scene.fog = new THREE.Fog(0xffffff, 20, 120);
 
 let gameTime = 0;
 
@@ -79,13 +46,28 @@ const camera = new THREE.PerspectiveCamera(
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMappingExposure = 1.15;
 app.appendChild(renderer.domElement);
 
-const ambientLight = new THREE.AmbientLight(0x7f8fbc, 0.75);
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.95);
 scene.add(ambientLight);
 
-const directionalLight = new THREE.DirectionalLight(0xffffff, 1.1);
-directionalLight.position.set(10, 18, 8);
+const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0xffffff, 0.55);
+scene.add(hemisphereLight);
+
+const directionalLight = new THREE.DirectionalLight(0xffffff, 0.85);
+directionalLight.position.set(18, 28, 14);
+directionalLight.castShadow = true;
+directionalLight.shadow.mapSize.set(2048, 2048);
+directionalLight.shadow.camera.near = 1;
+directionalLight.shadow.camera.far = 120;
+directionalLight.shadow.camera.left = -46;
+directionalLight.shadow.camera.right = 46;
+directionalLight.shadow.camera.top = 46;
+directionalLight.shadow.camera.bottom = -46;
+directionalLight.shadow.normalBias = 0.015;
 scene.add(directionalLight);
 
 const grid = createGrid(scene);
@@ -118,7 +100,8 @@ function placePathEndpointGate(position, facingDirection) {
   }
 
   gate.scale.setScalar(GATE_MODEL_SCALE);
-  gate.position.set(position.x, grid.tileTopY + GATE_Y_OFFSET, position.z);
+  const pathSurfaceY = grid.pathTileTopY ?? grid.tileTopY;
+  gate.position.set(position.x, pathSurfaceY + GATE_Y_OFFSET, position.z);
 
   const lookTarget = gate.position.clone().add(facingDirection);
   gate.lookAt(lookTarget);
