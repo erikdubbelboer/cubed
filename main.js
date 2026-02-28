@@ -213,7 +213,12 @@ function placePathEndpointGate(position, facingDirection) {
   } else {
     portalForward.normalize();
   }
-  const pathSurfaceY = grid.pathTileTopY ?? grid.tileTopY;
+  const derivedPathSurfaceY = Number.isFinite(position.y)
+    ? position.y - GAME_CONFIG.grid.enemyPathYOffset
+    : (grid.pathTileTopY ?? grid.tileTopY ?? 0);
+  const pathSurfaceY = typeof grid.getBuildSurfaceYAtWorld === "function"
+    ? grid.getBuildSurfaceYAtWorld(position.x, position.z)
+    : derivedPathSurfaceY;
   gate.position.set(position.x, pathSurfaceY + PORTAL_HEIGHT * 0.5 + PORTAL_Y_OFFSET, position.z);
   const lookTarget = gate.position.clone().add(portalForward);
   gate.lookAt(lookTarget);

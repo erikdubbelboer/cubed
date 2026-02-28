@@ -123,18 +123,6 @@ export const GAME_CONFIG = {
     // Move bounds inset from edge as cell-size fraction. Typical range: 0.3-0.6.
     moveInsetCellScale: 0.5,
 
-    // Raised terrain block (in grid-cell coordinates).
-    altitudeBlock: {
-      // Start cell for raised block.
-      startX: 1,
-      startZ: 4,
-      // Block footprint in cells. Typical range: 1-6.
-      width: 2,
-      depth: 3,
-      // Block stack height in cubes/cells. Typical range: 1-5.
-      height: 2,
-    },
-
     // Vertical wall-climb path tiles.
     wallPathTileSizeScale: 0.76,
     wallPathTileThicknessScale: 0.5,
@@ -184,40 +172,24 @@ export const GAME_CONFIG = {
     pathHeightEpsilon: 1e-5,
     rayParallelEpsilon: 1e-6,
 
-    // Hand-authored path coordinates through the grid.
-    pathCells: [
-      [0, 1],
-      [1, 1],
-      [2, 1],
-      [3, 1],
-      [3, 2],
-      [3, 3],
-      [2, 3],
-      [1, 3],
-      [1, 4],
-      [1, 5],
-      [2, 5],
-      [3, 5],
-      [4, 5],
-      [5, 5],
-      [6, 5],
-      [6, 6],
-      [6, 7],
-      [5, 7],
-      [4, 7],
-      [3, 7],
-      [2, 7],
-      [2, 8],
-      [2, 9],
-      [3, 9],
-      [4, 9],
-      [5, 9],
-      [6, 9],
-      [7, 9],
-      [8, 9],
-      [9, 9],
-      [10, 9],
-    ],
+    // Level layout uses 2 chars per cell: [height][marker], optionally space-separated per cell.
+    // Height uses base36 digits: 0-9, A-Z. A space in the height slot is treated as 0.
+    // Marker: . empty, P path, S start, E end. A space in the marker slot is treated as '.'.
+    // Rows are z=0..size-1 (top-to-bottom), columns x=0..size-1 (left-to-right).
+    levelLayoutAscii: [
+      "2. 2. 1. 1.  .  .  .  .  .  .  .  .",
+      "2E 2P 1P 1P  .  .  .  .  .  .  .  .",
+      "2. 2. 1. 1P  .  .  .  .  .  .  .  .",
+      "1. 1P 1P 1P  .  .  .  .  .  .  .  .",
+      " .  P  .  .  . 1. 1. 1.  .  .  .  .",
+      " .  P  P  P  P 1P 1P 1.  .  .  .  .",
+      " .  .  .  .  . 1. 1P 1.  .  .  .  .",
+      " .  .  P  P  P 1P 1P 1.  .  .  .  .",
+      " .  .  P  .  .  .  .  .  .  .  .  .",
+      " .  .  P  P  P  P  P  P  P  P  S  .",
+      " .  .  .  .  .  .  .  .  .  .  .  .",
+      " .  .  .  .  .  .  .  .  .  .  .  .",
+    ].join("\n"),
   },
 
   towers: {
@@ -246,7 +218,7 @@ export const GAME_CONFIG = {
 
     // EMP tower combat tuning.
     // Short-range pulse radius in world units. Typical range: 2.5-8.
-    empRange: 5,
+    empRange: 6,
     // Time to emit one pulse while charging (seconds). Typical range: 0.4-2.5.
     empPulseInterval: 1.35,
     // Damage dealt once per enemy per pulse. Typical range: 8-120.
@@ -491,7 +463,7 @@ export const GAME_CONFIG = {
       },
       fast: {
         health: 60,
-        speedMultiplier: 1.8,
+        speedMultiplier: 3,
         radius: 0.6,
         size: 1.0,
         color: 0xff6f6f,

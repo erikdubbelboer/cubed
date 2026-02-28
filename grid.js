@@ -10,29 +10,216 @@ const TILE_HEIGHT = GRID_CONFIG.tileHeight;
 const FLOOR_Y = GRID_CONFIG.floorY;
 const PATH_TILE_TOP_Y = FLOOR_Y + TILE_HEIGHT;
 const ENEMY_PATH_Y_OFFSET = GRID_CONFIG.enemyPathYOffset;
-const ALTITUDE_BLOCK = Object.freeze({ ...GRID_CONFIG.altitudeBlock });
 const ALTITUDE_CUBE_SIZE = CELL_SIZE;
 const WALL_PATH_TILE_SIZE = CELL_SIZE * GRID_CONFIG.wallPathTileSizeScale;
 const WALL_PATH_TILE_THICKNESS = TILE_HEIGHT * GRID_CONFIG.wallPathTileThicknessScale;
 const TERRAIN_OBSTACLE_HALF_SIZE = CELL_SIZE * 0.5;
 const WALL_CLIMB_PATH_OFFSET = GRID_CONFIG.wallClimbPathOffset;
 const WALL_PATH_TILE_VISUAL_OFFSET = WALL_PATH_TILE_THICKNESS * GRID_CONFIG.wallPathVisualOffsetScale;
-const PATH_CELLS = GRID_CONFIG.pathCells;
+const LEVEL_PATH_MARKERS = new Set(["P", "S", "E"]);
+const LEVEL_MARKERS = new Set([".", "P", "S", "E"]);
+const CELL_TOKEN_WIDTH = 2;
 
-function isInsideAltitudeBlock(cellX, cellZ) {
-  return (
-    cellX >= ALTITUDE_BLOCK.startX &&
-    cellX < ALTITUDE_BLOCK.startX + ALTITUDE_BLOCK.width &&
-    cellZ >= ALTITUDE_BLOCK.startZ &&
-    cellZ < ALTITUDE_BLOCK.startZ + ALTITUDE_BLOCK.depth
-  );
+function cellKey(cellX, cellZ) {
+  return `${cellX},${cellZ}`;
+}
+
+function parseCellHeight(char) {
+  const height = Number.parseInt(char, 36);
+  if (!Number.isInteger(height) || height < 0) {
+    throw new Error(`Invalid cell height '${char}' in grid.levelLayoutAscii.`);
+  }
+  return height;
+}
+
+function parseRowTokens(rawLine, cellZ) {
+  const compactWidth = GRID_SIZE * CELL_TOKEN_WIDTH;
+  const spacedWidth = compactWidth + (GRID_SIZE - 1);
+  let mode = null;
+
+  if (rawLine.length === compactWidth) {
+    mode = "compact";
+  } else if (rawLine.length === spacedWidth) {
+    mode = "spaced";
+  } else {
+    throw new Error(
+      `Invalid row width at z=${cellZ}; expected ${compactWidth} (compact) or ${spacedWidth} (space-separated) characters.`
+    );
+  }
+
+  const tokens = [];
+  for (let cellX = 0; cellX < GRID_SIZE; cellX += 1) {
+    const tokenOffset = mode === "spaced" ? cellX * 3 : cellX * CELL_TOKEN_WIDTH;
+    const heightChar = rawLine[tokenOffset];
+    const markerChar = rawLine[tokenOffset + 1];
+
+    if (mode === "spaced" && cellX < GRID_SIZE - 1 && rawLine[tokenOffset + 2] !== " ") {
+      throw new Error(`Invalid token separator at (${cellX}, ${cellZ}); expected a single space.`);
+    }
+
+    const normalizedHeightChar = heightChar === " "
+      ? "0"
+      : heightChar.toUpperCase();
+    const normalizedMarkerChar = markerChar === " "
+      ? "."
+      : markerChar.toUpperCase();
+
+    tokens.push({
+      heightChar: normalizedHeightChar,
+      markerChar: normalizedMarkerChar,
+    });
+  }
+
+  return tokens;
+}
+
+function parseLevelLayout(layoutAscii) {
+  if (typeof layoutAscii !== "string" || layoutAscii.trim().length === 0) {
+    throw new Error("grid.levelLayoutAscii must be a non-empty string.");
+  }
+
+  const lines = layoutAscii.replace(/\r/g, "").split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+  if (lines.length !== GRID_SIZE) {
+    throw new Error(`grid.levelLayoutAscii must contain exactly ${GRID_SIZE} rows.`);
+  }
+
+  const heights = [];
+  const pathSet = new Set();
+  let startCell = null;
+  let endCell = null;
+
+  for (let cellZ = 0; cellZ < GRID_SIZE; cellZ += 1) {
+    const rowTokens = parseRowTokens(lines[cellZ], cellZ);
+    const rowHeights = [];
+    for (let cellX = 0; cellX < GRID_SIZE; cellX += 1) {
+      const { heightChar, markerChar } = rowTokens[cellX];
+      if (!LEVEL_MARKERS.has(markerChar)) {
+        throw new Error(`Invalid cell marker '${markerChar}' at (${cellX}, ${cellZ}).`);
+      }
+
+      rowHeights.push(parseCellHeight(heightChar));
+      if (LEVEL_PATH_MARKERS.has(markerChar)) {
+        pathSet.add(cellKey(cellX, cellZ));
+      }
+      if (markerChar === "S") {
+        if (startCell) {
+          throw new Error("grid.levelLayoutAscii must contain exactly one start marker 'S'.");
+        }
+        startCell = { x: cellX, z: cellZ };
+      }
+      if (markerChar === "E") {
+        if (endCell) {
+          throw new Error("grid.levelLayoutAscii must contain exactly one end marker 'E'.");
+        }
+        endCell = { x: cellX, z: cellZ };
+      }
+    }
+    heights.push(rowHeights);
+  }
+
+  if (!startCell || !endCell) {
+    throw new Error("grid.levelLayoutAscii must contain both one 'S' and one 'E'.");
+  }
+
+  return {
+    heights,
+    pathSet,
+    startCell,
+    endCell,
+  };
+}
+
+function getPathNeighborCells(pathSet, cellX, cellZ) {
+  const neighbors = [];
+  const offsets = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  for (const [dx, dz] of offsets) {
+    const nx = cellX + dx;
+    const nz = cellZ + dz;
+    if (nx < 0 || nx >= GRID_SIZE || nz < 0 || nz >= GRID_SIZE) {
+      continue;
+    }
+    if (pathSet.has(cellKey(nx, nz))) {
+      neighbors.push({ x: nx, z: nz });
+    }
+  }
+  return neighbors;
+}
+
+function buildOrderedPathCells(pathSet, startCell, endCell) {
+  const startKey = cellKey(startCell.x, startCell.z);
+  const endKey = cellKey(endCell.x, endCell.z);
+  if (!pathSet.has(startKey) || !pathSet.has(endKey)) {
+    throw new Error("Start/end cells must be path cells in grid.levelLayoutAscii.");
+  }
+
+  for (const key of pathSet) {
+    const [xText, zText] = key.split(",");
+    const cellX = Number.parseInt(xText, 10);
+    const cellZ = Number.parseInt(zText, 10);
+    const degree = getPathNeighborCells(pathSet, cellX, cellZ).length;
+    const expectedDegree = key === startKey || key === endKey ? 1 : 2;
+    if (degree !== expectedDegree) {
+      throw new Error(
+        `Path degree mismatch at (${cellX}, ${cellZ}); expected ${expectedDegree}, got ${degree}.`
+      );
+    }
+  }
+
+  const orderedPathCells = [[startCell.x, startCell.z]];
+  const visited = new Set([startKey]);
+  let previousKey = null;
+  let current = { ...startCell };
+
+  while (cellKey(current.x, current.z) !== endKey) {
+    const nextCandidates = getPathNeighborCells(pathSet, current.x, current.z)
+      .filter((neighbor) => cellKey(neighbor.x, neighbor.z) !== previousKey);
+    if (nextCandidates.length !== 1) {
+      throw new Error(`Could not continue path walk at (${current.x}, ${current.z}).`);
+    }
+    const next = nextCandidates[0];
+    const nextKey = cellKey(next.x, next.z);
+    if (visited.has(nextKey)) {
+      throw new Error(`Path loop detected at (${next.x}, ${next.z}).`);
+    }
+
+    orderedPathCells.push([next.x, next.z]);
+    visited.add(nextKey);
+    previousKey = cellKey(current.x, current.z);
+    current = next;
+  }
+
+  if (visited.size !== pathSet.size) {
+    throw new Error("Path cells must form one continuous non-branching path from S to E.");
+  }
+
+  return orderedPathCells;
+}
+
+const LEVEL_LAYOUT = parseLevelLayout(GRID_CONFIG.levelLayoutAscii);
+const PATH_CELLS = buildOrderedPathCells(
+  LEVEL_LAYOUT.pathSet,
+  LEVEL_LAYOUT.startCell,
+  LEVEL_LAYOUT.endCell
+);
+
+function getCellHeightLevels(cellX, cellZ) {
+  const row = LEVEL_LAYOUT.heights[cellZ];
+  if (!row) {
+    return 0;
+  }
+  return row[cellX] ?? 0;
 }
 
 function getPathSupportHeight(cellX, cellZ) {
-  if (!isInsideAltitudeBlock(cellX, cellZ)) {
-    return 0;
-  }
-  return ALTITUDE_BLOCK.height * ALTITUDE_CUBE_SIZE;
+  return getCellHeightLevels(cellX, cellZ) * ALTITUDE_CUBE_SIZE;
 }
 
 function getPathSurfaceY(cellX, cellZ) {
@@ -80,7 +267,7 @@ export function createGrid(scene) {
   platform.receiveShadow = true;
   scene.add(platform);
 
-  const pathSet = new Set(PATH_CELLS.map(([x, z]) => `${x},${z}`));
+  const pathSet = LEVEL_LAYOUT.pathSet;
   const half = (GRID_SIZE * CELL_SIZE) / 2;
   const altitudeObstacles = [];
   const altitudeSurfaceCells = [];
@@ -91,18 +278,22 @@ export function createGrid(scene) {
     ALTITUDE_CUBE_SIZE
   );
 
-  for (let dz = 0; dz < ALTITUDE_BLOCK.depth; dz += 1) {
-    for (let dx = 0; dx < ALTITUDE_BLOCK.width; dx += 1) {
-      const cellX = ALTITUDE_BLOCK.startX + dx;
-      const cellZ = ALTITUDE_BLOCK.startZ + dz;
-      const checkerOffset = ((dx + dz) & 1) === 0
+  for (let cellZ = 0; cellZ < GRID_SIZE; cellZ += 1) {
+    for (let cellX = 0; cellX < GRID_SIZE; cellX += 1) {
+      const cellHeightLevels = getCellHeightLevels(cellX, cellZ);
+      if (cellHeightLevels <= 0) {
+        continue;
+      }
+
+      const checkerOffset = ((cellX + cellZ) & 1) === 0
         ? GRID_CONFIG.checkerLightnessOffset
         : -GRID_CONFIG.checkerLightnessOffset;
       const worldX = -half + cellX * CELL_SIZE + CELL_SIZE / 2;
       const worldZ = -half + cellZ * CELL_SIZE + CELL_SIZE / 2;
-      const surfaceY = pathSet.has(`${cellX},${cellZ}`)
+      const supportHeight = cellHeightLevels * ALTITUDE_CUBE_SIZE;
+      const surfaceY = pathSet.has(cellKey(cellX, cellZ))
         ? getPathSurfaceY(cellX, cellZ)
-        : FLOOR_Y + getPathSupportHeight(cellX, cellZ);
+        : FLOOR_Y + supportHeight;
 
       altitudeObstacles.push({
         position: new THREE.Vector3(worldX, FLOOR_Y, worldZ),
@@ -118,7 +309,7 @@ export function createGrid(scene) {
         surfaceY,
       });
 
-      for (let level = 0; level < ALTITUDE_BLOCK.height; level += 1) {
+      for (let level = 0; level < cellHeightLevels; level += 1) {
         const lightness = GRID_CONFIG.altitudeBaseLightness
           + checkerOffset
           + level * GRID_CONFIG.altitudePerLevelLightnessStep;
@@ -177,7 +368,7 @@ export function createGrid(scene) {
 
   for (let cellZ = 0; cellZ < GRID_SIZE; cellZ += 1) {
     for (let cellX = 0; cellX < GRID_SIZE; cellX += 1) {
-      const isPath = pathSet.has(`${cellX},${cellZ}`);
+      const isPath = pathSet.has(cellKey(cellX, cellZ));
       if (!isPath) {
         continue;
       }
@@ -313,18 +504,22 @@ export function createGrid(scene) {
   }
 
   function isPathCell(cellX, cellZ) {
-    return pathSet.has(`${cellX},${cellZ}`);
+    return pathSet.has(cellKey(cellX, cellZ));
   }
 
   function getBuildSurfaceYAtWorld(worldX, worldZ) {
     const cell = worldToCell(worldX, worldZ);
-    if (!cell || !isInsideAltitudeBlock(cell.x, cell.z)) {
+    if (!cell) {
+      return FLOOR_Y;
+    }
+    const supportHeight = getPathSupportHeight(cell.x, cell.z);
+    if (supportHeight <= 0) {
       return FLOOR_Y;
     }
     if (isPathCell(cell.x, cell.z)) {
       return getPathSurfaceY(cell.x, cell.z);
     }
-    return FLOOR_Y + getPathSupportHeight(cell.x, cell.z);
+    return FLOOR_Y + supportHeight;
   }
 
   function raycastBuildSurface(ray, outPoint = new THREE.Vector3()) {
