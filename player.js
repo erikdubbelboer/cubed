@@ -10,7 +10,7 @@ const PLAYER_HEAD_CLEARANCE = PLAYER_CONFIG.collision.headClearance;
 const TOWER_TOP_SNAP_DOWN = PLAYER_CONFIG.collision.towerTopSnapDown;
 const TOWER_TOP_SNAP_UP = PLAYER_CONFIG.collision.towerTopSnapUp;
 
-export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight, ui, getMovementObstacles }) {
+export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight, getMovementObstacles }) {
   const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
   const controls = new PointerLockControls(camera, domElement);
   controls.pointerSpeed = PLAYER_CONFIG.controls.pointerSpeed;
@@ -225,7 +225,6 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     pitch = camera.rotation.x;
     lookDeltaX = 0;
     lookDeltaY = 0;
-    ui.overlayEl.classList.add("hidden");
   });
 
   controls.addEventListener("unlock", () => {
@@ -344,14 +343,12 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     jumpQueued = true;
   }
 
-  function updateJetpackUi() {
-    const fuelRatio = Math.max(0, Math.min(1, jetpackFuel / jetpackMaxFuel));
-    if (ui?.jetpackFuelFillEl) {
-      ui.jetpackFuelFillEl.style.width = `${Math.round(fuelRatio * 100)}%`;
-    }
-    if (ui?.jetpackFuelPercentEl) {
-      ui.jetpackFuelPercentEl.textContent = `${Math.round(fuelRatio * 100)}%`;
-    }
+  function getJetpackFuelRatio() {
+    return Math.max(0, Math.min(1, jetpackFuel / jetpackMaxFuel));
+  }
+
+  function getJetpackFuelPercent() {
+    return Math.round(getJetpackFuelRatio() * 100);
   }
 
   function updateGunVisuals(deltaSeconds) {
@@ -707,7 +704,6 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     updateLook();
     updateMovement(deltaSeconds);
     updateGunVisuals(deltaSeconds);
-    updateJetpackUi();
     updateProjectiles(deltaSeconds, enemySystem);
     updateProjectileImpacts(deltaSeconds);
   }
@@ -737,6 +733,8 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     setVirtualMove,
     resetMovement,
     getPosition,
+    getJetpackFuelRatio,
+    getJetpackFuelPercent,
     upgradePlayerDamage,
     upgradePlayerFireRate,
     setMenuMode,

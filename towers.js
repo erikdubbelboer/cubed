@@ -26,6 +26,9 @@ const LASER_FLASH_PULSE_SCALE_BOOST = TOWER_CONFIG.flashPulseScaleBoost;
 const PATH_RANGE_HIGHLIGHT_VALID_COLOR = TOWER_CONFIG.rangeHighlightValidColor;
 const PATH_RANGE_HIGHLIGHT_INVALID_COLOR = TOWER_CONFIG.rangeHighlightInvalidColor;
 const LASER_CORNER_OFFSETS = TOWER_CONFIG.cornerOffsets;
+const TOWER_DISPLAY_NAMES = {
+  laser: "Laser Tower",
+};
 
 export function createTowerSystem({ scene, camera, grid }) {
   const raycaster = new THREE.Raycaster();
@@ -72,7 +75,9 @@ export function createTowerSystem({ scene, camera, grid }) {
 
   let selectedTowerType = null;
   let buildMode = false;
-  let maxTowers = TOWER_CONFIG.baseMaxTowers;
+  const towerStock = {
+    laser: TOWER_CONFIG.baseMaxTowers,
+  };
   const towers = [];
   let previewValid = false;
   let previewPosition = null;
@@ -80,7 +85,30 @@ export function createTowerSystem({ scene, camera, grid }) {
   let towerDamageMultiplier = 1;
   let towerFireRateMultiplier = 1;
 
-  function upgradeMaxTowers() { maxTowers += TOWER_CONFIG.maxTowerUpgradeStep; }
+  function getTowerRemaining(type) {
+    if (!type) {
+      return 0;
+    }
+    return Math.max(0, towerStock[type] || 0);
+  }
+
+  function grantTowerStock(type, amount = 1) {
+    if (typeof type !== "string") {
+      return 0;
+    }
+
+    const increment = Math.max(0, Math.floor(amount));
+    if (increment <= 0) {
+      return getTowerRemaining(type);
+    }
+
+    towerStock[type] = getTowerRemaining(type) + increment;
+    return towerStock[type];
+  }
+
+  function upgradeMaxTowers() {
+    grantTowerStock("laser", TOWER_CONFIG.maxTowerUpgradeStep);
+  }
   function upgradeTowerDamage() { towerDamageMultiplier += TOWER_CONFIG.damageUpgradeAdd; }
   function upgradeTowerFireRate() { towerFireRateMultiplier *= TOWER_CONFIG.fireRateUpgradeMultiplier; }
 
@@ -364,12 +392,16 @@ export function createTowerSystem({ scene, camera, grid }) {
     return grid.tileTopY;
   }
 
-  function selectTower() {
-    if (towers.length >= maxTowers) {
+  function selectTower(type = "laser") {
+    if (type !== "laser") {
       return false;
     }
 
-    selectedTowerType = "laser";
+    if (getTowerRemaining(type) <= 0) {
+      return false;
+    }
+
+    selectedTowerType = type;
     buildMode = true;
 
     scene.remove(preview);
@@ -400,7 +432,11 @@ export function createTowerSystem({ scene, camera, grid }) {
   }
 
   function updatePreviewFromCamera() {
-    if (!buildMode || towers.length >= maxTowers) {
+    if (
+      !buildMode
+      || selectedTowerType !== "laser"
+      || getTowerRemaining(selectedTowerType) <= 0
+    ) {
       preview.visible = false;
       hidePathRangeHighlights();
       previewValid = false;
@@ -445,7 +481,13 @@ export function createTowerSystem({ scene, camera, grid }) {
   function placeSelectedTower() {
     updatePreviewFromCamera();
 
-    if (!buildMode || !previewValid || towers.length >= maxTowers || !selectedTowerType || !previewPosition) {
+    if (
+      !buildMode
+      || !previewValid
+      || !selectedTowerType
+      || getTowerRemaining(selectedTowerType) <= 0
+      || !previewPosition
+    ) {
       return false;
     }
 
@@ -463,6 +505,7 @@ export function createTowerSystem({ scene, camera, grid }) {
       mesh: towerMesh,
       cooldown: 0,
       pulseTimer: 0,
+      towerType: selectedTowerType,
       range: TOWER_RANGE,
       radius: LASER_TOWER_RADIUS,
       halfSize: LASER_TOWER_HALF_SIZE,
@@ -472,7 +515,8 @@ export function createTowerSystem({ scene, camera, grid }) {
       cornerIndex: null,
     });
 
-    if (towers.length >= maxTowers) {
+    towerStock[selectedTowerType] = Math.max(0, getTowerRemaining(selectedTowerType) - 1);
+    if (getTowerRemaining(selectedTowerType) <= 0) {
       cancelPlacement();
     }
     return true;
@@ -866,11 +910,30 @@ export function createTowerSystem({ scene, camera, grid }) {
       }
       return "Build mode: invalid location";
     }
-    return `Towers built: ${towers.length} / ${maxTowers}`;
+    return `Towers built: ${towers.length}`;
   }
 
-  function getAvailableTowers() {
-    return Math.max(0, maxTowers - towers.length);
+  function getAvailableTowers(type = null) {
+    if (typeof type === "string") {
+      return getTowerRemaining(type);
+    }
+
+    return Object.values(towerStock).reduce(
+      (total, count) => total + Math.max(0, count || 0),
+      0
+    );
+  }
+
+  function getTowerInventory() {
+    return Object.keys(towerStock).map((type) => ({
+      type,
+      label: TOWER_DISPLAY_NAMES[type] || type,
+      remaining: getTowerRemaining(type),
+    }));
+  }
+
+  function getSelectedTowerType() {
+    return selectedTowerType;
   }
 
   function getMovementObstacles() {
@@ -885,12 +948,15 @@ export function createTowerSystem({ scene, camera, grid }) {
     isBuildMode,
     getStatusText,
     getAvailableTowers,
+    getTowerInventory,
+    getSelectedTowerType,
     getMovementObstacles,
+    grantTowerStock,
     upgradeMaxTowers,
     upgradeTowerDamage,
     upgradeTowerFireRate,
-    forcePlaceTower: (x, z) => {
-      if (towers.length >= maxTowers) {
+    forcePlaceTower: (x, z, towerType = "laser") => {
+      if (towerType !== "laser" || getTowerRemaining(towerType) <= 0) {
         return false;
       }
 
@@ -911,6 +977,7 @@ export function createTowerSystem({ scene, camera, grid }) {
         mesh: towerMesh,
         cooldown: 0,
         pulseTimer: 0,
+        towerType,
         range: TOWER_RANGE,
         radius: LASER_TOWER_RADIUS,
         halfSize: LASER_TOWER_HALF_SIZE,
@@ -919,6 +986,7 @@ export function createTowerSystem({ scene, camera, grid }) {
         beamVisual: null,
         cornerIndex: null,
       });
+      towerStock[towerType] = Math.max(0, getTowerRemaining(towerType) - 1);
       return true;
     }
   };

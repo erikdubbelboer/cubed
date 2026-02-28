@@ -3,6 +3,7 @@ import { createGrid } from "./grid.js";
 import { createPlayer } from "./player.js";
 import { createEnemySystem, getLargestEnemySize } from "./enemies.js";
 import { createTowerSystem } from "./towers.js";
+import { createUiOverlay } from "./uiOverlay.js";
 import { GAME_CONFIG } from "./config.js";
 
 const SCENE_CONFIG = GAME_CONFIG.scene;
@@ -12,30 +13,8 @@ const UI_CONFIG = GAME_CONFIG.ui;
 const WAVE_CONFIG = GAME_CONFIG.waves;
 
 const app = document.getElementById("app");
-const overlayEl = document.getElementById("overlay");
-const buildStatusEl = document.getElementById("build-status");
-const jetpackFuelFillEl = document.getElementById("jetpack-fuel-fill");
-const jetpackFuelPercentEl = document.getElementById("jetpack-fuel-percent");
-
-const movePadEl = document.getElementById("move-pad");
-const moveKnobEl = document.getElementById("move-knob");
-const lookPadEl = document.getElementById("look-pad");
-const jumpButtonEl = document.getElementById("btn-jump");
-const shootButtonEl = document.getElementById("btn-shoot");
-const buildButtonEl = document.getElementById("btn-build");
-const placeButtonEl = document.getElementById("btn-place");
-const cancelButtonEl = document.getElementById("btn-cancel");
-const waveCounterEl = document.getElementById("wave-counter");
-const towersAvailableEl = document.getElementById("towers-available");
-const upgradeMenuEl = document.getElementById("upgrade-menu");
-const upgradeOptionsEl = document.getElementById("upgrade-options");
-const virtualCursorEl = document.getElementById("virtual-cursor");
-const crosshairEl = document.getElementById("crosshair");
 
 const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
-if (isTouchDevice) {
-  overlayEl.classList.add("hidden");
-}
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SCENE_CONFIG.backgroundColor);
@@ -61,7 +40,14 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.localClippingEnabled = true;
 renderer.toneMappingExposure = SCENE_CONFIG.toneMappingExposure;
+renderer.autoClear = false;
 app.appendChild(renderer.domElement);
+
+const uiOverlay = createUiOverlay({
+  width: window.innerWidth,
+  height: window.innerHeight,
+  maxPixelRatio: SCENE_CONFIG.maxPixelRatio,
+});
 
 const ambientLight = new THREE.AmbientLight(
   LIGHT_CONFIG.ambient.color,
@@ -264,16 +250,12 @@ function placePathGates() {
   return spawnPortal;
 }
 
-function refreshBuildStatus() {
-  buildStatusEl.textContent = towerSystem.getStatusText();
-}
-
 function updatePauseState() {
   // Use a small timeout to ensure Three.js has updated the internal isLocked state
   // and browser has updated pointerLockElement.
   setTimeout(() => {
     const isLocked = !!document.pointerLockElement;
-    const shouldPause = document.hidden || !document.hasFocus() || !isLocked;
+    const shouldPause = document.hidden || !document.hasFocus() || (!isTouchDevice && !isLocked);
 
     if (shouldPause !== isPaused) {
       isPaused = shouldPause;
@@ -291,7 +273,6 @@ function updatePauseState() {
 function handlePrimaryAction() {
   if (towerSystem.isBuildMode()) {
     const didPlaceTower = towerSystem.placeSelectedTower();
-    refreshBuildStatus();
     if (didPlaceTower) {
       isPrimaryDown = false;
     }
@@ -312,13 +293,46 @@ document.addEventListener("contextmenu", (event) => {
 let isPrimaryDown = false;
 let vCursorX = window.innerWidth / 2;
 let vCursorY = window.innerHeight / 2;
+let hoveredUpgradeIndex = -1;
+let currentUpgradeOptions = [];
+let lastTouchUiActionAt = -Infinity;
 
-function updateVirtualCursor() {
-  virtualCursorEl.style.left = `${vCursorX}px`;
-  virtualCursorEl.style.top = `${vCursorY}px`;
+function updateMenuHoverFromVirtualCursor() {
+  if (waveState !== "MENU") {
+    hoveredUpgradeIndex = -1;
+    return;
+  }
+  hoveredUpgradeIndex = uiOverlay.hitTestMenuOption(vCursorX, vCursorY);
 }
 
-let hoveredBtn = null;
+function applyUpgradeChoice(index) {
+  if (index < 0 || index >= currentUpgradeOptions.length) {
+    return false;
+  }
+
+  const selectedUpgrade = currentUpgradeOptions[index];
+  if (!selectedUpgrade || typeof selectedUpgrade.apply !== "function") {
+    return false;
+  }
+
+  selectedUpgrade.apply();
+  currentUpgradeOptions = [];
+  hoveredUpgradeIndex = -1;
+  player.setMenuMode(false);
+  startWave(currentWave + 1);
+  return true;
+}
+
+function getCanvasPointerPosition(event) {
+  const canvasRect = renderer.domElement.getBoundingClientRect();
+  const x = clamp(event.clientX - canvasRect.left, 0, canvasRect.width);
+  const y = clamp(event.clientY - canvasRect.top, 0, canvasRect.height);
+  return { x, y };
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
 
 window.addEventListener("mousemove", (event) => {
   if (!player) return;
@@ -327,47 +341,34 @@ window.addEventListener("mousemove", (event) => {
     vCursorY += event.movementY;
     vCursorX = Math.max(0, Math.min(window.innerWidth, vCursorX));
     vCursorY = Math.max(0, Math.min(window.innerHeight, vCursorY));
-    updateVirtualCursor();
-
-    virtualCursorEl.classList.remove("visible");
-    const el = document.elementFromPoint(vCursorX, vCursorY);
-    virtualCursorEl.classList.add("visible");
-
-    if (hoveredBtn && hoveredBtn !== el) {
-      hoveredBtn.classList.remove("hover");
-      hoveredBtn = null;
-    }
-
-    if (el && el.classList.contains("upgrade-btn")) {
-      el.classList.add("hover");
-      hoveredBtn = el;
-    }
+    updateMenuHoverFromVirtualCursor();
   }
 }, true);
 
 window.addEventListener("mousedown", (event) => {
+  if (performance.now() - lastTouchUiActionAt < 350) {
+    return;
+  }
+
   if (isPaused || !player || !towerSystem) {
     return;
   }
 
-  if (waveState === "MENU" && player.controls.isLocked) {
-    virtualCursorEl.classList.remove("visible"); // temporarily hide to check what's underneath
-    const hitEl = document.elementFromPoint(vCursorX, vCursorY);
-    virtualCursorEl.classList.add("visible");
-
-    if (hitEl && hitEl.classList.contains("upgrade-btn")) {
-      hitEl.click();
-    }
-    return;
-  }
-
   if (waveState === "MENU") {
+    if (event.button !== 0) {
+      return;
+    }
+    if (player.controls.isLocked) {
+      applyUpgradeChoice(uiOverlay.hitTestMenuOption(vCursorX, vCursorY));
+      return;
+    }
+    const pointer = getCanvasPointerPosition(event);
+    applyUpgradeChoice(uiOverlay.hitTestMenuOption(pointer.x, pointer.y));
     return;
   }
 
   if (event.button === 2) {
     towerSystem.selectTower("laser");
-    refreshBuildStatus();
     return;
   }
 
@@ -381,11 +382,34 @@ window.addEventListener("mousedown", (event) => {
 
   if (towerSystem.isBuildMode()) {
     towerSystem.placeSelectedTower();
-    refreshBuildStatus();
     return;
   }
 
   isPrimaryDown = true;
+}, true);
+
+window.addEventListener("pointerdown", (event) => {
+  if (!isTouchDevice || event.pointerType !== "touch" || !player || !towerSystem || isPaused) {
+    return;
+  }
+
+  const pointer = getCanvasPointerPosition(event);
+
+  if (waveState === "MENU") {
+    const pickedIndex = uiOverlay.hitTestMenuOption(pointer.x, pointer.y);
+    if (pickedIndex >= 0) {
+      applyUpgradeChoice(pickedIndex);
+      lastTouchUiActionAt = performance.now();
+    }
+    return;
+  }
+
+  const touchedTowerType = uiOverlay.hitTestTowerSlot(pointer.x, pointer.y);
+  if (touchedTowerType) {
+    towerSystem.selectTower(touchedTowerType);
+    lastTouchUiActionAt = performance.now();
+    event.preventDefault();
+  }
 }, true);
 
 document.addEventListener("mouseup", (event) => {
@@ -397,178 +421,46 @@ document.addEventListener("mouseup", (event) => {
 
 window.addEventListener("keydown", (event) => {
   if (!player || !towerSystem) return;
+
+  if (waveState === "MENU") {
+    if (event.code === "Digit1" || event.code === "Digit2" || event.code === "Digit3") {
+      const optionIndex = Number(event.code.slice(-1)) - 1;
+      applyUpgradeChoice(optionIndex);
+    }
+    return;
+  }
+
   if (event.code === "Escape" && towerSystem.isBuildMode()) {
     towerSystem.cancelPlacement();
-    refreshBuildStatus();
     return;
   }
 
   if (event.code === "Digit1") {
     towerSystem.selectTower("laser");
-    refreshBuildStatus();
     return;
   }
 
   if (event.code === "KeyQ") {
     towerSystem.cancelPlacement();
-    refreshBuildStatus();
     return;
   }
 
   if (event.code === "Enter" && towerSystem.isBuildMode()) {
     towerSystem.placeSelectedTower();
-    refreshBuildStatus();
   }
 });
 
-function bindActionButton(buttonEl, callback, shouldRefreshStatus = false) {
-  if (!buttonEl) {
-    return;
-  }
-
-  buttonEl.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    callback();
-    if (shouldRefreshStatus) {
-      refreshBuildStatus();
-    }
-  });
-}
-
-function bindMovePad() {
-  if (!movePadEl || !moveKnobEl) {
-    return;
-  }
-
-  const radius = UI_CONFIG.movePadRadiusPx;
-  let pointerId = null;
-  let centerX = 0;
-  let centerY = 0;
-
-  function updateKnob(deltaX, deltaY) {
-    moveKnobEl.style.transform = `translate(calc(-50% + ${deltaX}px), calc(-50% + ${deltaY}px))`;
-  }
-
-  function resetPad() {
-    pointerId = null;
-    updateKnob(0, 0);
-    player.setVirtualMove(0, 0);
-  }
-
-  movePadEl.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    pointerId = event.pointerId;
-    const rect = movePadEl.getBoundingClientRect();
-    centerX = rect.left + rect.width * 0.5;
-    centerY = rect.top + rect.height * 0.5;
-    movePadEl.setPointerCapture(pointerId);
-  });
-
-  movePadEl.addEventListener("pointermove", (event) => {
-    if (event.pointerId !== pointerId) {
-      return;
-    }
-    event.preventDefault();
-
-    const rawX = event.clientX - centerX;
-    const rawY = event.clientY - centerY;
-    const length = Math.hypot(rawX, rawY);
-    const scale = length > radius ? radius / length : 1;
-    const clampedX = rawX * scale;
-    const clampedY = rawY * scale;
-
-    updateKnob(clampedX, clampedY);
-    player.setVirtualMove(clampedX / radius, -clampedY / radius);
-  });
-
-  movePadEl.addEventListener("pointerup", (event) => {
-    if (event.pointerId === pointerId) {
-      resetPad();
-    }
-  });
-
-  movePadEl.addEventListener("pointercancel", (event) => {
-    if (event.pointerId === pointerId) {
-      resetPad();
-    }
-  });
-
-  movePadEl.addEventListener("lostpointercapture", resetPad);
-}
-
-function bindLookPad() {
-  if (!lookPadEl) {
-    return;
-  }
-
-  let pointerId = null;
-  let lastX = 0;
-  let lastY = 0;
-
-  lookPadEl.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    pointerId = event.pointerId;
-    lastX = event.clientX;
-    lastY = event.clientY;
-    lookPadEl.setPointerCapture(pointerId);
-  });
-
-  lookPadEl.addEventListener("pointermove", (event) => {
-    if (event.pointerId !== pointerId) {
-      return;
-    }
-    event.preventDefault();
-    const deltaX = event.clientX - lastX;
-    const deltaY = event.clientY - lastY;
-    lastX = event.clientX;
-    lastY = event.clientY;
-    player.addLookInput(deltaX, deltaY);
-  });
-
-  function clearLookPointer(event) {
-    if (event.pointerId === pointerId) {
-      pointerId = null;
-    }
-  }
-
-  lookPadEl.addEventListener("pointerup", clearLookPointer);
-  lookPadEl.addEventListener("pointercancel", clearLookPointer);
-}
-
-bindMovePad();
-bindLookPad();
-
-bindActionButton(jumpButtonEl, () => player.jump());
-bindActionButton(shootButtonEl, () => handlePrimaryAction());
-bindActionButton(
-  buildButtonEl,
-  () => {
-    towerSystem.selectTower("laser");
-  },
-  true
-);
-bindActionButton(
-  placeButtonEl,
-  () => {
-    towerSystem.placeSelectedTower();
-  },
-  true
-);
-bindActionButton(
-  cancelButtonEl,
-  () => {
-    towerSystem.cancelPlacement();
-  },
-  true
-);
-
 const ALL_UPGRADES = [
-  { label: "Extra tower to place", apply: () => towerSystem.upgradeMaxTowers() },
-  { label: "Tower does more damage", apply: () => towerSystem.upgradeTowerDamage() },
-  { label: "I do more damage", apply: () => player.upgradePlayerDamage() },
-  { label: "Enemies move slower", apply: () => enemySystem.upgradeSlowEnemies() },
-  { label: "Tower shoots faster", apply: () => towerSystem.upgradeTowerFireRate() },
-  { label: "I shoot faster", apply: () => player.upgradePlayerFireRate() },
+  {
+    label: "+1 Laser Tower",
+    iconId: "tower_laser_add",
+    apply: () => towerSystem.grantTowerStock("laser", 1)
+  },
+  { label: "Tower does more damage", iconId: "tower_damage", apply: () => towerSystem.upgradeTowerDamage() },
+  { label: "I do more damage", iconId: "player_damage", apply: () => player.upgradePlayerDamage() },
+  { label: "Enemies move slower", iconId: "enemy_slow", apply: () => enemySystem.upgradeSlowEnemies() },
+  { label: "Tower shoots faster", iconId: "tower_fire_rate", apply: () => towerSystem.upgradeTowerFireRate() },
+  { label: "I shoot faster", iconId: "player_fire_rate", apply: () => player.upgradePlayerFireRate() },
 ];
 
 let waveState = "PLAYING";
@@ -588,35 +480,14 @@ function startWave(wave) {
 }
 
 function showUpgradeMenu() {
-  if (player.controls.isLocked) {
-    player.setMenuMode(true);
-    crosshairEl.style.display = "none";
-    virtualCursorEl.classList.add("visible");
-    vCursorX = window.innerWidth / 2;
-    vCursorY = window.innerHeight / 2;
-    updateVirtualCursor();
-  }
-
-  upgradeMenuEl.classList.remove("hidden");
-  upgradeOptionsEl.innerHTML = "";
+  player.setMenuMode(true);
+  vCursorX = window.innerWidth * 0.5;
+  vCursorY = window.innerHeight * 0.5;
 
   const shuffled = [...ALL_UPGRADES].sort(() => 0.5 - Math.random());
-  const selected = shuffled.slice(0, UI_CONFIG.upgradesShown);
-
-  selected.forEach(upgrade => {
-    const btn = document.createElement("button");
-    btn.className = "upgrade-btn";
-    btn.textContent = upgrade.label;
-    btn.onclick = () => {
-      upgrade.apply();
-      upgradeMenuEl.classList.add("hidden");
-      player.setMenuMode(false);
-      crosshairEl.style.display = "";
-      virtualCursorEl.classList.remove("visible");
-      startWave(currentWave + 1);
-    };
-    upgradeOptionsEl.appendChild(btn);
-  });
+  currentUpgradeOptions = shuffled.slice(0, UI_CONFIG.upgradesShown);
+  hoveredUpgradeIndex = -1;
+  updateMenuHoverFromVirtualCursor();
 }
 
 function animate() {
@@ -647,12 +518,35 @@ function animate() {
       towerSystem.update(deltaSeconds, enemySystem);
     }
   }
-  refreshBuildStatus();
 
-  waveCounterEl.textContent = currentWave;
-  towersAvailableEl.textContent = towerSystem.getAvailableTowers();
+  const towerInventory = towerSystem
+    ? towerSystem.getTowerInventory().map((entry) => ({
+      ...entry,
+      iconId: entry.type === "laser" ? "tower_laser_add" : "tower_laser_add",
+    }))
+    : [];
 
+  uiOverlay.setState({
+    showCrosshair: waveState !== "MENU",
+    menuOpen: waveState === "MENU",
+    menuOptions: currentUpgradeOptions.map((upgrade) => ({
+      label: upgrade.label,
+      iconId: upgrade.iconId,
+    })),
+    hoveredMenuIndex: hoveredUpgradeIndex,
+    menuCursorX: vCursorX,
+    menuCursorY: vCursorY,
+    menuCursorVisible: waveState === "MENU" && !!player?.controls?.isLocked,
+    jetpackFuelRatio: player ? player.getJetpackFuelRatio() : 1,
+    towerInventory,
+    selectedTowerType: towerSystem ? towerSystem.getSelectedTowerType() : null,
+  });
+  uiOverlay.draw();
+
+  renderer.clear();
   renderer.render(scene, camera);
+  renderer.clearDepth();
+  renderer.render(uiOverlay.scene, uiOverlay.camera);
   requestAnimationFrame(animate);
 }
 
@@ -666,11 +560,6 @@ function initGame() {
     domElement: renderer.domElement,
     moveBounds: grid.moveBounds,
     eyeHeight: grid.eyeHeight,
-    ui: {
-      overlayEl,
-      jetpackFuelFillEl,
-      jetpackFuelPercentEl,
-    },
     getMovementObstacles: () => {
       const terrainObstacles = Array.isArray(grid.heightObstacles) ? grid.heightObstacles : [];
       const towerObstacles = towerSystem ? towerSystem.getMovementObstacles() : [];
@@ -692,7 +581,6 @@ function initGame() {
     isPrimaryDown = false;
     if (towerSystem && towerSystem.isBuildMode()) {
       towerSystem.cancelPlacement();
-      refreshBuildStatus();
     }
   });
   player.controls.addEventListener("lock", updatePauseState);
@@ -711,10 +599,11 @@ function initGame() {
         enemySystem.forceSpawnEnemy(type, spawner);
       }
     },
-    hideOverlay: () => {
-      document.getElementById("overlay").style.display = "none";
-      if (player && player.controls) player.controls.lock();
-    }
+    lockControls: () => {
+      if (player && player.controls) {
+        player.controls.lock();
+      }
+    },
   };
 
   startWave(WAVE_CONFIG.initialWave);
@@ -727,4 +616,7 @@ window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  uiOverlay.resize(window.innerWidth, window.innerHeight);
+  vCursorX = clamp(vCursorX, 0, window.innerWidth);
+  vCursorY = clamp(vCursorY, 0, window.innerHeight);
 });
