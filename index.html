@@ -114,6 +114,38 @@
       backdrop-filter: blur(3px);
     }
 
+    #jetpack-ui {
+      margin-top: 8px;
+      min-width: 170px;
+    }
+
+    #jetpack-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      opacity: 0.9;
+    }
+
+    #jetpack-fuel-bar {
+      margin-top: 5px;
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid rgba(197, 228, 255, 0.4);
+      background: rgba(9, 15, 27, 0.65);
+    }
+
+    #jetpack-fuel-fill {
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, #58f3ff 0%, #5fb6ff 100%);
+      transition: width 0.08s linear;
+    }
+
     #mobile-ui {
       position: fixed;
       inset: 0;
@@ -202,6 +234,15 @@
   <div id="app"></div>
   <div id="hud">
     <div id="build-status">Combat mode</div>
+    <div id="jetpack-ui">
+      <div id="jetpack-header">
+        <span>Jetpack Fuel</span>
+        <span id="jetpack-fuel-percent">100%</span>
+      </div>
+      <div id="jetpack-fuel-bar">
+        <div id="jetpack-fuel-fill"></div>
+      </div>
+    </div>
   </div>
 
   <div id="bottom-bar"

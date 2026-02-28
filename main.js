@@ -8,6 +8,8 @@ import { loadModels, getModel } from "./models.js";
 const app = document.getElementById("app");
 const overlayEl = document.getElementById("overlay");
 const buildStatusEl = document.getElementById("build-status");
+const jetpackFuelFillEl = document.getElementById("jetpack-fuel-fill");
+const jetpackFuelPercentEl = document.getElementById("jetpack-fuel-percent");
 
 const movePadEl = document.getElementById("move-pad");
 const moveKnobEl = document.getElementById("move-knob");
@@ -530,7 +532,11 @@ async function initGame() {
     domElement: renderer.domElement,
     moveBounds: grid.moveBounds,
     eyeHeight: grid.eyeHeight,
-    ui: { overlayEl },
+    ui: {
+      overlayEl,
+      jetpackFuelFillEl,
+      jetpackFuelPercentEl,
+    },
     getMovementObstacles: () => (towerSystem ? towerSystem.getMovementObstacles() : []),
   });
 

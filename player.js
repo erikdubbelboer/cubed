@@ -65,6 +65,15 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
   const jumpVelocity = 10.8;
   let verticalVelocity = 0;
   let jumpQueued = false;
+  let jumpHeld = false;
+
+  const jetpackMaxFuel = 2.25;
+  const jetpackBurnRate = 1;
+  const jetpackGroundRechargeRate = 0.42;
+  const jetpackAirRechargeRate = 0.14;
+  const jetpackAcceleration = 32;
+  const jetpackMaxRiseSpeed = 8.2;
+  let jetpackFuel = jetpackMaxFuel;
 
   const projectileGeometry = new THREE.SphereGeometry(0.08, 10, 10);
   const projectileMaterial = new THREE.MeshStandardMaterial({
@@ -120,11 +129,19 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     setMovementKey(event.code, true);
     if (event.code === "Space") {
       event.preventDefault();
-      jump();
+      jumpHeld = true;
+      if (!event.repeat) {
+        jump();
+      }
     }
   });
 
-  window.addEventListener("keyup", (event) => setMovementKey(event.code, false));
+  window.addEventListener("keyup", (event) => {
+    setMovementKey(event.code, false);
+    if (event.code === "Space") {
+      jumpHeld = false;
+    }
+  });
 
   controls.addEventListener("lock", () => {
     yaw = camera.rotation.y;
@@ -137,6 +154,7 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
   controls.addEventListener("unlock", () => {
     yaw = camera.rotation.y;
     pitch = camera.rotation.x;
+    jumpHeld = false;
   });
 
   domElement.addEventListener("mousedown", (event) => {
@@ -185,6 +203,16 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
 
   function jump() {
     jumpQueued = true;
+  }
+
+  function updateJetpackUi() {
+    const fuelRatio = Math.max(0, Math.min(1, jetpackFuel / jetpackMaxFuel));
+    if (ui?.jetpackFuelFillEl) {
+      ui.jetpackFuelFillEl.style.width = `${Math.round(fuelRatio * 100)}%`;
+    }
+    if (ui?.jetpackFuelPercentEl) {
+      ui.jetpackFuelPercentEl.textContent = `${Math.round(fuelRatio * 100)}%`;
+    }
   }
 
   function tryShoot() {
@@ -291,6 +319,19 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     }
     jumpQueued = false;
 
+    const isTryingJetpack = jumpHeld && !isGrounded;
+    const usingJetpack = isTryingJetpack && jetpackFuel > 0;
+    if (usingJetpack) {
+      jetpackFuel = Math.max(0, jetpackFuel - jetpackBurnRate * deltaSeconds);
+      verticalVelocity = Math.min(
+        jetpackMaxRiseSpeed,
+        verticalVelocity + jetpackAcceleration * deltaSeconds
+      );
+    } else if (!isTryingJetpack) {
+      const rechargeRate = isGrounded ? jetpackGroundRechargeRate : jetpackAirRechargeRate;
+      jetpackFuel = Math.min(jetpackMaxFuel, jetpackFuel + rechargeRate * deltaSeconds);
+    }
+
     verticalVelocity -= gravity * deltaSeconds;
     camera.position.y += verticalVelocity * deltaSeconds;
 
@@ -343,6 +384,7 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     fireCooldownRemaining = Math.max(0, fireCooldownRemaining - deltaSeconds);
     updateLook();
     updateMovement(deltaSeconds);
+    updateJetpackUi();
     updateProjectiles(deltaSeconds, enemySystem);
   }
 
@@ -355,6 +397,7 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     virtualState.forward = 0;
     virtualState.strafe = 0;
     jumpQueued = false;
+    jumpHeld = false;
   }
 
   function getPosition() {
