@@ -106,7 +106,7 @@ function drawIconTowerLaser(ctx, x, y, size) {
   drawTowerBaseIcon(ctx, x, y, size);
 }
 
-function drawIconTowerEmp(ctx, x, y, size) {
+function drawIconTowerAoe(ctx, x, y, size) {
   const cx = x + size * 0.5;
   const cy = y + size * 0.5;
   const r = size * 0.25;
@@ -122,17 +122,59 @@ function drawIconTowerEmp(ctx, x, y, size) {
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = "rgba(118, 255, 236, 0.95)";
-  ctx.lineWidth = Math.max(1.3, size * 0.05);
+  const spikeCount = 10;
+  const spikeOuter = r * 1.78;
+  const spikeInner = r * 1.2;
+  ctx.strokeStyle = "rgba(125, 238, 255, 0.92)";
+  ctx.lineWidth = Math.max(1.2, size * 0.046);
+  for (let i = 0; i < spikeCount; i += 1) {
+    const angle = (Math.PI * 2 * i) / spikeCount;
+    const x0 = cx + Math.cos(angle) * spikeInner;
+    const y0 = cy + Math.sin(angle) * spikeInner;
+    const x1 = cx + Math.cos(angle) * spikeOuter;
+    const y1 = cy + Math.sin(angle) * spikeOuter;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  }
+}
+
+function drawIconTowerSlow(ctx, x, y, size) {
+  const cx = x + size * 0.5;
+  const cy = y + size * 0.5;
+  const rx = size * 0.2;
+  const ry = size * 0.29;
+
+  const gradient = ctx.createLinearGradient(cx, cy - ry, cx, cy + ry);
+  gradient.addColorStop(0, "rgba(205, 235, 255, 0.98)");
+  gradient.addColorStop(1, "rgba(106, 180, 239, 0.95)");
+  ctx.fillStyle = gradient;
   ctx.beginPath();
-  ctx.ellipse(cx, cy, r * 1.58, r * 0.65, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(161, 235, 255, 0.95)";
+  ctx.lineWidth = Math.max(1.2, size * 0.043);
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + size * 0.02, rx * 1.15, ry * 0.5, 0, 0, Math.PI * 2);
   ctx.stroke();
 
-  ctx.strokeStyle = "rgba(130, 216, 255, 0.78)";
-  ctx.lineWidth = Math.max(1, size * 0.035);
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, r * 1.1, r * 0.42, Math.PI * 0.5, 0, Math.PI * 2);
-  ctx.stroke();
+  ctx.fillStyle = "rgba(120, 210, 255, 0.35)";
+  ctx.fillRect(
+    cx - size * 0.22,
+    cy + size * 0.2,
+    size * 0.44,
+    size * 0.24
+  );
+  ctx.strokeStyle = "rgba(143, 225, 255, 0.82)";
+  ctx.lineWidth = Math.max(1, size * 0.03);
+  ctx.strokeRect(
+    cx - size * 0.22,
+    cy + size * 0.2,
+    size * 0.44,
+    size * 0.24
+  );
 }
 
 function drawIconTowerDamage(ctx, x, y, size) {
@@ -285,11 +327,23 @@ function drawIconById(ctx, iconId, x, y, size) {
     case "tower_laser":
       drawIconTowerLaser(ctx, x, y, size);
       return;
+    case "tower_aoe_add":
+      drawIconTowerAoe(ctx, x, y, size);
+      return;
+    case "tower_aoe":
+      drawIconTowerAoe(ctx, x, y, size);
+      return;
+    case "tower_slow_add":
+      drawIconTowerSlow(ctx, x, y, size);
+      return;
+    case "tower_slow":
+      drawIconTowerSlow(ctx, x, y, size);
+      return;
     case "tower_emp_add":
-      drawIconTowerEmp(ctx, x, y, size);
+      drawIconTowerAoe(ctx, x, y, size);
       return;
     case "tower_emp":
-      drawIconTowerEmp(ctx, x, y, size);
+      drawIconTowerAoe(ctx, x, y, size);
       return;
     case "tower_damage":
       drawIconTowerDamage(ctx, x, y, size);

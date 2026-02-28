@@ -471,10 +471,16 @@ const ALL_UPGRADES = [
     apply: () => towerSystem.grantTowerStock("laser", 1)
   },
   {
-    id: "tower_emp_add",
-    label: "+1 EMP Tower",
-    iconId: "tower_emp_add",
-    apply: () => towerSystem.grantTowerStock("emp", 1)
+    id: "tower_aoe_add",
+    label: "+1 AOE Tower",
+    iconId: "tower_aoe_add",
+    apply: () => towerSystem.grantTowerStock("aoe", 1)
+  },
+  {
+    id: "tower_slow_add",
+    label: "+1 Slow Tower",
+    iconId: "tower_slow_add",
+    apply: () => towerSystem.grantTowerStock("slow", 1)
   },
   { id: "tower_damage", label: "Tower does more damage", iconId: "tower_damage", apply: () => towerSystem.upgradeTowerDamage() },
   { id: "player_damage", label: "I do more damage", iconId: "player_damage", apply: () => player.upgradePlayerDamage() },
@@ -539,13 +545,13 @@ function showUpgradeMenu() {
   const optionCount = Math.max(1, UI_CONFIG.upgradesShown);
   if (!hasShownFirstUpgradeMenu) {
     hasShownFirstUpgradeMenu = true;
-    const empUpgrade = ALL_UPGRADES.find((upgrade) => upgrade.id === "tower_emp_add") || null;
+    const aoeUpgrade = ALL_UPGRADES.find((upgrade) => upgrade.id === "tower_aoe_add") || null;
     const pool = [...ALL_UPGRADES]
-      .filter((upgrade) => upgrade !== empUpgrade)
+      .filter((upgrade) => upgrade !== aoeUpgrade)
       .sort(() => 0.5 - Math.random());
     currentUpgradeOptions = [
-      ...(empUpgrade ? [empUpgrade] : []),
-      ...pool.slice(0, Math.max(0, optionCount - (empUpgrade ? 1 : 0))),
+      ...(aoeUpgrade ? [aoeUpgrade] : []),
+      ...pool.slice(0, Math.max(0, optionCount - (aoeUpgrade ? 1 : 0))),
     ];
     currentUpgradeOptions.sort(() => 0.5 - Math.random());
   } else {
@@ -588,7 +594,13 @@ function animate() {
   const towerInventory = towerSystem
     ? towerSystem.getTowerInventory().map((entry, index) => ({
       ...entry,
-      iconId: entry.type === "emp" ? "tower_emp" : "tower_laser",
+      iconId: (
+        {
+          laser: "tower_laser",
+          aoe: "tower_aoe",
+          slow: "tower_slow",
+        }[entry.type] || "tower_laser"
+      ),
       hotkey: String((index + 1) % 10 || 0),
     }))
     : [];

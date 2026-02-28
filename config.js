@@ -540,11 +540,11 @@ export const GAME_CONFIG = {
         impactSurfaceInsetScale: 0.78,
       },
 
-      emp: {
-        // Starting EMP stock. Typical range: 0-4.
+      aoe: {
+        // Starting AOE stock. Typical range: 0-4.
         baseStock: 0,
 
-        // EMP combat tuning.
+        // AOE combat tuning.
         // Short-range pulse radius in world units. Typical range: 2.5-8.
         range: 6,
         // Time to emit one pulse while charging (seconds). Typical range: 0.4-2.5.
@@ -556,12 +556,12 @@ export const GAME_CONFIG = {
         // Thickness used for wavefront hit tests in world units. Typical range: 0.05-0.5.
         shellThickness: 0.16,
 
-        // EMP collision/build footprint.
+        // AOE collision/build footprint.
         radius: 1.1,
         halfSize: 0.9,
         height: 2.0,
 
-        // EMP visuals.
+        // AOE visuals.
         coreRadius: 0.82,
         auraRadius: 1.02,
         auraOpacity: 0.38,
@@ -574,7 +574,7 @@ export const GAME_CONFIG = {
         emissiveCharge: 0x4ce5d8,
         lightDistance: 4.4,
 
-        // EMP build preview + placed palette.
+        // AOE build preview + placed palette.
         previewColor: 0x79aed6,
         previewGlow: 0x6ce7df,
         previewOpacity: 0.55,
@@ -583,10 +583,51 @@ export const GAME_CONFIG = {
         placedColor: 0x5386ad,
         placedGlow: 0x3fd8cb,
 
-        // EMP pulse visual.
+        // AOE pulse visual.
         pulseColor: 0x8cf9ff,
         pulseOpacity: 0.74,
         pulseSegments: 20,
+      },
+
+      slow: {
+        // Starting Slow stock.
+        baseStock: 1,
+
+        // Slow combat tuning.
+        range: 7.5,
+        fireInterval: 1.1,
+        slowMultiplier: 0.6,
+        slowDuration: 1.6,
+        fieldDuration: 1.6,
+
+        // Slow collision/build footprint.
+        radius: 1.2,
+        halfSize: 0.95,
+        height: 2.1,
+
+        // Slow visuals.
+        bodyRadius: 0.62,
+        bodyHeight: 1.45,
+        hoverBaseY: 1.05,
+        bobAmplitude: 0.14,
+        bobFrequency: 3.4,
+        lightDistance: 4.4,
+        bodyColor: 0x8ec9ff,
+        bodyEmissive: 0x2a78b8,
+        emissiveIntensity: 0.85,
+        bandColor: 0xcde9ff,
+        bandOpacity: 0.66,
+        fieldColor: 0x72c9ff,
+        fieldOpacity: 0.42,
+
+        // Slow build preview + placed palette.
+        previewColor: 0x9ad2ff,
+        previewGlow: 0x64b9ff,
+        previewOpacity: 0.55,
+        previewInvalidColor: 0xb67373,
+        previewInvalidGlow: 0xa04343,
+        placedColor: 0x7ab8f0,
+        placedGlow: 0x4da5ec,
       },
     },
   },
@@ -832,6 +873,29 @@ export const GAME_CONFIG = {
       flashOpacityBoost: 0.26,
       flashScaleBoost: 0.22,
       lightFlashBoost: 6.8,
+
+      // 3D reload meter mounted directly on the gun.
+      reloadBarOffsetX: 0,
+      reloadBarOffsetY: 0.11,
+      reloadBarOffsetZ: -0.03,
+      reloadBarWidth: 0.17,
+      reloadBarHeight: 0.03,
+      reloadBarDepth: 0.03,
+      reloadBarPadding: 0.004,
+      reloadBarTrackColor: 0x0f1822,
+      reloadBarTrackOpacity: 0.9,
+      reloadBarReloadColor: 0x2a4f57,
+      reloadBarReadyColor: 0x8dffd8,
+      reloadBarEmissiveIntensity: 0.65,
+
+      // Weapon sway while moving (walk + air movement).
+      bobFrequency: 2.8,
+      bobSpeedForMax: 6.8,
+      bobSmoothing: 10,
+      bobXAmplitude: 0.01,
+      bobYAmplitude: 0.02,
+      bobPitchAmplitude: 0.035,
+      bobRollAmplitude: 0.05,
     },
   },
 };

@@ -338,7 +338,9 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       deathDuration: DISSOLVE_DEATH_DURATION,
       dissolveUniforms: [],
       dissolveMaterials: [],
-      type: normalizedType
+      type: normalizedType,
+      tempSlowMultiplier: 1,
+      tempSlowRemaining: 0,
     };
   }
 
@@ -509,6 +511,85 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     }
   }
 
+  function findActiveEnemyByMesh(enemyMesh) {
+    if (!enemyMesh) {
+      return null;
+    }
+
+    for (const enemy of activeEnemies) {
+      if (enemy.mesh === enemyMesh) {
+        return enemy;
+      }
+    }
+    return null;
+  }
+
+  function isEnemyMeshSlowed(enemyMesh) {
+    const enemy = findActiveEnemyByMesh(enemyMesh);
+    if (!enemy || !enemy.alive || enemy.dying || enemy.portalClippingActive) {
+      return false;
+    }
+    return (enemy.tempSlowRemaining ?? 0) > 0;
+  }
+
+  function applyTemporarySlowToEnemyMesh(enemyMesh, multiplier, duration) {
+    const enemy = findActiveEnemyByMesh(enemyMesh);
+    if (!enemy || !enemy.alive || enemy.dying || enemy.portalClippingActive) {
+      return false;
+    }
+
+    const safeMultiplier = THREE.MathUtils.clamp(Number(multiplier), 0, 1);
+    const safeDuration = Math.max(0, Number(duration) || 0);
+    if (!Number.isFinite(safeMultiplier) || safeDuration <= 0) {
+      return false;
+    }
+
+    enemy.tempSlowMultiplier = Math.min(enemy.tempSlowMultiplier ?? 1, safeMultiplier);
+    enemy.tempSlowRemaining = Math.max(enemy.tempSlowRemaining ?? 0, safeDuration);
+    return true;
+  }
+
+  function sphereIntersectsAabb(center, radius, minPoint, maxPoint) {
+    const clampedX = THREE.MathUtils.clamp(center.x, minPoint.x, maxPoint.x);
+    const clampedY = THREE.MathUtils.clamp(center.y, minPoint.y, maxPoint.y);
+    const clampedZ = THREE.MathUtils.clamp(center.z, minPoint.z, maxPoint.z);
+    const dx = center.x - clampedX;
+    const dy = center.y - clampedY;
+    const dz = center.z - clampedZ;
+    return (dx * dx) + (dy * dy) + (dz * dz) <= (radius * radius);
+  }
+
+  function applyTemporarySlowInAabb(center, halfExtentVec3, multiplier, duration) {
+    if (!center || !halfExtentVec3) {
+      return 0;
+    }
+
+    const halfX = Math.max(0, Number(halfExtentVec3.x) || 0);
+    const halfY = Math.max(0, Number(halfExtentVec3.y) || 0);
+    const halfZ = Math.max(0, Number(halfExtentVec3.z) || 0);
+    if (halfX <= 0 || halfY <= 0 || halfZ <= 0) {
+      return 0;
+    }
+
+    const minPoint = new THREE.Vector3(center.x - halfX, center.y - halfY, center.z - halfZ);
+    const maxPoint = new THREE.Vector3(center.x + halfX, center.y + halfY, center.z + halfZ);
+    let appliedCount = 0;
+
+    for (const enemy of activeEnemies) {
+      if (!enemy.alive || enemy.dying || enemy.portalClippingActive) {
+        continue;
+      }
+      if (!sphereIntersectsAabb(enemy.mesh.position, enemy.radius, minPoint, maxPoint)) {
+        continue;
+      }
+      if (applyTemporarySlowToEnemyMesh(enemy.mesh, multiplier, duration)) {
+        appliedCount += 1;
+      }
+    }
+
+    return appliedCount;
+  }
+
   function update(deltaSeconds, camera) {
     // Spawn new enemies
     if (spawnEventCursor < scheduledSpawns.length) {
@@ -554,7 +635,21 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       }
 
       // Move along path
-      let remaining = enemy.speed * enemySpeedMultiplier * deltaSeconds;
+      let activeSlowMultiplier = 1;
+      const slowRemaining = Math.max(0, enemy.tempSlowRemaining ?? 0);
+      if (slowRemaining > 0) {
+        enemy.tempSlowRemaining = Math.max(0, slowRemaining - deltaSeconds);
+        activeSlowMultiplier = THREE.MathUtils.clamp(enemy.tempSlowMultiplier ?? 1, 0, 1);
+        if (enemy.tempSlowRemaining <= 0) {
+          enemy.tempSlowMultiplier = 1;
+          activeSlowMultiplier = 1;
+        }
+      } else {
+        enemy.tempSlowMultiplier = 1;
+        enemy.tempSlowRemaining = 0;
+      }
+
+      let remaining = enemy.speed * enemySpeedMultiplier * activeSlowMultiplier * deltaSeconds;
       while (remaining > 0 && enemy.alive) {
         const start = travelWaypoints[enemy.segmentIndex];
         const end = travelWaypoints[enemy.segmentIndex + 1];
@@ -687,6 +782,9 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     getEnemies,
     getDamageableEnemies,
     getTargetInRange,
+    isEnemyMeshSlowed,
+    applyTemporarySlowToEnemyMesh,
+    applyTemporarySlowInAabb,
     applyDamageAtPoint,
     applyDamageToEnemyMesh,
     startWave,

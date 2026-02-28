@@ -87,15 +87,87 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
   gunLight.position.set(0, 0, PLAYER_CONFIG.gun.lightOffsetZ);
   gunGroup.add(gunLight);
 
-  const gunFlashDuration = PLAYER_CONFIG.gun.flashDuration;
-  let gunFlashTimer = 0;
+  const reloadBarWidth = PLAYER_CONFIG.gun.reloadBarWidth;
+  const reloadBarHeight = PLAYER_CONFIG.gun.reloadBarHeight;
+  const reloadBarDepth = PLAYER_CONFIG.gun.reloadBarDepth;
+  const reloadBarPadding = PLAYER_CONFIG.gun.reloadBarPadding;
+  const reloadBarFillWidth = Math.max(0.001, reloadBarWidth - (reloadBarPadding * 2));
+  const reloadBarFillHeight = Math.max(0.001, reloadBarHeight - (reloadBarPadding * 2));
+  const reloadBarFillDepth = Math.max(0.001, reloadBarDepth - (reloadBarPadding * 2));
+  const reloadBarTrackDepth = Math.max(0.001, reloadBarFillDepth * 0.22);
+  const reloadBarFillVisualDepth = Math.max(0.001, reloadBarFillDepth * 0.16);
+  const reloadBarFaceLift = 0.0012;
 
-  // Attach to camera
-  gunGroup.position.set(
+  const reloadBarGroup = new THREE.Group();
+  reloadBarGroup.position.set(
+    PLAYER_CONFIG.gun.reloadBarOffsetX,
+    PLAYER_CONFIG.gun.reloadBarOffsetY,
+    PLAYER_CONFIG.gun.reloadBarOffsetZ
+  );
+
+  const reloadBarFrame = new THREE.Mesh(
+    new THREE.BoxGeometry(reloadBarWidth, reloadBarHeight, reloadBarDepth),
+    new THREE.MeshStandardMaterial({
+      color: PLAYER_CONFIG.gun.bodyColor,
+      emissive: PLAYER_CONFIG.gun.bodyEmissive,
+      emissiveIntensity: PLAYER_CONFIG.gun.bodyEmissiveIntensity * 0.8,
+      roughness: PLAYER_CONFIG.gun.bodyRoughness,
+      metalness: PLAYER_CONFIG.gun.bodyMetalness,
+    })
+  );
+  reloadBarGroup.add(reloadBarFrame);
+
+  const reloadBarTrack = new THREE.Mesh(
+    new THREE.BoxGeometry(reloadBarFillWidth, reloadBarFillHeight, reloadBarTrackDepth),
+    new THREE.MeshBasicMaterial({
+      color: PLAYER_CONFIG.gun.reloadBarTrackColor,
+      transparent: true,
+      opacity: PLAYER_CONFIG.gun.reloadBarTrackOpacity,
+    })
+  );
+  reloadBarTrack.material.toneMapped = false;
+  reloadBarTrack.position.z = (reloadBarDepth * 0.5) + (reloadBarTrackDepth * 0.5) + reloadBarFaceLift;
+  reloadBarGroup.add(reloadBarTrack);
+
+  const reloadBarFillMaterial = new THREE.MeshBasicMaterial({
+    color: PLAYER_CONFIG.gun.reloadBarReadyColor,
+    transparent: true,
+    opacity: 1,
+  });
+  reloadBarFillMaterial.toneMapped = false;
+  const reloadBarFill = new THREE.Mesh(
+    new THREE.BoxGeometry(reloadBarFillWidth, reloadBarFillHeight, reloadBarFillVisualDepth),
+    reloadBarFillMaterial
+  );
+  reloadBarFill.position.z = reloadBarTrack.position.z + ((reloadBarTrackDepth + reloadBarFillVisualDepth) * 0.5) + reloadBarFaceLift;
+  reloadBarGroup.add(reloadBarFill);
+  gunGroup.add(reloadBarGroup);
+
+  const reloadBarReadyColor = new THREE.Color(PLAYER_CONFIG.gun.reloadBarReadyColor);
+  const reloadBarReloadColor = new THREE.Color(PLAYER_CONFIG.gun.reloadBarReloadColor);
+  const reloadBarCurrentColor = new THREE.Color();
+
+  const gunBasePosition = new THREE.Vector3(
     PLAYER_CONFIG.gun.offsetX,
     PLAYER_CONFIG.gun.offsetY,
     PLAYER_CONFIG.gun.offsetZ
   );
+  const gunBobFrequency = PLAYER_CONFIG.gun.bobFrequency;
+  const gunBobSpeedForMax = PLAYER_CONFIG.gun.bobSpeedForMax;
+  const gunBobSmoothing = PLAYER_CONFIG.gun.bobSmoothing;
+  const gunBobXAmplitude = PLAYER_CONFIG.gun.bobXAmplitude;
+  const gunBobYAmplitude = PLAYER_CONFIG.gun.bobYAmplitude;
+  const gunBobPitchAmplitude = PLAYER_CONFIG.gun.bobPitchAmplitude;
+  const gunBobRollAmplitude = PLAYER_CONFIG.gun.bobRollAmplitude;
+  let gunBobTime = 0;
+  let gunBobAmount = 0;
+  const movementStartPosition = new THREE.Vector3();
+
+  const gunFlashDuration = PLAYER_CONFIG.gun.flashDuration;
+  let gunFlashTimer = 0;
+
+  // Attach to camera
+  gunGroup.position.copy(gunBasePosition);
   camera.add(gunGroup);
   scene.add(camera);
 
@@ -170,12 +242,18 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
   const baseFireCooldown = PLAYER_CONFIG.weapon.baseFireCooldown;
 
   let fireCooldownRemaining = 0;
+  let currentFireCooldown = baseFireCooldown;
 
   let playerDamageMultiplier = 1;
   let playerFireRateMultiplier = 1;
 
   function upgradePlayerDamage() { playerDamageMultiplier += PLAYER_CONFIG.upgrades.damageUpgradeAdd; }
-  function upgradePlayerFireRate() { playerFireRateMultiplier *= PLAYER_CONFIG.upgrades.fireRateUpgradeMultiplier; }
+  function upgradePlayerFireRate() {
+    playerFireRateMultiplier *= PLAYER_CONFIG.upgrades.fireRateUpgradeMultiplier;
+    if (fireCooldownRemaining <= 0) {
+      currentFireCooldown = baseFireCooldown * playerFireRateMultiplier;
+    }
+  }
 
   function setMovementKey(code, isDown) {
     switch (code) {
@@ -351,7 +429,18 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     return Math.round(getJetpackFuelRatio() * 100);
   }
 
-  function updateGunVisuals(deltaSeconds) {
+  function updateReloadBar(progress) {
+    const clampedProgress = Math.max(0, Math.min(1, progress));
+    const fillScale = Math.max(0.001, clampedProgress);
+    reloadBarFill.scale.x = fillScale;
+    reloadBarFill.position.x = (-reloadBarFillWidth * 0.5) + (reloadBarFillWidth * fillScale * 0.5);
+
+    reloadBarCurrentColor.lerpColors(reloadBarReloadColor, reloadBarReadyColor, clampedProgress);
+    reloadBarFillMaterial.color.copy(reloadBarCurrentColor);
+    reloadBarFillMaterial.opacity = 0.45 + (clampedProgress * 0.55);
+  }
+
+  function updateGunVisuals(deltaSeconds, movementSpeed) {
     gunFlashTimer = Math.max(0, gunFlashTimer - deltaSeconds);
     const flash = gunFlashTimer > 0 ? (gunFlashTimer / gunFlashDuration) : 0;
     const flashBoost = flash > 0 ? Math.pow(flash, PLAYER_CONFIG.gun.flashExponent) : 0;
@@ -363,6 +452,31 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     gunFlashMaterial.opacity = flashBoost * PLAYER_CONFIG.gun.flashOpacityBoost;
     gunFlashMesh.scale.setScalar(1 + flashBoost * PLAYER_CONFIG.gun.flashScaleBoost);
     gunLight.intensity = flashBoost * PLAYER_CONFIG.gun.lightFlashBoost;
+
+    const reloadProgress = currentFireCooldown > 0
+      ? (1 - (fireCooldownRemaining / currentFireCooldown))
+      : 1;
+    updateReloadBar(reloadProgress);
+
+    const speedRatio = Math.min(1, movementSpeed / gunBobSpeedForMax);
+    const bobBlend = Math.min(1, deltaSeconds * gunBobSmoothing);
+    gunBobAmount += (speedRatio - gunBobAmount) * bobBlend;
+
+    if (movementSpeed > 0.001) {
+      const phaseSpeed = gunBobFrequency * (0.45 + (speedRatio * 0.9));
+      gunBobTime += deltaSeconds * phaseSpeed * Math.PI * 2;
+    }
+
+    const bobX = Math.sin(gunBobTime * 0.5) * gunBobXAmplitude * gunBobAmount;
+    const bobY = Math.sin(gunBobTime) * gunBobYAmplitude * gunBobAmount;
+    const bobPitch = Math.sin(gunBobTime) * gunBobPitchAmplitude * gunBobAmount;
+    const bobRoll = Math.cos(gunBobTime * 0.5) * gunBobRollAmplitude * gunBobAmount;
+    gunGroup.position.set(
+      gunBasePosition.x + bobX,
+      gunBasePosition.y + bobY,
+      gunBasePosition.z
+    );
+    gunGroup.rotation.set(bobPitch, 0, bobRoll);
   }
 
   function tryShoot() {
@@ -390,7 +504,9 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     });
 
     gunFlashTimer = gunFlashDuration;
-    fireCooldownRemaining = baseFireCooldown * playerFireRateMultiplier;
+    currentFireCooldown = baseFireCooldown * playerFireRateMultiplier;
+    fireCooldownRemaining = currentFireCooldown;
+    updateReloadBar(0);
     return true;
   }
 
@@ -691,8 +807,12 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
   function update(deltaSeconds, enemySystem) {
     fireCooldownRemaining = Math.max(0, fireCooldownRemaining - deltaSeconds);
     updateLook();
+    movementStartPosition.copy(camera.position);
     updateMovement(deltaSeconds);
-    updateGunVisuals(deltaSeconds);
+    const movementSpeed = deltaSeconds > 0
+      ? movementStartPosition.distanceTo(camera.position) / deltaSeconds
+      : 0;
+    updateGunVisuals(deltaSeconds, movementSpeed);
     updateProjectiles(deltaSeconds, enemySystem);
     updateProjectileImpacts(deltaSeconds);
   }
