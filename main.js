@@ -595,7 +595,6 @@ function initGame() {
     scene,
     camera,
     domElement: renderer.domElement,
-    moveBounds: grid.moveBounds,
     eyeHeight: grid.eyeHeight,
     getMovementObstacles: () => {
       const terrainObstacles = Array.isArray(grid.heightObstacles) ? grid.heightObstacles : [];

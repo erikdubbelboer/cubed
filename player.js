@@ -10,7 +10,7 @@ const PLAYER_HEAD_CLEARANCE = PLAYER_CONFIG.collision.headClearance;
 const TOWER_TOP_SNAP_DOWN = PLAYER_CONFIG.collision.towerTopSnapDown;
 const TOWER_TOP_SNAP_UP = PLAYER_CONFIG.collision.towerTopSnapUp;
 
-export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight, getMovementObstacles }) {
+export function createPlayer({ scene, camera, domElement, eyeHeight, getMovementObstacles }) {
   const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
   const controls = new PointerLockControls(camera, domElement);
   controls.pointerSpeed = PLAYER_CONFIG.controls.pointerSpeed;
@@ -166,7 +166,7 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
     PLAYER_CONFIG.projectileImpact.ringOuterRadius,
     PLAYER_CONFIG.projectileImpact.ringSegments
   );
-  const despawnMargin = PLAYER_CONFIG.weapon.despawnMargin;
+  const projectileMaxDistanceFromPlayerSq = Math.pow((GAME_CONFIG.grid.cellSize * 20), 2);
   const baseFireCooldown = PLAYER_CONFIG.weapon.baseFireCooldown;
 
   let fireCooldownRemaining = 0;
@@ -506,17 +506,12 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
         projectile.damage
       );
 
-      const outOfBounds =
-        projectile.mesh.position.x < moveBounds.minX - despawnMargin ||
-        projectile.mesh.position.x > moveBounds.maxX + despawnMargin ||
-        projectile.mesh.position.z < moveBounds.minZ - despawnMargin ||
-        projectile.mesh.position.z > moveBounds.maxZ + despawnMargin ||
-        projectile.mesh.position.y < PLAYER_CONFIG.weapon.despawnMinY ||
-        projectile.mesh.position.y > PLAYER_CONFIG.weapon.despawnMaxY;
+      const tooFarFromPlayer =
+        projectile.mesh.position.distanceToSquared(camera.position) > projectileMaxDistanceFromPlayerSq;
 
       const hitTower = projectileHitsTower(projectile.mesh.position);
 
-      if (hit || hitTower || projectile.life <= 0 || outOfBounds) {
+      if (hit || hitTower || projectile.life <= 0 || tooFarFromPlayer) {
         if (hit || hitTower) {
           spawnProjectileImpact(projectile.mesh.position);
         }
@@ -624,9 +619,6 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
       verticalVelocity = 0;
     }
 
-    camera.position.x = Math.min(moveBounds.maxX, Math.max(moveBounds.minX, camera.position.x));
-    camera.position.z = Math.min(moveBounds.maxZ, Math.max(moveBounds.minZ, camera.position.z));
-
     if (obstacles.length > 0) {
       for (let pass = 0; pass < PLAYER_CONFIG.movement.collisionPasses; pass += 1) {
         for (const obstacle of obstacles) {
@@ -687,9 +679,6 @@ export function createPlayer({ scene, camera, domElement, moveBounds, eyeHeight,
           camera.position.z += dz * push;
         }
       }
-
-      camera.position.x = Math.min(moveBounds.maxX, Math.max(moveBounds.minX, camera.position.x));
-      camera.position.z = Math.min(moveBounds.maxZ, Math.max(moveBounds.minZ, camera.position.z));
 
       const supportAfterCollision = getSupportCameraYAtPosition(camera.position.x, camera.position.z, camera.position.y);
       if (camera.position.y < supportAfterCollision) {
