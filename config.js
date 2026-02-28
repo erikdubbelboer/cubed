@@ -62,6 +62,13 @@ export const GAME_CONFIG = {
     upgradesShown: 3,
   },
 
+  economy: {
+    // Starting cash at game start (BTD6-style opening economy).
+    startingCash: 50,
+    // Tower types available before any unlock upgrades are chosen.
+    startingUnlockedTowers: ["laser"],
+  },
+
   waves: {
     // First wave number shown to player. Typical value: 1.
     initialWave: 1,
@@ -414,8 +421,8 @@ export const GAME_CONFIG = {
 
     types: {
       laser: {
-        // Starting laser stock. Typical range: 1-8.
-        baseStock: 1,
+        // Cash required to place one laser tower. Typical range: 150-350.
+        cost: 40,
 
         // Laser combat tuning.
         // Max beam reach in world units. Typical range: 4-20.
@@ -541,8 +548,8 @@ export const GAME_CONFIG = {
       },
 
       aoe: {
-        // Starting AOE stock. Typical range: 0-4.
-        baseStock: 0,
+        // Cash required to place one AOE tower. Typical range: 350-700.
+        cost: 50,
 
         // AOE combat tuning.
         // Short-range pulse radius in world units. Typical range: 2.5-8.
@@ -590,8 +597,8 @@ export const GAME_CONFIG = {
       },
 
       slow: {
-        // Starting Slow stock.
-        baseStock: 1,
+        // Cash required to place one Slow tower.
+        cost: 30,
 
         // Slow combat tuning.
         range: 7.5,
@@ -697,18 +704,115 @@ export const GAME_CONFIG = {
 
     // Enemy archetypes.
     types: {
-      red: { health: 1, speedMultiplier: 1.0, radius: 0.7, size: 1.05, color: 0xff3a30, emissive: 0x4a0e0b },
-      blue: { health: 2, speedMultiplier: 1.4, radius: 0.72, size: 1.08, color: 0x2f66ff, emissive: 0x10214a },
-      green: { health: 3, speedMultiplier: 1.8, radius: 0.75, size: 1.12, color: 0x2fbf3b, emissive: 0x103b15 },
-      yellow: { health: 4, speedMultiplier: 3.2, radius: 0.78, size: 1.15, color: 0xffdf38, emissive: 0x4a3f0a },
-      pink: { health: 5, speedMultiplier: 3.5, radius: 0.8, size: 1.18, color: 0xff76cf, emissive: 0x4a173a },
-      black: { health: 11, speedMultiplier: 1.8, radius: 0.86, size: 1.24, color: 0x18181b, emissive: 0x2f2f34 },
-      white: { health: 11, speedMultiplier: 2.0, radius: 0.86, size: 1.24, color: 0xf5f7ff, emissive: 0x38445a },
-      purple: { health: 11, speedMultiplier: 3.0, radius: 0.86, size: 1.24, color: 0x8b5cf6, emissive: 0x261349 },
-      lead: { health: 23, speedMultiplier: 1.0, radius: 0.9, size: 1.3, color: 0x6e7681, emissive: 0x2e3239 },
-      zebra: { health: 23, speedMultiplier: 1.8, radius: 0.92, size: 1.33, color: 0xd4dae2, emissive: 0x2a2e36 },
-      rainbow: { health: 47, speedMultiplier: 2.2, radius: 0.97, size: 1.42, color: 0xff8f2e, emissive: 0x4a2910 },
-      ceramic: { health: 104, speedMultiplier: 2.8, radius: 1.02, size: 1.52, color: 0xa86b32, emissive: 0x3f2410 },
+      // cashReward defaults to health/layers for BTD6-like per-pop cash pacing.
+      red: {
+        health: 1,
+        cashReward: 1,
+        speedMultiplier: 1.0,
+        radius: 0.7,
+        size: 1.05,
+        color: 0xff3a30,
+        emissive: 0x4a0e0b,
+      },
+      blue: {
+        health: 2,
+        cashReward: 2,
+        speedMultiplier: 1.4,
+        radius: 0.72,
+        size: 1.08,
+        color: 0x2f66ff,
+        emissive: 0x10214a,
+      },
+      green: {
+        health: 3,
+        cashReward: 3,
+        speedMultiplier: 1.8,
+        radius: 0.75,
+        size: 1.12,
+        color: 0x2fbf3b,
+        emissive: 0x103b15,
+      },
+      yellow: {
+        health: 4,
+        cashReward: 4,
+        speedMultiplier: 3.2,
+        radius: 0.78,
+        size: 1.15,
+        color: 0xffdf38,
+        emissive: 0x4a3f0a,
+      },
+      pink: {
+        health: 5,
+        cashReward: 5,
+        speedMultiplier: 3.5,
+        radius: 0.8,
+        size: 1.18,
+        color: 0xff76cf,
+        emissive: 0x4a173a,
+      },
+      black: {
+        health: 11,
+        cashReward: 11,
+        speedMultiplier: 1.8,
+        radius: 0.86,
+        size: 1.24,
+        color: 0x18181b,
+        emissive: 0x2f2f34,
+      },
+      white: {
+        health: 11,
+        cashReward: 11,
+        speedMultiplier: 2.0,
+        radius: 0.86,
+        size: 1.24,
+        color: 0xf5f7ff,
+        emissive: 0x38445a,
+      },
+      purple: {
+        health: 11,
+        cashReward: 11,
+        speedMultiplier: 3.0,
+        radius: 0.86,
+        size: 1.24,
+        color: 0x8b5cf6,
+        emissive: 0x261349,
+      },
+      lead: {
+        health: 23,
+        cashReward: 23,
+        speedMultiplier: 1.0,
+        radius: 0.9,
+        size: 1.3,
+        color: 0x6e7681,
+        emissive: 0x2e3239,
+      },
+      zebra: {
+        health: 23,
+        cashReward: 23,
+        speedMultiplier: 1.8,
+        radius: 0.92,
+        size: 1.33,
+        color: 0xd4dae2,
+        emissive: 0x2a2e36,
+      },
+      rainbow: {
+        health: 47,
+        cashReward: 47,
+        speedMultiplier: 2.2,
+        radius: 0.97,
+        size: 1.42,
+        color: 0xff8f2e,
+        emissive: 0x4a2910,
+      },
+      ceramic: {
+        health: 104,
+        cashReward: 104,
+        speedMultiplier: 2.8,
+        radius: 1.02,
+        size: 1.52,
+        color: 0xa86b32,
+        emissive: 0x3f2410,
+      },
     },
   },
 

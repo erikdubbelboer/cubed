@@ -370,13 +370,21 @@ function normalizeTowerInventory(inputInventory) {
     return [];
   }
 
-  return inputInventory.map((entry) => ({
-    type: entry?.type || "unknown",
-    label: entry?.label || entry?.type || "Tower",
-    iconId: entry?.iconId || "tower_laser",
-    hotkey: entry?.hotkey || "",
-    remaining: Math.max(0, Math.floor(entry?.remaining || 0)),
-  }));
+  return inputInventory.map((entry) => {
+    const remaining = Math.max(0, Math.floor(entry?.remaining ?? 1));
+    const affordable = typeof entry?.affordable === "boolean"
+      ? entry.affordable
+      : remaining > 0;
+    return {
+      type: entry?.type || "unknown",
+      label: entry?.label || entry?.type || "Tower",
+      iconId: entry?.iconId || "tower_laser",
+      hotkey: entry?.hotkey || "",
+      remaining,
+      affordable,
+      cost: Math.max(0, Math.floor(Number(entry?.cost) || 0)),
+    };
+  });
 }
 
 export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
@@ -415,6 +423,7 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
     menuCursorVisible: false,
     showCrosshair: true,
     jetpackFuelRatio: 1,
+    money: 0,
     towerInventory: [],
     selectedTowerType: null,
     buildMode: false,
@@ -463,6 +472,9 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
     }
     if (typeof partialState.jetpackFuelRatio === "number") {
       state.jetpackFuelRatio = clamp(partialState.jetpackFuelRatio, 0, 1);
+    }
+    if (typeof partialState.money === "number") {
+      state.money = Math.max(0, Math.floor(partialState.money));
     }
     if (Array.isArray(partialState.towerInventory)) {
       state.towerInventory = normalizeTowerInventory(partialState.towerInventory);
@@ -570,6 +582,36 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
     }
   }
 
+  function drawMoneyHud() {
+    const panelWidth = clamp(viewportWidth * 0.15, 136, 220);
+    const panelHeight = clamp(viewportHeight * 0.072, 50, 72);
+    const panelX = viewportWidth - panelWidth - clamp(viewportWidth * 0.02, 12, 22);
+    const panelY = clamp(viewportHeight * 0.02, 12, 20);
+
+    drawPanel(
+      drawCtx,
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+      11,
+      "rgba(12, 28, 18, 0.78)",
+      "rgba(132, 232, 158, 0.52)",
+      1.2
+    );
+
+    drawCtx.fillStyle = "rgba(210, 247, 218, 0.92)";
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "top";
+    drawCtx.font = `600 ${clamp(panelHeight * 0.26, 11, 15)}px ${FONT_STACK}`;
+    drawCtx.fillText("Cash", panelX + 12, panelY + 8);
+
+    drawCtx.fillStyle = "rgba(169, 255, 184, 0.98)";
+    drawCtx.font = `700 ${clamp(panelHeight * 0.45, 18, 28)}px ${FONT_STACK}`;
+    drawCtx.textBaseline = "alphabetic";
+    drawCtx.fillText(`$${Math.max(0, Math.floor(state.money))}`, panelX + 12, panelY + panelHeight - 9);
+  }
+
   function drawTowerTray() {
     const visibleInventory = state.towerInventory;
     towerSlotRects = [];
@@ -587,7 +629,7 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
       const item = visibleInventory[i];
       const x = startX + (slotSize + slotGap) * i;
       const isSelected = item.type === state.selectedTowerType;
-      const isDepleted = item.remaining <= 0;
+      const isDepleted = !item.affordable;
       const slotFill = isDepleted
         ? "rgba(28, 34, 44, 0.78)"
         : (isSelected ? "rgba(26, 55, 72, 0.92)" : "rgba(14, 23, 38, 0.82)");
@@ -645,29 +687,31 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
         );
       }
 
-      if (item.remaining > 1) {
-        const badgeSize = clamp(slotSize * 0.28, 20, 34);
-        const badgeX = x + slotSize - badgeSize - 6;
+      if (item.cost > 0) {
+        const costText = `$${item.cost}`;
+        const badgeHeight = clamp(slotSize * 0.2, 18, 26);
+        drawCtx.font = `700 ${clamp(slotSize * 0.13, 10, 14)}px ${FONT_STACK}`;
+        const badgeWidth = clamp(drawCtx.measureText(costText).width + 12, 30, slotSize * 0.55);
+        const badgeX = x + slotSize - badgeWidth - 6;
         const badgeY = y + 6;
         drawPanel(
           drawCtx,
           badgeX,
           badgeY,
-          badgeSize,
-          badgeSize,
-          badgeSize * 0.35,
-          "rgba(8, 19, 30, 0.92)",
-          "rgba(124, 255, 205, 0.82)",
+          badgeWidth,
+          badgeHeight,
+          clamp(badgeHeight * 0.36, 4, 8),
+          isDepleted ? "rgba(26, 34, 44, 0.9)" : "rgba(12, 28, 18, 0.9)",
+          isDepleted ? "rgba(141, 153, 166, 0.6)" : "rgba(124, 255, 205, 0.82)",
           1.2
         );
-        drawCtx.fillStyle = "rgba(122, 255, 215, 0.98)";
-        drawCtx.font = `700 ${clamp(slotSize * 0.19, 12, 18)}px ${FONT_STACK}`;
+        drawCtx.fillStyle = isDepleted ? "rgba(171, 182, 196, 0.92)" : "rgba(122, 255, 215, 0.98)";
         drawCtx.textAlign = "center";
         drawCtx.textBaseline = "middle";
         drawCtx.fillText(
-          String(item.remaining),
-          badgeX + badgeSize * 0.5,
-          badgeY + badgeSize * 0.53
+          costText,
+          badgeX + badgeWidth * 0.5,
+          badgeY + badgeHeight * 0.54
         );
       }
 
@@ -851,6 +895,7 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
     drawCtx.clearRect(0, 0, viewportWidth, viewportHeight);
 
     drawJetpackHud();
+    drawMoneyHud();
     drawTowerTray();
     drawBuildModeHint();
     drawCrosshair();

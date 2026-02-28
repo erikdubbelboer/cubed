@@ -109,6 +109,9 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     ? spawnPortalConfig.forward.clone().setY(0).normalize()
     : spawnPathDirection;
   const maxEnemyRadius = getLargestEnemyRadius();
+  const onEnemyDefeated = typeof options?.onEnemyDefeated === "function"
+    ? options.onEnemyDefeated
+    : null;
   const spawnPortalPlane = hasSpawnPortal
     ? (spawnPortalConfig.plane?.clone() ?? null)
     : null;
@@ -507,6 +510,15 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     triggerHitPulse(enemy);
     updateHealthBar(enemy);
     if (enemy.health <= 0) {
+      if (onEnemyDefeated) {
+        const configuredReward = Number(ENEMY_TYPES[enemy.type]?.cashReward);
+        const cashReward = Number.isFinite(configuredReward)
+          ? Math.max(0, Math.floor(configuredReward))
+          : Math.max(1, Math.floor(enemy.maxHealth || 1));
+        if (cashReward > 0) {
+          onEnemyDefeated(cashReward, enemy.type);
+        }
+      }
       startEnemyDissolve(enemy);
     }
   }

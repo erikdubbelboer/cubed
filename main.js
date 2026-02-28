@@ -11,6 +11,7 @@ const LIGHT_CONFIG = GAME_CONFIG.lights;
 const PORTAL_CONFIG = GAME_CONFIG.portal;
 const UI_CONFIG = GAME_CONFIG.ui;
 const WAVE_CONFIG = GAME_CONFIG.waves;
+const ECONOMY_CONFIG = GAME_CONFIG.economy ?? {};
 const CONFIGURED_ROUNDS = Array.isArray(WAVE_CONFIG.rounds) ? WAVE_CONFIG.rounds : [];
 
 const app = document.getElementById("app");
@@ -276,6 +277,33 @@ function updatePauseState() {
 
 // Listeners for player lock moved into initGame after player is created
 
+const DEFAULT_STARTING_CASH = 650;
+const startingCash = Number.isFinite(Number(ECONOMY_CONFIG.startingCash))
+  ? Math.max(0, Math.floor(Number(ECONOMY_CONFIG.startingCash)))
+  : DEFAULT_STARTING_CASH;
+let playerMoney = startingCash;
+
+function addMoney(amount) {
+  const value = Math.max(0, Math.floor(Number(amount) || 0));
+  if (value <= 0) {
+    return 0;
+  }
+  playerMoney += value;
+  return playerMoney;
+}
+
+function trySpendMoney(amount) {
+  const value = Math.max(0, Math.floor(Number(amount) || 0));
+  if (value <= 0) {
+    return true;
+  }
+  if (playerMoney < value) {
+    return false;
+  }
+  playerMoney -= value;
+  return true;
+}
+
 function handlePrimaryAction() {
   if (towerSystem.isBuildMode()) {
     const didPlaceTower = towerSystem.placeSelectedTower();
@@ -463,25 +491,12 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
-const ALL_UPGRADES = [
-  {
-    id: "tower_laser_add",
-    label: "+1 Laser Tower",
-    iconId: "tower_laser_add",
-    apply: () => towerSystem.grantTowerStock("laser", 1)
-  },
-  {
-    id: "tower_aoe_add",
-    label: "+1 AOE Tower",
-    iconId: "tower_aoe_add",
-    apply: () => towerSystem.grantTowerStock("aoe", 1)
-  },
-  {
-    id: "tower_slow_add",
-    label: "+1 Slow Tower",
-    iconId: "tower_slow_add",
-    apply: () => towerSystem.grantTowerStock("slow", 1)
-  },
+const TOWER_UNLOCK_UPGRADES = [
+  { id: "tower_aoe_unlock", label: "Unlock AOE Tower", iconId: "tower_aoe_add", towerType: "aoe" },
+  { id: "tower_slow_unlock", label: "Unlock Slow Tower", iconId: "tower_slow_add", towerType: "slow" },
+];
+
+const BASE_UPGRADES = [
   { id: "tower_damage", label: "Tower does more damage", iconId: "tower_damage", apply: () => towerSystem.upgradeTowerDamage() },
   { id: "player_damage", label: "I do more damage", iconId: "player_damage", apply: () => player.upgradePlayerDamage() },
   { id: "enemy_slow", label: "Enemies move slower", iconId: "enemy_slow", apply: () => enemySystem.upgradeSlowEnemies() },
@@ -489,10 +504,21 @@ const ALL_UPGRADES = [
   { id: "player_fire_rate", label: "I shoot faster", iconId: "player_fire_rate", apply: () => player.upgradePlayerFireRate() },
 ];
 
+function getUpgradePool() {
+  const unlockUpgrades = TOWER_UNLOCK_UPGRADES
+    .filter((upgrade) => towerSystem && !towerSystem.isTowerTypeUnlocked(upgrade.towerType))
+    .map((upgrade) => ({
+      id: upgrade.id,
+      label: upgrade.label,
+      iconId: upgrade.iconId,
+      apply: () => towerSystem.unlockTowerType(upgrade.towerType),
+    }));
+  return [...unlockUpgrades, ...BASE_UPGRADES];
+}
+
 let waveState = "PLAYING";
 let currentWave = WAVE_CONFIG.initialWave;
 let waveDelay = 0;
-let hasShownFirstUpgradeMenu = false;
 
 function getEffectiveWaveNumber(wave) {
   if (CONFIGURED_ROUNDS.length === 0) {
@@ -543,21 +569,8 @@ function showUpgradeMenu() {
   vCursorY = window.innerHeight * 0.5;
 
   const optionCount = Math.max(1, UI_CONFIG.upgradesShown);
-  if (!hasShownFirstUpgradeMenu) {
-    hasShownFirstUpgradeMenu = true;
-    const aoeUpgrade = ALL_UPGRADES.find((upgrade) => upgrade.id === "tower_aoe_add") || null;
-    const pool = [...ALL_UPGRADES]
-      .filter((upgrade) => upgrade !== aoeUpgrade)
-      .sort(() => 0.5 - Math.random());
-    currentUpgradeOptions = [
-      ...(aoeUpgrade ? [aoeUpgrade] : []),
-      ...pool.slice(0, Math.max(0, optionCount - (aoeUpgrade ? 1 : 0))),
-    ];
-    currentUpgradeOptions.sort(() => 0.5 - Math.random());
-  } else {
-    const shuffled = [...ALL_UPGRADES].sort(() => 0.5 - Math.random());
-    currentUpgradeOptions = shuffled.slice(0, optionCount);
-  }
+  const shuffled = getUpgradePool().sort(() => 0.5 - Math.random());
+  currentUpgradeOptions = shuffled.slice(0, optionCount);
   hoveredUpgradeIndex = -1;
   updateMenuHoverFromVirtualCursor();
 }
@@ -617,6 +630,7 @@ function animate() {
     menuCursorY: vCursorY,
     menuCursorVisible: waveState === "MENU" && !!player?.controls?.isLocked,
     jetpackFuelRatio: player ? player.getJetpackFuelRatio() : 1,
+    money: playerMoney,
     towerInventory,
     selectedTowerType: towerSystem ? towerSystem.getSelectedTowerType() : null,
     buildMode: towerSystem ? towerSystem.isBuildMode() : false,
@@ -653,8 +667,19 @@ function initGame() {
     },
   });
 
-  enemySystem = createEnemySystem(scene, grid.pathWaypoints, { spawnPortal });
-  towerSystem = createTowerSystem({ scene, camera, grid });
+  enemySystem = createEnemySystem(scene, grid.pathWaypoints, {
+    spawnPortal,
+    onEnemyDefeated: (cashReward) => {
+      addMoney(cashReward);
+    },
+  });
+  towerSystem = createTowerSystem({
+    scene,
+    camera,
+    grid,
+    getCurrentMoney: () => playerMoney,
+    spendMoney: (amount) => trySpendMoney(amount),
+  });
 
   player.controls.addEventListener("unlock", () => {
     updatePauseState();
@@ -678,6 +703,16 @@ function initGame() {
         const spawner = grid.pathWaypoints[0];
         enemySystem.forceSpawnEnemy(type, spawner);
       }
+    },
+    addMoney: (amount = 100) => {
+      addMoney(amount);
+    },
+    getMoney: () => playerMoney,
+    unlockTower: (type) => {
+      if (towerSystem) {
+        return towerSystem.unlockTowerType(type);
+      }
+      return false;
     },
     lockControls: () => {
       if (player && player.controls) {

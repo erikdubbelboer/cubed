@@ -62,7 +62,13 @@ const TOWER_DISPLAY_NAMES = {
   slow: "Slow Tower",
 };
 
-export function createTowerSystem({ scene, camera, grid }) {
+export function createTowerSystem({
+  scene,
+  camera,
+  grid,
+  getCurrentMoney = null,
+  spendMoney = null,
+} = {}) {
   const raycaster = new THREE.Raycaster();
   const aimPoint = new THREE.Vector2(0, 0);
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -grid.tileTopY);
@@ -232,18 +238,6 @@ export function createTowerSystem({ scene, camera, grid }) {
 
   let selectedTowerType = null;
   let buildMode = false;
-  const towerStock = {
-    laser: LASER_TOWER_CONFIG.baseStock,
-    aoe: AOE_TOWER_CONFIG.baseStock ?? 0,
-    slow: SLOW_TOWER_CONFIG.baseStock ?? 0,
-  };
-  const unlockedTowerTypes = new Set(["laser"]);
-  if (towerStock.aoe > 0) {
-    unlockedTowerTypes.add("aoe");
-  }
-  if (towerStock.slow > 0) {
-    unlockedTowerTypes.add("slow");
-  }
   const towers = [];
   let previewValid = false;
   let previewPosition = null;
@@ -270,36 +264,84 @@ export function createTowerSystem({ scene, camera, grid }) {
     return towerSpecs[normalizedType] || null;
   }
 
-  function getTowerRemaining(type) {
-    const normalizedType = normalizeTowerType(type);
-    if (!normalizedType) {
-      return 0;
+  const configuredStartingUnlocks = Array.isArray(GAME_CONFIG.economy?.startingUnlockedTowers)
+    ? GAME_CONFIG.economy.startingUnlockedTowers
+    : ["laser"];
+  const unlockedTowerTypes = new Set();
+  for (const rawType of configuredStartingUnlocks) {
+    const normalizedType = normalizeTowerType(rawType);
+    if (normalizedType && getTowerSpec(normalizedType)) {
+      unlockedTowerTypes.add(normalizedType);
     }
-    return Math.max(0, towerStock[normalizedType] || 0);
+  }
+  if (!unlockedTowerTypes.has("laser")) {
+    unlockedTowerTypes.add("laser");
   }
 
-  function grantTowerStock(type, amount = 1) {
+  function getTowerCost(type) {
     const normalizedType = normalizeTowerType(type);
     if (!normalizedType) {
       return 0;
     }
-    if (!getTowerSpec(normalizedType)) {
+    const configuredCost = Number(TOWER_TYPES[normalizedType]?.cost);
+    if (!Number.isFinite(configuredCost)) {
       return 0;
     }
+    return Math.max(0, Math.floor(configuredCost));
+  }
 
-    const increment = Math.max(0, Math.floor(amount));
-    if (increment <= 0) {
-      return getTowerRemaining(normalizedType);
+  function getPlayerMoney() {
+    if (typeof getCurrentMoney !== "function") {
+      return Number.POSITIVE_INFINITY;
     }
+    const money = Number(getCurrentMoney());
+    if (!Number.isFinite(money)) {
+      return 0;
+    }
+    return Math.max(0, Math.floor(money));
+  }
 
-    towerStock[normalizedType] = getTowerRemaining(normalizedType) + increment;
+  function canAffordTower(type) {
+    const cost = getTowerCost(type);
+    if (cost <= 0) {
+      return true;
+    }
+    return getPlayerMoney() >= cost;
+  }
+
+  function spendTowerCost(type) {
+    const cost = getTowerCost(type);
+    if (cost <= 0) {
+      return true;
+    }
+    if (typeof spendMoney !== "function") {
+      return true;
+    }
+    return !!spendMoney(cost, type);
+  }
+
+  function isTowerTypeUnlocked(type) {
+    const normalizedType = normalizeTowerType(type);
+    if (!normalizedType) {
+      return false;
+    }
+    return unlockedTowerTypes.has(normalizedType);
+  }
+
+  function unlockTowerType(type) {
+    const normalizedType = normalizeTowerType(type);
+    if (!normalizedType || !getTowerSpec(normalizedType)) {
+      return false;
+    }
+    const wasUnlocked = unlockedTowerTypes.has(normalizedType);
     unlockedTowerTypes.add(normalizedType);
-    return towerStock[normalizedType];
+    return !wasUnlocked;
   }
 
-  function upgradeMaxTowers() {
-    grantTowerStock("laser", TOWER_CONFIG.maxTowerUpgradeStep);
+  function getUnlockedTowerTypes() {
+    return TOWER_TYPE_ORDER.filter((type) => unlockedTowerTypes.has(type));
   }
+
   function upgradeTowerDamage() { towerDamageMultiplier += TOWER_CONFIG.damageUpgradeAdd; }
   function upgradeTowerFireRate() { towerFireRateMultiplier *= TOWER_CONFIG.fireRateUpgradeMultiplier; }
 
@@ -869,8 +911,10 @@ export function createTowerSystem({ scene, camera, grid }) {
     if (!towerSpec) {
       return false;
     }
-
-    if (getTowerRemaining(normalizedType) <= 0) {
+    if (!isTowerTypeUnlocked(normalizedType)) {
+      return false;
+    }
+    if (!canAffordTower(normalizedType)) {
       return false;
     }
 
@@ -903,7 +947,7 @@ export function createTowerSystem({ scene, camera, grid }) {
     if (
       !buildMode
       || !towerSpec
-      || getTowerRemaining(selectedTowerType) <= 0
+      || !isTowerTypeUnlocked(selectedTowerType)
     ) {
       preview.visible = false;
       hidePathRangeHighlights();
@@ -940,7 +984,7 @@ export function createTowerSystem({ scene, camera, grid }) {
       previewPosition = new THREE.Vector3();
     }
     previewPosition.copy(preview.position);
-    previewValid = isPlacementValid(previewPosition, towerSpec.radius);
+    previewValid = canAffordTower(selectedTowerType) && isPlacementValid(previewPosition, towerSpec.radius);
     setPreviewValidityVisual(previewValid);
     setPathRangeHighlightValidityVisual(previewValid);
     updatePathRangeHighlights(previewPosition);
@@ -983,7 +1027,7 @@ export function createTowerSystem({ scene, camera, grid }) {
       !buildMode
       || !previewValid
       || !selectedTowerType
-      || getTowerRemaining(selectedTowerType) <= 0
+      || !isTowerTypeUnlocked(selectedTowerType)
       || !previewPosition
     ) {
       return false;
@@ -999,11 +1043,12 @@ export function createTowerSystem({ scene, camera, grid }) {
       scene.remove(towerMesh);
       return false;
     }
+    if (!spendTowerCost(normalizedType)) {
+      scene.remove(towerMesh);
+      return false;
+    }
     towers.push(towerEntry);
-    unlockedTowerTypes.add(normalizedType);
-
-    towerStock[normalizedType] = Math.max(0, getTowerRemaining(normalizedType) - 1);
-    if (getTowerRemaining(normalizedType) <= 0) {
+    if (!canAffordTower(normalizedType)) {
       cancelPlacement();
     }
     return true;
@@ -1893,6 +1938,10 @@ export function createTowerSystem({ scene, camera, grid }) {
 
   function getStatusText() {
     if (buildMode) {
+      if (selectedTowerType && !canAffordTower(selectedTowerType)) {
+        const towerCost = getTowerCost(selectedTowerType);
+        return `Build mode: need $${towerCost}`;
+      }
       if (previewValid) {
         const selectedLabel = TOWER_DISPLAY_NAMES[selectedTowerType] || "tower";
         return `Build mode: place ${selectedLabel}`;
@@ -1904,11 +1953,14 @@ export function createTowerSystem({ scene, camera, grid }) {
 
   function getAvailableTowers(type = null) {
     if (typeof type === "string") {
-      return getTowerRemaining(type);
+      const normalizedType = normalizeTowerType(type);
+      if (!normalizedType || !isTowerTypeUnlocked(normalizedType)) {
+        return 0;
+      }
+      return canAffordTower(normalizedType) ? 1 : 0;
     }
-
-    return Object.values(towerStock).reduce(
-      (total, count) => total + Math.max(0, count || 0),
+    return getTowerInventory().reduce(
+      (total, entry) => total + (entry.affordable ? 1 : 0),
       0
     );
   }
@@ -1917,9 +1969,11 @@ export function createTowerSystem({ scene, camera, grid }) {
     return TOWER_TYPE_ORDER
       .filter((type) => unlockedTowerTypes.has(type))
       .map((type) => ({
-      type,
-      label: TOWER_DISPLAY_NAMES[type] || type,
-      remaining: getTowerRemaining(type),
+        type,
+        label: TOWER_DISPLAY_NAMES[type] || type,
+        remaining: canAffordTower(type) ? 1 : 0,
+        affordable: canAffordTower(type),
+        cost: getTowerCost(type),
       }));
   }
 
@@ -1942,16 +1996,20 @@ export function createTowerSystem({ scene, camera, grid }) {
     getTowerInventory,
     getSelectedTowerType,
     getMovementObstacles,
-    grantTowerStock,
-    upgradeMaxTowers,
+    getTowerCost,
+    canAffordTower,
+    unlockTowerType,
+    isTowerTypeUnlocked,
+    getUnlockedTowerTypes,
     upgradeTowerDamage,
     upgradeTowerFireRate,
     forcePlaceTower: (x, z, towerType = "laser") => {
       const normalizedType = normalizeTowerType(towerType);
       const towerSpec = getTowerSpec(normalizedType);
-      if (!towerSpec || getTowerRemaining(normalizedType) <= 0) {
+      if (!towerSpec) {
         return false;
       }
+      unlockTowerType(normalizedType);
 
       const towerPosition = new THREE.Vector3(x, getBuildSurfaceY(x, z), z);
       if (!isPlacementValid(towerPosition, towerSpec.radius)) {
@@ -1968,8 +2026,6 @@ export function createTowerSystem({ scene, camera, grid }) {
         return false;
       }
       towers.push(towerEntry);
-      unlockedTowerTypes.add(normalizedType);
-      towerStock[normalizedType] = Math.max(0, getTowerRemaining(normalizedType) - 1);
       return true;
     }
   };
