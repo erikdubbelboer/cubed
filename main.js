@@ -10,11 +10,15 @@ const SCENE_CONFIG = GAME_CONFIG.scene;
 const LIGHT_CONFIG = GAME_CONFIG.lights;
 const PORTAL_CONFIG = GAME_CONFIG.portal;
 const UI_CONFIG = GAME_CONFIG.ui;
+const MOBILE_UI_CONFIG = UI_CONFIG.mobile ?? {};
 const WAVE_CONFIG = GAME_CONFIG.waves;
 const ECONOMY_CONFIG = GAME_CONFIG.economy ?? {};
 const CONFIGURED_ROUNDS = Array.isArray(WAVE_CONFIG.rounds) ? WAVE_CONFIG.rounds : [];
 const UPGRADE_DEFINITIONS = Array.isArray(GAME_CONFIG.upgrades) ? GAME_CONFIG.upgrades : [];
 const FIRST_MENU_FORCED_UPGRADE_ID = "tower_aoe_unlock";
+const MOBILE_LOOK_SENSITIVITY_SCALE = Number.isFinite(Number(MOBILE_UI_CONFIG.lookSensitivityScale))
+  ? Math.max(0.1, Number(MOBILE_UI_CONFIG.lookSensitivityScale))
+  : 1;
 
 const app = document.getElementById("app");
 
@@ -51,6 +55,10 @@ const uiOverlay = createUiOverlay({
   width: window.innerWidth,
   height: window.innerHeight,
   maxPixelRatio: SCENE_CONFIG.maxPixelRatio,
+  mobileConfig: {
+    movePadRadiusPx: UI_CONFIG.movePadRadiusPx,
+    ...MOBILE_UI_CONFIG,
+  },
 });
 
 const ambientLight = new THREE.AmbientLight(
@@ -268,8 +276,11 @@ function updatePauseState() {
 
     if (shouldPause !== isPaused) {
       isPaused = shouldPause;
-      if (isPaused && player) {
-        player.resetMovement();
+      if (isPaused) {
+        if (player) {
+          player.resetMovement();
+        }
+        resetMobileInputState();
       } else if (!isPaused) {
         clock.getDelta();
       }
@@ -331,10 +342,33 @@ let vCursorX = window.innerWidth / 2;
 let vCursorY = window.innerHeight / 2;
 let hoveredUpgradeIndex = -1;
 let currentUpgradeOptions = [];
-let lastTouchUiActionAt = -Infinity;
 let menuAdvancesWaveOnChoice = true;
 let menuResumeWaveState = "PLAYING";
 let hasShownFirstUpgradeMenu = false;
+let forceTouchControls = false;
+const mobileInput = {
+  movePointerId: null,
+  lookPointerId: null,
+  moveOriginX: 0,
+  moveOriginY: 0,
+  moveX: 0,
+  moveY: 0,
+  lookLastX: 0,
+  lookLastY: 0,
+  pressedButtons: {
+    primary: false,
+    jump: false,
+    cancel: false,
+  },
+  buttonPointerIds: {
+    primary: null,
+    jump: null,
+    cancel: null,
+  },
+  previousPrimaryPressed: false,
+  pendingBuildConfirm: false,
+  suppressPrimaryFireUntilRelease: false,
+};
 const upgradeCountsById = new Map();
 
 function updateMenuHoverFromVirtualCursor() {
@@ -457,6 +491,7 @@ function finishUpgradeMenuChoice() {
   currentUpgradeOptions = [];
   hoveredUpgradeIndex = -1;
   player.setMenuMode(false);
+  resetMobileInputState();
   if (menuAdvancesWaveOnChoice) {
     startWave(currentWave + 1);
   } else {
@@ -493,89 +528,353 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-window.addEventListener("mousemove", (event) => {
-  if (!player) return;
-  if (waveState === "MENU" && player.controls.isLocked) {
-    vCursorX += event.movementX;
-    vCursorY += event.movementY;
-    vCursorX = Math.max(0, Math.min(window.innerWidth, vCursorX));
-    vCursorY = Math.max(0, Math.min(window.innerHeight, vCursorY));
-    updateMenuHoverFromVirtualCursor();
+function isPointInsideRect(x, y, rect) {
+  if (!rect || typeof rect !== "object") {
+    return false;
   }
-}, true);
+  return (
+    x >= rect.x
+    && x <= rect.x + rect.width
+    && y >= rect.y
+    && y <= rect.y + rect.height
+  );
+}
 
-window.addEventListener("mousedown", (event) => {
-  if (performance.now() - lastTouchUiActionAt < 350) {
+function isPointInsideAnyRect(x, y, rects) {
+  if (!Array.isArray(rects)) {
+    return false;
+  }
+  for (const rect of rects) {
+    if (isPointInsideRect(x, y, rect)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function resetMobileInputState() {
+  mobileInput.movePointerId = null;
+  mobileInput.lookPointerId = null;
+  mobileInput.moveOriginX = 0;
+  mobileInput.moveOriginY = 0;
+  mobileInput.moveX = 0;
+  mobileInput.moveY = 0;
+  mobileInput.lookLastX = 0;
+  mobileInput.lookLastY = 0;
+  mobileInput.pressedButtons.primary = false;
+  mobileInput.pressedButtons.jump = false;
+  mobileInput.pressedButtons.cancel = false;
+  mobileInput.buttonPointerIds.primary = null;
+  mobileInput.buttonPointerIds.jump = null;
+  mobileInput.buttonPointerIds.cancel = null;
+  mobileInput.previousPrimaryPressed = false;
+  mobileInput.pendingBuildConfirm = false;
+  mobileInput.suppressPrimaryFireUntilRelease = false;
+  isPrimaryDown = false;
+  if (player) {
+    player.setVirtualMove(0, 0);
+    if (typeof player.setJumpHeld === "function") {
+      player.setJumpHeld(false);
+    }
+  }
+}
+
+function releaseMobileButtonPointer(pointerId) {
+  for (const action of ["primary", "jump", "cancel"]) {
+    if (mobileInput.buttonPointerIds[action] !== pointerId) {
+      continue;
+    }
+    mobileInput.buttonPointerIds[action] = null;
+    mobileInput.pressedButtons[action] = false;
+    if (action === "primary") {
+      mobileInput.pendingBuildConfirm = false;
+      mobileInput.suppressPrimaryFireUntilRelease = false;
+    }
+    if (action === "jump" && player && typeof player.setJumpHeld === "function") {
+      player.setJumpHeld(false);
+    }
+  }
+}
+
+function releaseMobilePointer(pointerId) {
+  if (mobileInput.movePointerId === pointerId) {
+    mobileInput.movePointerId = null;
+    mobileInput.moveX = 0;
+    mobileInput.moveY = 0;
+  }
+  if (mobileInput.lookPointerId === pointerId) {
+    mobileInput.lookPointerId = null;
+  }
+  releaseMobileButtonPointer(pointerId);
+}
+
+function updateMobileMoveFromPointer(pointerX, pointerY) {
+  const layout = uiOverlay.getTouchControlLayout();
+  const movePad = layout?.movePad;
+  const activationRadius = Math.max(1, Number(movePad?.activationRadius) || Number(UI_CONFIG.movePadRadiusPx) || 45);
+  const dx = pointerX - mobileInput.moveOriginX;
+  const dy = pointerY - mobileInput.moveOriginY;
+  let normalizedX = dx / activationRadius;
+  let normalizedY = dy / activationRadius;
+  const magnitude = Math.hypot(normalizedX, normalizedY);
+  if (magnitude > 1) {
+    normalizedX /= magnitude;
+    normalizedY /= magnitude;
+  }
+  mobileInput.moveX = clamp(normalizedX, -1, 1);
+  mobileInput.moveY = clamp(-normalizedY, -1, 1);
+}
+
+function applyMobileGameplayInput() {
+  if (!isTouchDevice || !player || !towerSystem) {
     return;
   }
 
-  if (isPaused || !player || !towerSystem) {
+  const inGameplayState = waveState === "PLAYING" || waveState === "DELAY";
+  if (!inGameplayState || isPaused) {
+    player.setVirtualMove(0, 0);
+    if (typeof player.setJumpHeld === "function") {
+      player.setJumpHeld(false);
+    }
+    isPrimaryDown = false;
+    mobileInput.previousPrimaryPressed = false;
     return;
   }
 
-  if (waveState === "MENU") {
+  player.setVirtualMove(mobileInput.moveX, mobileInput.moveY);
+  if (typeof player.setJumpHeld === "function") {
+    player.setJumpHeld(mobileInput.pressedButtons.jump);
+  }
+
+  const primaryPressed = !!mobileInput.pressedButtons.primary;
+  if (towerSystem.isBuildMode()) {
+    isPrimaryDown = false;
+    if (
+      mobileInput.pendingBuildConfirm
+      || (primaryPressed && !mobileInput.previousPrimaryPressed)
+    ) {
+      handlePrimaryAction();
+      mobileInput.pendingBuildConfirm = false;
+    }
+  } else {
+    isPrimaryDown = mobileInput.suppressPrimaryFireUntilRelease
+      ? false
+      : primaryPressed;
+    mobileInput.pendingBuildConfirm = false;
+  }
+  mobileInput.previousPrimaryPressed = primaryPressed;
+}
+
+if (!isTouchDevice) {
+  window.addEventListener("mousemove", (event) => {
+    if (!player) return;
+    if (waveState === "MENU" && player.controls.isLocked) {
+      vCursorX += event.movementX;
+      vCursorY += event.movementY;
+      vCursorX = Math.max(0, Math.min(window.innerWidth, vCursorX));
+      vCursorY = Math.max(0, Math.min(window.innerHeight, vCursorY));
+      updateMenuHoverFromVirtualCursor();
+    }
+  }, true);
+
+  window.addEventListener("mousedown", (event) => {
+    if (isPaused || !player || !towerSystem) {
+      return;
+    }
+
+    if (waveState === "MENU") {
+      if (event.button !== 0) {
+        return;
+      }
+      if (player.controls.isLocked) {
+        applyUpgradeChoice(uiOverlay.hitTestMenuOption(vCursorX, vCursorY));
+        return;
+      }
+      const pointer = getCanvasPointerPosition(event);
+      applyUpgradeChoice(uiOverlay.hitTestMenuOption(pointer.x, pointer.y));
+      return;
+    }
+
+    if (event.button === 2) {
+      towerSystem.selectTower("laser");
+      return;
+    }
+
     if (event.button !== 0) {
       return;
     }
-    if (player.controls.isLocked) {
-      applyUpgradeChoice(uiOverlay.hitTestMenuOption(vCursorX, vCursorY));
+
+    if (!player.controls.isLocked) {
       return;
     }
-    const pointer = getCanvasPointerPosition(event);
-    applyUpgradeChoice(uiOverlay.hitTestMenuOption(pointer.x, pointer.y));
-    return;
-  }
 
-  if (event.button === 2) {
-    towerSystem.selectTower("laser");
-    return;
-  }
-
-  if (event.button !== 0) {
-    return;
-  }
-
-  if (!player.controls.isLocked && !isTouchDevice) {
-    return;
-  }
-
-  if (towerSystem.isBuildMode()) {
-    towerSystem.placeSelectedTower();
-    return;
-  }
-
-  isPrimaryDown = true;
-}, true);
-
-window.addEventListener("pointerdown", (event) => {
-  if (!isTouchDevice || event.pointerType !== "touch" || !player || !towerSystem || isPaused) {
-    return;
-  }
-
-  const pointer = getCanvasPointerPosition(event);
-
-  if (waveState === "MENU") {
-    const pickedIndex = uiOverlay.hitTestMenuOption(pointer.x, pointer.y);
-    if (pickedIndex >= 0) {
-      applyUpgradeChoice(pickedIndex);
-      lastTouchUiActionAt = performance.now();
+    if (towerSystem.isBuildMode()) {
+      towerSystem.placeSelectedTower();
+      return;
     }
-    return;
+
+    isPrimaryDown = true;
+  }, true);
+
+  document.addEventListener("mouseup", (event) => {
+    if (event.button === 0) {
+      isPrimaryDown = false;
+    }
+  });
+}
+
+if (isTouchDevice) {
+  const mobilePointerTarget = renderer.domElement;
+
+  function captureTouchPointer(pointerId) {
+    if (typeof mobilePointerTarget.setPointerCapture !== "function") {
+      return;
+    }
+    try {
+      mobilePointerTarget.setPointerCapture(pointerId);
+    } catch (error) {
+      // Ignore capture failures from race conditions during cancel/unmount.
+    }
   }
 
-  const touchedTowerType = uiOverlay.hitTestTowerSlot(pointer.x, pointer.y);
-  if (touchedTowerType) {
-    towerSystem.selectTower(touchedTowerType);
-    lastTouchUiActionAt = performance.now();
+  function releaseTouchPointer(pointerId) {
+    if (typeof mobilePointerTarget.releasePointerCapture !== "function") {
+      return;
+    }
+    try {
+      if (mobilePointerTarget.hasPointerCapture(pointerId)) {
+        mobilePointerTarget.releasePointerCapture(pointerId);
+      }
+    } catch (error) {
+      // Ignore release failures from browsers that already dropped capture.
+    }
+  }
+
+  mobilePointerTarget.addEventListener("pointerdown", (event) => {
+    if (event.pointerType !== "touch" || !player || !towerSystem || isPaused) {
+      return;
+    }
+
+    const pointer = getCanvasPointerPosition(event);
+    if (waveState === "MENU") {
+      const pickedIndex = uiOverlay.hitTestMenuOption(pointer.x, pointer.y);
+      if (pickedIndex >= 0) {
+        applyUpgradeChoice(pickedIndex);
+      }
+      event.preventDefault();
+      return;
+    }
+
+    const touchedTowerType = uiOverlay.hitTestTowerSlot(pointer.x, pointer.y);
+    if (touchedTowerType) {
+      towerSystem.selectTower(touchedTowerType);
+      event.preventDefault();
+      return;
+    }
+
+    const touchedAction = uiOverlay.hitTestTouchAction(pointer.x, pointer.y);
+    if (touchedAction) {
+      mobileInput.buttonPointerIds[touchedAction] = event.pointerId;
+      mobileInput.pressedButtons[touchedAction] = true;
+      if (touchedAction === "primary") {
+        if (towerSystem.isBuildMode()) {
+          mobileInput.pendingBuildConfirm = true;
+          mobileInput.suppressPrimaryFireUntilRelease = true;
+        } else {
+          mobileInput.suppressPrimaryFireUntilRelease = false;
+          handlePrimaryAction();
+        }
+      }
+      if (touchedAction === "jump" && player && typeof player.setJumpHeld === "function") {
+        player.setJumpHeld(true);
+      }
+      if (touchedAction === "cancel" && towerSystem.isBuildMode()) {
+        towerSystem.cancelPlacement();
+        mobileInput.pressedButtons.cancel = false;
+        mobileInput.buttonPointerIds.cancel = null;
+      }
+      captureTouchPointer(event.pointerId);
+      event.preventDefault();
+      return;
+    }
+
+    const touchLayout = uiOverlay.getTouchControlLayout();
+    const movePad = touchLayout?.movePad ?? {};
+    const movePadActivationRadius = Math.max(
+      1,
+      Number(movePad.activationRadius) || Number(UI_CONFIG.movePadRadiusPx) || 45
+    );
+    const dx = pointer.x - (Number(movePad.centerX) || 0);
+    const dy = pointer.y - (Number(movePad.centerY) || 0);
+    const insideMovePad = (dx * dx) + (dy * dy) <= movePadActivationRadius * movePadActivationRadius;
+
+    if (insideMovePad && mobileInput.movePointerId == null) {
+      mobileInput.movePointerId = event.pointerId;
+      mobileInput.moveOriginX = pointer.x;
+      mobileInput.moveOriginY = pointer.y;
+      mobileInput.moveX = 0;
+      mobileInput.moveY = 0;
+      captureTouchPointer(event.pointerId);
+      event.preventDefault();
+      return;
+    }
+
+    const blockedRects = Array.isArray(touchLayout?.blockedRects) ? touchLayout.blockedRects : [];
+    const lookZoneTop = Number.isFinite(Number(touchLayout?.lookZoneTop))
+      ? Number(touchLayout.lookZoneTop)
+      : 0;
+    const blockedForLook = pointer.y <= lookZoneTop || isPointInsideAnyRect(pointer.x, pointer.y, blockedRects);
+    if (!blockedForLook && mobileInput.lookPointerId == null) {
+      mobileInput.lookPointerId = event.pointerId;
+      mobileInput.lookLastX = pointer.x;
+      mobileInput.lookLastY = pointer.y;
+      captureTouchPointer(event.pointerId);
+      event.preventDefault();
+    }
+  }, { capture: true, passive: false });
+
+  mobilePointerTarget.addEventListener("pointermove", (event) => {
+    if (event.pointerType !== "touch" || !player) {
+      return;
+    }
+
+    const pointer = getCanvasPointerPosition(event);
+    if (mobileInput.movePointerId === event.pointerId) {
+      updateMobileMoveFromPointer(pointer.x, pointer.y);
+      event.preventDefault();
+      return;
+    }
+
+    if (mobileInput.lookPointerId === event.pointerId) {
+      const deltaX = pointer.x - mobileInput.lookLastX;
+      const deltaY = pointer.y - mobileInput.lookLastY;
+      mobileInput.lookLastX = pointer.x;
+      mobileInput.lookLastY = pointer.y;
+      if (waveState !== "MENU" && !isPaused) {
+        player.addLookInput(deltaX * MOBILE_LOOK_SENSITIVITY_SCALE, deltaY * MOBILE_LOOK_SENSITIVITY_SCALE);
+      }
+      event.preventDefault();
+      return;
+    }
+
+    const controlsPointerIds = Object.values(mobileInput.buttonPointerIds);
+    if (controlsPointerIds.includes(event.pointerId)) {
+      event.preventDefault();
+    }
+  }, { capture: true, passive: false });
+
+  const finishTouchPointer = (event) => {
+    if (event.pointerType !== "touch") {
+      return;
+    }
+    releaseMobilePointer(event.pointerId);
+    releaseTouchPointer(event.pointerId);
     event.preventDefault();
-  }
-}, true);
+  };
 
-document.addEventListener("mouseup", (event) => {
-  if (event.button === 0) {
-    isPrimaryDown = false;
-  }
-});
+  mobilePointerTarget.addEventListener("pointerup", finishTouchPointer, { capture: true, passive: false });
+  mobilePointerTarget.addEventListener("pointercancel", finishTouchPointer, { capture: true, passive: false });
+}
 
 
 window.addEventListener("keydown", (event) => {
@@ -699,6 +998,7 @@ function showUpgradeMenu(options = {}) {
   menuResumeWaveState = resumeWaveState === "DELAY" ? "DELAY" : "PLAYING";
 
   player.setMenuMode(true);
+  resetMobileInputState();
   vCursorX = window.innerWidth * 0.5;
   vCursorY = window.innerHeight * 0.5;
 
@@ -751,6 +1051,7 @@ function animate() {
     }
 
     if (waveState === "PLAYING" || waveState === "DELAY") {
+      applyMobileGameplayInput();
       if (isPrimaryDown) {
         handlePrimaryAction();
       }
@@ -773,6 +1074,8 @@ function animate() {
       hotkey: String((index + 1) % 10 || 0),
     }))
     : [];
+  const showTouchControls = isTouchDevice || forceTouchControls;
+  const touchPortrait = window.innerHeight >= window.innerWidth;
 
   uiOverlay.setState({
     showCrosshair: waveState !== "MENU",
@@ -790,7 +1093,12 @@ function animate() {
     towerInventory,
     selectedTowerType: towerSystem ? towerSystem.getSelectedTowerType() : null,
     buildMode: towerSystem ? towerSystem.isBuildMode() : false,
-    showKeyboardHints: !isTouchDevice,
+    showKeyboardHints: !showTouchControls,
+    showTouchControls,
+    touchPortrait,
+    moveStickX: mobileInput.moveX,
+    moveStickY: mobileInput.moveY,
+    pressedActions: mobileInput.pressedButtons,
   });
   uiOverlay.draw();
 
@@ -839,7 +1147,7 @@ function initGame() {
 
   player.controls.addEventListener("unlock", () => {
     updatePauseState();
-    isPrimaryDown = false;
+    resetMobileInputState();
     if (towerSystem && towerSystem.isBuildMode()) {
       towerSystem.cancelPlacement();
     }
@@ -875,6 +1183,12 @@ function initGame() {
         player.controls.lock();
       }
     },
+    setForceTouchControls: (value = true) => {
+      forceTouchControls = !!value;
+      resetMobileInputState();
+      return forceTouchControls;
+    },
+    getForceTouchControls: () => forceTouchControls,
   };
 
   startWave(WAVE_CONFIG.initialWave);
@@ -890,4 +1204,7 @@ window.addEventListener("resize", () => {
   uiOverlay.resize(window.innerWidth, window.innerHeight);
   vCursorX = clamp(vCursorX, 0, window.innerWidth);
   vCursorY = clamp(vCursorY, 0, window.innerHeight);
+  if (isTouchDevice) {
+    resetMobileInputState();
+  }
 });

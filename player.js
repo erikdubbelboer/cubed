@@ -158,12 +158,8 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     8
   );
   const chargeDotsGroup = new THREE.Group();
-  chargeDotsGroup.position.set(
-    PLAYER_CONFIG.gun.reloadBarOffsetX,
-    PLAYER_CONFIG.gun.reloadBarOffsetY + (reloadBarHeight * 1.45),
-    PLAYER_CONFIG.gun.reloadBarOffsetZ + (reloadBarDepth * 0.5)
-  );
-  gunGroup.add(chargeDotsGroup);
+  chargeDotsGroup.position.set(0, reloadBarHeight * 1.45, reloadBarDepth * 0.5);
+  reloadBarGroup.add(chargeDotsGroup);
   let chargeDots = [];
 
   const gunBasePosition = new THREE.Vector3(
@@ -171,6 +167,68 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     PLAYER_CONFIG.gun.offsetY,
     PLAYER_CONFIG.gun.offsetZ
   );
+  const gunBaseMobilePortraitPosition = new THREE.Vector3(
+    Number.isFinite(Number(PLAYER_CONFIG.gun.mobilePortraitOffsetX))
+      ? Number(PLAYER_CONFIG.gun.mobilePortraitOffsetX)
+      : gunBasePosition.x * 0.46,
+    Number.isFinite(Number(PLAYER_CONFIG.gun.mobilePortraitOffsetY))
+      ? Number(PLAYER_CONFIG.gun.mobilePortraitOffsetY)
+      : gunBasePosition.y * 0.65,
+    Number.isFinite(Number(PLAYER_CONFIG.gun.mobilePortraitOffsetZ))
+      ? Number(PLAYER_CONFIG.gun.mobilePortraitOffsetZ)
+      : gunBasePosition.z * 0.85
+  );
+  const gunBaseMobileLandscapePosition = new THREE.Vector3(
+    Number.isFinite(Number(PLAYER_CONFIG.gun.mobileLandscapeOffsetX))
+      ? Number(PLAYER_CONFIG.gun.mobileLandscapeOffsetX)
+      : gunBasePosition.x * 0.8,
+    Number.isFinite(Number(PLAYER_CONFIG.gun.mobileLandscapeOffsetY))
+      ? Number(PLAYER_CONFIG.gun.mobileLandscapeOffsetY)
+      : gunBasePosition.y * 0.9,
+    Number.isFinite(Number(PLAYER_CONFIG.gun.mobileLandscapeOffsetZ))
+      ? Number(PLAYER_CONFIG.gun.mobileLandscapeOffsetZ)
+      : gunBasePosition.z
+  );
+  const gunMobilePortraitScale = Number.isFinite(Number(PLAYER_CONFIG.gun.mobilePortraitScale))
+    ? Math.max(0.4, Number(PLAYER_CONFIG.gun.mobilePortraitScale))
+    : 0.85;
+  const gunMobileLandscapeScale = Number.isFinite(Number(PLAYER_CONFIG.gun.mobileLandscapeScale))
+    ? Math.max(0.4, Number(PLAYER_CONFIG.gun.mobileLandscapeScale))
+    : 0.92;
+  const desktopReloadBarOffset = new THREE.Vector3(
+    Number.isFinite(Number(PLAYER_CONFIG.gun.reloadBarOffsetX))
+      ? Number(PLAYER_CONFIG.gun.reloadBarOffsetX)
+      : 0,
+    Number.isFinite(Number(PLAYER_CONFIG.gun.reloadBarOffsetY))
+      ? Number(PLAYER_CONFIG.gun.reloadBarOffsetY)
+      : 0.11,
+    Number.isFinite(Number(PLAYER_CONFIG.gun.reloadBarOffsetZ))
+      ? Number(PLAYER_CONFIG.gun.reloadBarOffsetZ)
+      : -0.03
+  );
+  const mobilePortraitReloadBarOffset = new THREE.Vector3(
+    Number.isFinite(Number(PLAYER_CONFIG.gun.mobilePortraitReloadBarOffsetX))
+      ? Number(PLAYER_CONFIG.gun.mobilePortraitReloadBarOffsetX)
+      : desktopReloadBarOffset.x,
+    Number.isFinite(Number(PLAYER_CONFIG.gun.mobilePortraitReloadBarOffsetY))
+      ? Number(PLAYER_CONFIG.gun.mobilePortraitReloadBarOffsetY)
+      : desktopReloadBarOffset.y,
+    Number.isFinite(Number(PLAYER_CONFIG.gun.mobilePortraitReloadBarOffsetZ))
+      ? Number(PLAYER_CONFIG.gun.mobilePortraitReloadBarOffsetZ)
+      : desktopReloadBarOffset.z
+  );
+  const mobileLandscapeReloadBarOffset = new THREE.Vector3(
+    Number.isFinite(Number(PLAYER_CONFIG.gun.mobileLandscapeReloadBarOffsetX))
+      ? Number(PLAYER_CONFIG.gun.mobileLandscapeReloadBarOffsetX)
+      : desktopReloadBarOffset.x,
+    Number.isFinite(Number(PLAYER_CONFIG.gun.mobileLandscapeReloadBarOffsetY))
+      ? Number(PLAYER_CONFIG.gun.mobileLandscapeReloadBarOffsetY)
+      : desktopReloadBarOffset.y,
+    Number.isFinite(Number(PLAYER_CONFIG.gun.mobileLandscapeReloadBarOffsetZ))
+      ? Number(PLAYER_CONFIG.gun.mobileLandscapeReloadBarOffsetZ)
+      : desktopReloadBarOffset.z
+  );
+  let lastWeaponHudLayoutMode = null;
   const gunBobFrequency = PLAYER_CONFIG.gun.bobFrequency;
   const gunBobSpeedForMax = PLAYER_CONFIG.gun.bobSpeedForMax;
   const gunBobSmoothing = PLAYER_CONFIG.gun.bobSmoothing;
@@ -185,8 +243,48 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
   const gunFlashDuration = PLAYER_CONFIG.gun.flashDuration;
   let gunFlashTimer = 0;
 
+  function isPortraitViewport() {
+    return window.innerHeight >= window.innerWidth;
+  }
+
+  function getActiveGunBasePosition() {
+    if (!isTouchDevice) {
+      return gunBasePosition;
+    }
+    return isPortraitViewport()
+      ? gunBaseMobilePortraitPosition
+      : gunBaseMobileLandscapePosition;
+  }
+
+  function getActiveGunScale() {
+    if (!isTouchDevice) {
+      return 1;
+    }
+    return isPortraitViewport()
+      ? gunMobilePortraitScale
+      : gunMobileLandscapeScale;
+  }
+
+  function getWeaponHudLayoutMode() {
+    if (!isTouchDevice) {
+      return "desktop";
+    }
+    return isPortraitViewport() ? "mobile_portrait" : "mobile_landscape";
+  }
+
+  function getActiveReloadBarOffset(mode = getWeaponHudLayoutMode()) {
+    if (mode === "mobile_portrait") {
+      return mobilePortraitReloadBarOffset;
+    }
+    if (mode === "mobile_landscape") {
+      return mobileLandscapeReloadBarOffset;
+    }
+    return desktopReloadBarOffset;
+  }
+
   // Attach to camera
-  gunGroup.position.copy(gunBasePosition);
+  gunGroup.position.copy(getActiveGunBasePosition());
+  gunGroup.scale.setScalar(getActiveGunScale());
   camera.add(gunGroup);
   scene.add(camera);
 
@@ -370,17 +468,14 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     setMovementKey(event.code, true);
     if (event.code === "Space") {
       event.preventDefault();
-      jumpHeld = true;
-      if (!event.repeat) {
-        jump();
-      }
+      setJumpHeld(true);
     }
   });
 
   window.addEventListener("keyup", (event) => {
     setMovementKey(event.code, false);
     if (event.code === "Space") {
-      jumpHeld = false;
+      setJumpHeld(false);
     }
   });
 
@@ -399,7 +494,7 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     lastUnlockTime = performance.now();
     yaw = camera.rotation.y;
     pitch = camera.rotation.x;
-    jumpHeld = false;
+    setJumpHeld(false);
   });
 
   function requestPointerLock(attempt = 0) {
@@ -509,6 +604,14 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     jumpQueued = true;
   }
 
+  function setJumpHeld(isHeld) {
+    const nextHeld = !!isHeld;
+    if (nextHeld && !jumpHeld) {
+      jump();
+    }
+    jumpHeld = nextHeld;
+  }
+
   function getJetpackFuelRatio() {
     if (hasInfiniteJetpackFuel) {
       return 1;
@@ -525,6 +628,47 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     jetpackFuel = jetpackMaxFuel;
   }
 
+  function applyChargeDotLayout(mode = getWeaponHudLayoutMode()) {
+    const maxDotsPerRow = 3;
+    const dotStep = reloadBarHeight * 0.9;
+    const rows = Math.max(1, Math.ceil(maxWeaponCharges / maxDotsPerRow));
+    const rowOffsetBase = ((rows - 1) * dotStep) * 0.5;
+    const isMobileLayout = mode !== "desktop";
+
+    for (let i = 0; i < chargeDots.length; i += 1) {
+      const dot = chargeDots[i];
+      if (!dot) {
+        continue;
+      }
+      const col = i % maxDotsPerRow;
+      const row = Math.floor(i / maxDotsPerRow);
+      const colsInRow = Math.min(maxDotsPerRow, maxWeaponCharges - (row * maxDotsPerRow));
+      const x = isMobileLayout
+        ? -((col + 1) * dotStep)
+        : ((col * dotStep) - (((colsInRow - 1) * dotStep) * 0.5));
+      const y = rowOffsetBase - (row * dotStep);
+      dot.position.set(x, y, 0);
+    }
+  }
+
+  function applyWeaponHudLayout() {
+    const mode = getWeaponHudLayoutMode();
+    const activeReloadOffset = getActiveReloadBarOffset(mode);
+    const reloadBarLengthScale = mode === "desktop" ? 1 : 0.5;
+
+    reloadBarGroup.position.copy(activeReloadOffset);
+    reloadBarFrame.scale.x = reloadBarLengthScale;
+    reloadBarTrack.scale.x = reloadBarLengthScale;
+    reloadBarFrame.position.x = (-reloadBarWidth * (1 - reloadBarLengthScale)) * 0.5;
+    reloadBarTrack.position.x = (-reloadBarFillWidth * (1 - reloadBarLengthScale)) * 0.5;
+    chargeDotsGroup.position.set(0, reloadBarHeight * 1.45, reloadBarDepth * 0.5);
+
+    if (lastWeaponHudLayoutMode !== mode) {
+      lastWeaponHudLayoutMode = mode;
+      applyChargeDotLayout(mode);
+    }
+  }
+
   function rebuildChargeDots() {
     for (const dot of chargeDots) {
       chargeDotsGroup.remove(dot);
@@ -532,17 +676,7 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     }
     chargeDots = [];
 
-    const maxDotsPerRow = 3;
-    const dotStep = reloadBarHeight * 0.9;
-    const rows = Math.max(1, Math.ceil(maxWeaponCharges / maxDotsPerRow));
-    const rowOffsetBase = ((rows - 1) * dotStep) * 0.5;
-
     for (let i = 0; i < maxWeaponCharges; i += 1) {
-      const col = i % maxDotsPerRow;
-      const row = Math.floor(i / maxDotsPerRow);
-      const colsInRow = Math.min(maxDotsPerRow, maxWeaponCharges - (row * maxDotsPerRow));
-      const colOffsetBase = ((colsInRow - 1) * dotStep) * 0.5;
-
       const dot = new THREE.Mesh(
         chargeDotGeometry,
         new THREE.MeshBasicMaterial({
@@ -552,14 +686,10 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
         })
       );
       dot.material.toneMapped = false;
-      dot.position.set(
-        (col * dotStep) - colOffsetBase,
-        rowOffsetBase - (row * dotStep),
-        0
-      );
       chargeDotsGroup.add(dot);
       chargeDots.push(dot);
     }
+    applyChargeDotLayout();
   }
 
   function updateChargeDots(reloadProgress) {
@@ -592,9 +722,10 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
 
   function updateReloadBar(progress) {
     const clampedProgress = Math.max(0, Math.min(1, progress));
-    const fillScale = Math.max(0.001, clampedProgress);
+    const reloadBarLengthScale = getWeaponHudLayoutMode() === "desktop" ? 1 : 0.5;
+    const fillScale = Math.max(0.001, clampedProgress * reloadBarLengthScale);
     reloadBarFill.scale.x = fillScale;
-    reloadBarFill.position.x = (-reloadBarFillWidth * 0.5) + (reloadBarFillWidth * fillScale * 0.5);
+    reloadBarFill.position.x = (-reloadBarFillWidth * (1 - fillScale)) * 0.5;
 
     reloadBarCurrentColor.lerpColors(reloadBarReloadColor, reloadBarReadyColor, clampedProgress);
     reloadBarFillMaterial.color.copy(reloadBarCurrentColor);
@@ -602,10 +733,12 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     updateChargeDots(clampedProgress);
   }
 
+  applyWeaponHudLayout();
   rebuildChargeDots();
   updateReloadBar(currentWeaponCharges >= maxWeaponCharges ? 1 : 0);
 
   function updateGunVisuals(deltaSeconds, movementSpeed) {
+    applyWeaponHudLayout();
     gunFlashTimer = Math.max(0, gunFlashTimer - deltaSeconds);
     const flash = gunFlashTimer > 0 ? (gunFlashTimer / gunFlashDuration) : 0;
     const flashBoost = flash > 0 ? Math.pow(flash, PLAYER_CONFIG.gun.flashExponent) : 0;
@@ -638,10 +771,12 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     const bobY = Math.sin(gunBobTime) * gunBobYAmplitude * gunBobAmount;
     const bobPitch = Math.sin(gunBobTime) * gunBobPitchAmplitude * gunBobAmount;
     const bobRoll = Math.cos(gunBobTime * 0.5) * gunBobRollAmplitude * gunBobAmount;
+    const activeGunBase = getActiveGunBasePosition();
+    gunGroup.scale.setScalar(getActiveGunScale());
     gunGroup.position.set(
-      gunBasePosition.x + bobX,
-      gunBasePosition.y + bobY,
-      gunBasePosition.z
+      activeGunBase.x + bobX,
+      activeGunBase.y + bobY,
+      activeGunBase.z
     );
     gunGroup.rotation.set(bobPitch, 0, bobRoll);
   }
@@ -1106,7 +1241,7 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     virtualState.forward = 0;
     virtualState.strafe = 0;
     jumpQueued = false;
-    jumpHeld = false;
+    setJumpHeld(false);
   }
 
   function getPosition() {
@@ -1120,6 +1255,7 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     tryShoot,
     addLookInput,
     setVirtualMove,
+    setJumpHeld,
     resetMovement,
     getPosition,
     getJetpackFuelRatio,

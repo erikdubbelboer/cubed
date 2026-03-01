@@ -1,6 +1,16 @@
 import * as THREE from "three";
 
 const FONT_STACK = "\"Segoe UI\", sans-serif";
+const MOBILE_UI_DEFAULTS = {
+  movePadRadiusPx: 45,
+  actionButtonSizePx: 96,
+  jumpButtonSizePx: 78,
+  cancelButtonSizePx: 56,
+  edgeMarginPx: 18,
+  controlBottomOffsetPx: 26,
+  moveStickActivationScale: 1.45,
+  lookZoneTopPaddingPx: 108,
+};
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -47,6 +57,36 @@ function fillPath(ctx, points, fillStyle, strokeStyle = null, lineWidth = 1) {
     ctx.lineWidth = lineWidth;
     ctx.stroke();
   }
+}
+
+function fitLabelText(ctx, text, maxWidth, maxFontSize, minFontSize, fontWeight = 600) {
+  let fontSize = Math.max(minFontSize, maxFontSize);
+  let displayText = String(text ?? "");
+  ctx.font = `${fontWeight} ${fontSize}px ${FONT_STACK}`;
+
+  while (fontSize > minFontSize && ctx.measureText(displayText).width > maxWidth) {
+    fontSize -= 1;
+    ctx.font = `${fontWeight} ${fontSize}px ${FONT_STACK}`;
+  }
+
+  if (ctx.measureText(displayText).width <= maxWidth) {
+    return { text: displayText, fontSize };
+  }
+
+  let trimmed = displayText;
+  while (trimmed.length > 0) {
+    const candidate = `${trimmed}\u2026`;
+    if (ctx.measureText(candidate).width <= maxWidth) {
+      displayText = candidate;
+      break;
+    }
+    trimmed = trimmed.slice(0, -1);
+  }
+  if (trimmed.length === 0) {
+    displayText = "\u2026";
+  }
+
+  return { text: displayText, fontSize };
 }
 
 function drawTowerBaseIcon(ctx, x, y, size) {
@@ -483,11 +523,20 @@ function normalizeTowerInventory(inputInventory) {
   });
 }
 
-export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
+export function createUiOverlay({
+  width,
+  height,
+  maxPixelRatio = 2,
+  mobileConfig = {},
+} = {}) {
   const scene = new THREE.Scene();
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const drawCanvas = document.createElement("canvas");
   const drawCtx = drawCanvas.getContext("2d");
+  const mobileUiConfig = {
+    ...MOBILE_UI_DEFAULTS,
+    ...(mobileConfig && typeof mobileConfig === "object" ? mobileConfig : {}),
+  };
 
   const texture = new THREE.CanvasTexture(drawCanvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -524,10 +573,41 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
     selectedTowerType: null,
     buildMode: false,
     showKeyboardHints: true,
+    showTouchControls: false,
+    touchPortrait: false,
+    moveStickX: 0,
+    moveStickY: 0,
+    pressedActions: {
+      primary: false,
+      jump: false,
+      cancel: false,
+    },
   };
 
   let menuOptionRects = [];
   let towerSlotRects = [];
+  let touchActionZones = [];
+  let touchBlockedRects = [];
+  const touchControlLayout = {
+    movePad: {
+      centerX: 0,
+      centerY: 0,
+      radius: mobileUiConfig.movePadRadiusPx,
+      activationRadius: mobileUiConfig.movePadRadiusPx * mobileUiConfig.moveStickActivationScale,
+    },
+    lookZoneTop: mobileUiConfig.lookZoneTopPaddingPx,
+    blockedRects: [],
+  };
+
+  function pushTouchBlockedRect(x, y, width, height) {
+    if (!state.showTouchControls) {
+      return;
+    }
+    if (width <= 0 || height <= 0) {
+      return;
+    }
+    touchBlockedRects.push({ x, y, width, height });
+  }
 
   function resize(nextWidth, nextHeight) {
     viewportWidth = Math.max(1, Math.floor(nextWidth));
@@ -584,6 +664,25 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
     if (typeof partialState.showKeyboardHints === "boolean") {
       state.showKeyboardHints = partialState.showKeyboardHints;
     }
+    if (typeof partialState.showTouchControls === "boolean") {
+      state.showTouchControls = partialState.showTouchControls;
+    }
+    if (typeof partialState.touchPortrait === "boolean") {
+      state.touchPortrait = partialState.touchPortrait;
+    }
+    if (typeof partialState.moveStickX === "number") {
+      state.moveStickX = clamp(partialState.moveStickX, -1, 1);
+    }
+    if (typeof partialState.moveStickY === "number") {
+      state.moveStickY = clamp(partialState.moveStickY, -1, 1);
+    }
+    if (partialState.pressedActions && typeof partialState.pressedActions === "object") {
+      state.pressedActions = {
+        primary: !!partialState.pressedActions.primary,
+        jump: !!partialState.pressedActions.jump,
+        cancel: !!partialState.pressedActions.cancel,
+      };
+    }
   }
 
   function drawCrosshair() {
@@ -612,77 +711,123 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
   }
 
   function drawJetpackHud() {
-    const panelX = clamp(viewportWidth * 0.02, 12, 22);
-    const panelY = clamp(viewportHeight * 0.02, 12, 20);
-    const panelWidth = clamp(viewportWidth * 0.21, 190, 290);
-    const panelHeight = clamp(viewportHeight * 0.095, 68, 92);
-    const panelRadius = 11;
+    const fuelRatio = clamp(state.jetpackFuelRatio, 0, 1);
+    if (fuelRatio >= 0.999) {
+      return;
+    }
 
+    const isTouchPortrait = state.showTouchControls && state.touchPortrait;
+    if (isTouchPortrait) {
+      const trackWidth = clamp(viewportWidth * 0.03, 10, 16);
+      const trackHeight = clamp(viewportHeight * 0.26, 120, 230);
+      const trackX = clamp(viewportWidth * 0.02, 10, 18);
+      const trackY = clamp(
+        viewportHeight * 0.38,
+        84,
+        Math.max(84, viewportHeight - trackHeight - 24)
+      );
+      const radius = trackWidth * 0.5;
+
+      drawPanel(
+        drawCtx,
+        trackX,
+        trackY,
+        trackWidth,
+        trackHeight,
+        radius,
+        "rgba(10, 20, 34, 0.56)",
+        "rgba(152, 212, 255, 0.5)",
+        1.1
+      );
+
+      const innerPadding = 2;
+      const innerX = trackX + innerPadding;
+      const innerY = trackY + innerPadding;
+      const innerWidth = Math.max(2, trackWidth - innerPadding * 2);
+      const innerHeight = Math.max(2, trackHeight - innerPadding * 2);
+      const fillHeight = Math.max(0, innerHeight * fuelRatio);
+      if (fillHeight > 0.5) {
+        const fillY = innerY + (innerHeight - fillHeight);
+        const gradient = drawCtx.createLinearGradient(innerX, innerY + innerHeight, innerX, innerY);
+        gradient.addColorStop(0, fuelRatio < 0.22 ? "#ff8a5b" : "#5cbcff");
+        gradient.addColorStop(1, fuelRatio < 0.22 ? "#ffc59a" : "#66fff2");
+        drawPanel(
+          drawCtx,
+          innerX,
+          fillY,
+          innerWidth,
+          fillHeight,
+          innerWidth * 0.5,
+          gradient,
+          null
+        );
+      }
+
+      pushTouchBlockedRect(trackX - 6, trackY - 6, trackWidth + 12, trackHeight + 12);
+      return;
+    }
+
+    const trackWidth = clamp(viewportWidth * 0.16, 92, 168);
+    const trackHeight = clamp(viewportHeight * 0.015, 8, 12);
+    const trackX = clamp(viewportWidth * 0.02, 12, 22);
+    const trackY = clamp(viewportHeight * 0.02, 12, 20);
     drawPanel(
       drawCtx,
-      panelX,
-      panelY,
-      panelWidth,
-      panelHeight,
-      panelRadius,
-      "rgba(14, 23, 38, 0.68)",
-      "rgba(155, 202, 255, 0.28)",
-      1.2
-    );
-
-    drawCtx.fillStyle = "rgba(225, 239, 255, 0.92)";
-    drawCtx.font = `700 ${clamp(panelHeight * 0.2, 12, 16)}px ${FONT_STACK}`;
-    drawCtx.textBaseline = "top";
-    drawCtx.fillText("Jetpack Fuel", panelX + 12, panelY + 10);
-
-    const percentText = `${Math.round(state.jetpackFuelRatio * 100)}%`;
-    drawCtx.font = `700 ${clamp(panelHeight * 0.24, 14, 20)}px ${FONT_STACK}`;
-    const textWidth = drawCtx.measureText(percentText).width;
-    drawCtx.fillText(
-      percentText,
-      panelX + panelWidth - textWidth - 12,
-      panelY + 7
-    );
-
-    const barX = panelX + 12;
-    const barY = panelY + panelHeight - 24;
-    const barWidth = panelWidth - 24;
-    const barHeight = 12;
-    drawPanel(
-      drawCtx,
-      barX,
-      barY,
-      barWidth,
-      barHeight,
+      trackX,
+      trackY,
+      trackWidth,
+      trackHeight,
       999,
-      "rgba(10, 16, 28, 0.82)",
-      "rgba(197, 228, 255, 0.45)",
+      "rgba(10, 16, 28, 0.72)",
+      "rgba(170, 220, 255, 0.45)",
       1
     );
 
-    const fillWidth = Math.max(0, barWidth * state.jetpackFuelRatio);
+    const fillWidth = Math.max(0, (trackWidth - 2) * fuelRatio);
     if (fillWidth > 0.5) {
-      const gradient = drawCtx.createLinearGradient(barX, barY, barX + barWidth, barY);
-      gradient.addColorStop(0, "#58f3ff");
-      gradient.addColorStop(1, "#5fb6ff");
+      const gradient = drawCtx.createLinearGradient(trackX, trackY, trackX + trackWidth, trackY);
+      gradient.addColorStop(0, fuelRatio < 0.22 ? "#ff8a5b" : "#58f3ff");
+      gradient.addColorStop(1, fuelRatio < 0.22 ? "#ffc59a" : "#5fb6ff");
       drawPanel(
         drawCtx,
-        barX + 1,
-        barY + 1,
-        Math.max(0, fillWidth - 2),
-        barHeight - 2,
+        trackX + 1,
+        trackY + 1,
+        fillWidth,
+        Math.max(1, trackHeight - 2),
         999,
         gradient,
         null
       );
     }
+
+    pushTouchBlockedRect(trackX, trackY, trackWidth, trackHeight);
+  }
+
+  function getMoneyPanelRect() {
+    const panelWidth = state.showTouchControls
+      ? clamp(viewportWidth * 0.14, 108, 170)
+      : clamp(viewportWidth * 0.13, 112, 176);
+    const panelHeight = state.showTouchControls
+      ? clamp(viewportHeight * 0.062, 42, 60)
+      : clamp(viewportHeight * 0.058, 40, 56);
+    const panelX = viewportWidth - panelWidth - clamp(viewportWidth * 0.02, 12, 22);
+    const panelY = clamp(viewportHeight * 0.02, 12, 20);
+    return {
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+    };
   }
 
   function drawMoneyHud() {
-    const panelWidth = clamp(viewportWidth * 0.15, 136, 220);
-    const panelHeight = clamp(viewportHeight * 0.072, 50, 72);
-    const panelX = viewportWidth - panelWidth - clamp(viewportWidth * 0.02, 12, 22);
-    const panelY = clamp(viewportHeight * 0.02, 12, 20);
+    const {
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+    } = getMoneyPanelRect();
+    const moneyText = `$${Math.max(0, Math.floor(state.money))}`;
 
     drawPanel(
       drawCtx,
@@ -696,16 +841,25 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
       1.2
     );
 
-    drawCtx.fillStyle = "rgba(210, 247, 218, 0.92)";
-    drawCtx.textAlign = "left";
-    drawCtx.textBaseline = "top";
-    drawCtx.font = `600 ${clamp(panelHeight * 0.26, 11, 15)}px ${FONT_STACK}`;
-    drawCtx.fillText("Cash", panelX + 12, panelY + 8);
-
     drawCtx.fillStyle = "rgba(169, 255, 184, 0.98)";
-    drawCtx.font = `700 ${clamp(panelHeight * 0.45, 18, 28)}px ${FONT_STACK}`;
-    drawCtx.textBaseline = "alphabetic";
-    drawCtx.fillText(`$${Math.max(0, Math.floor(state.money))}`, panelX + 12, panelY + panelHeight - 9);
+    drawCtx.textAlign = "center";
+    drawCtx.textBaseline = "middle";
+    const fittedMoney = fitLabelText(
+      drawCtx,
+      moneyText,
+      Math.max(26, panelWidth - 14),
+      clamp(panelHeight * 0.58, 17, 30),
+      13,
+      700
+    );
+    drawCtx.font = `700 ${fittedMoney.fontSize}px ${FONT_STACK}`;
+    drawCtx.fillText(
+      fittedMoney.text,
+      panelX + panelWidth * 0.5,
+      panelY + panelHeight * 0.55
+    );
+
+    pushTouchBlockedRect(panelX, panelY, panelWidth, panelHeight);
   }
 
   function drawTowerTray() {
@@ -715,15 +869,49 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
       return;
     }
 
-    const slotSize = clamp(Math.min(viewportWidth * 0.18, viewportHeight * 0.16), 84, 116);
-    const slotGap = clamp(slotSize * 0.14, 10, 18);
-    const trayWidth = (slotSize * visibleInventory.length) + (slotGap * (visibleInventory.length - 1));
-    const startX = (viewportWidth - trayWidth) * 0.5;
-    const y = viewportHeight - slotSize - clamp(viewportHeight * 0.03, 14, 24);
+    const mobileTowerColumn = state.showTouchControls;
+    let slotSize = mobileTowerColumn
+      ? clamp(Math.min(viewportWidth * 0.14, viewportHeight * 0.09), 56, 84)
+      : clamp(Math.min(viewportWidth * 0.18, viewportHeight * 0.16), 84, 116);
+    let slotGap = mobileTowerColumn
+      ? clamp(slotSize * 0.14, 7, 12)
+      : clamp(slotSize * 0.14, 10, 18);
+    let baseX = 0;
+    let baseY = 0;
+
+    if (mobileTowerColumn) {
+      const {
+        panelX: moneyPanelX,
+        panelY: moneyPanelY,
+        panelWidth: moneyPanelWidth,
+        panelHeight: moneyPanelHeight,
+      } = getMoneyPanelRect();
+      const topGap = clamp(viewportHeight * 0.01, 6, 10);
+      const bottomMargin = clamp(viewportHeight * 0.02, 12, 20);
+      const availableHeight = Math.max(
+        52,
+        viewportHeight - (moneyPanelY + moneyPanelHeight + topGap) - bottomMargin
+      );
+      const neededHeight = (slotSize * visibleInventory.length) + (slotGap * (visibleInventory.length - 1));
+      if (neededHeight > availableHeight) {
+        const candidateSize = (
+          availableHeight - (slotGap * Math.max(0, visibleInventory.length - 1))
+        ) / Math.max(1, visibleInventory.length);
+        slotSize = clamp(candidateSize, 48, slotSize);
+        slotGap = clamp(slotSize * 0.12, 6, 10);
+      }
+      baseX = moneyPanelX + moneyPanelWidth - slotSize;
+      baseY = moneyPanelY + moneyPanelHeight + topGap;
+    } else {
+      const trayWidth = (slotSize * visibleInventory.length) + (slotGap * (visibleInventory.length - 1));
+      baseX = (viewportWidth - trayWidth) * 0.5;
+      baseY = viewportHeight - slotSize - clamp(viewportHeight * 0.03, 14, 24);
+    }
 
     for (let i = 0; i < visibleInventory.length; i += 1) {
       const item = visibleInventory[i];
-      const x = startX + (slotSize + slotGap) * i;
+      const x = mobileTowerColumn ? baseX : baseX + (slotSize + slotGap) * i;
+      const y = mobileTowerColumn ? baseY + (slotSize + slotGap) * i : baseY;
       const isSelected = item.type === state.selectedTowerType;
       const isDepleted = !item.affordable;
       const slotFill = isDepleted
@@ -746,9 +934,9 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
         slotLineWidth
       );
 
-      const iconSize = slotSize * 0.52;
+      const iconSize = slotSize * 0.9;
       const iconX = x + (slotSize - iconSize) * 0.5;
-      const iconY = y + slotSize * 0.1;
+      const iconY = y + (slotSize - iconSize) * 0.5;
       drawCtx.save();
       if (isDepleted) {
         drawCtx.globalAlpha = 0.42;
@@ -811,16 +999,6 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
         );
       }
 
-      drawCtx.textAlign = "center";
-      drawCtx.textBaseline = "alphabetic";
-      drawCtx.fillStyle = isDepleted ? "rgba(155, 166, 180, 0.88)" : "rgba(230, 241, 255, 0.92)";
-      drawCtx.font = `600 ${clamp(slotSize * 0.14, 10, 14)}px ${FONT_STACK}`;
-      drawCtx.fillText(
-        item.label,
-        x + slotSize * 0.5,
-        y + slotSize - 8
-      );
-
       towerSlotRects.push({
         type: item.type,
         x,
@@ -829,6 +1007,7 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
         height: slotSize,
         disabled: isDepleted,
       });
+      pushTouchBlockedRect(x, y, slotSize, slotSize);
     }
 
     drawCtx.textAlign = "left";
@@ -840,10 +1019,30 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
       return;
     }
 
-    const hintWidth = clamp(viewportWidth * 0.24, 190, 320);
-    const hintHeight = clamp(viewportHeight * 0.048, 30, 44);
-    const x = (viewportWidth - hintWidth) * 0.5;
-    const y = viewportHeight - clamp(viewportHeight * 0.2, 112, 165);
+    const hintText = "Q to cancel";
+    const hintFontSize = clamp(viewportHeight * 0.022, 12, 19);
+    drawCtx.font = `600 ${hintFontSize}px ${FONT_STACK}`;
+    const textWidth = drawCtx.measureText(hintText).width;
+    const horizontalPadding = clamp(hintFontSize * 0.72, 9, 16);
+    const hintWidth = clamp(textWidth + (horizontalPadding * 2), 96, viewportWidth - 18);
+    const hintHeight = clamp(hintFontSize * 1.75, 28, 42);
+
+    let x = (viewportWidth - hintWidth) * 0.5;
+    let y = viewportHeight - clamp(viewportHeight * 0.2, 112, 165);
+
+    if (!state.showTouchControls && towerSlotRects.length > 0) {
+      let trayTop = Number.POSITIVE_INFINITY;
+      let trayMinX = Number.POSITIVE_INFINITY;
+      let trayMaxX = Number.NEGATIVE_INFINITY;
+      for (const rect of towerSlotRects) {
+        trayTop = Math.min(trayTop, rect.y);
+        trayMinX = Math.min(trayMinX, rect.x);
+        trayMaxX = Math.max(trayMaxX, rect.x + rect.width);
+      }
+      const trayCenterX = (trayMinX + trayMaxX) * 0.5;
+      x = clamp(trayCenterX - hintWidth * 0.5, 9, viewportWidth - hintWidth - 9);
+      y = Math.max(10, trayTop - hintHeight - clamp(viewportHeight * 0.012, 7, 12));
+    }
 
     drawPanel(
       drawCtx,
@@ -860,8 +1059,220 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
     drawCtx.fillStyle = "rgba(229, 245, 255, 0.96)";
     drawCtx.textAlign = "center";
     drawCtx.textBaseline = "middle";
-    drawCtx.font = `600 ${clamp(hintHeight * 0.44, 12, 18)}px ${FONT_STACK}`;
-    drawCtx.fillText("Build mode active  |  Q to exit", x + hintWidth * 0.5, y + hintHeight * 0.56);
+    drawCtx.font = `600 ${clamp(hintHeight * 0.45, 12, 18)}px ${FONT_STACK}`;
+    drawCtx.fillText(hintText, x + hintWidth * 0.5, y + hintHeight * 0.54);
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "alphabetic";
+  }
+
+  function drawTouchControls() {
+    touchActionZones = [];
+
+    const movePadRadius = clamp(
+      Number(mobileUiConfig.movePadRadiusPx) || MOBILE_UI_DEFAULTS.movePadRadiusPx,
+      28,
+      92
+    );
+    const movePadActivationScale = clamp(
+      Number(mobileUiConfig.moveStickActivationScale) || MOBILE_UI_DEFAULTS.moveStickActivationScale,
+      1,
+      2.5
+    );
+    const movePadActivationRadius = movePadRadius * movePadActivationScale;
+    const edgeMargin = clamp(
+      Number(mobileUiConfig.edgeMarginPx) || MOBILE_UI_DEFAULTS.edgeMarginPx,
+      8,
+      52
+    );
+    const bottomOffset = clamp(
+      Number(mobileUiConfig.controlBottomOffsetPx) || MOBILE_UI_DEFAULTS.controlBottomOffsetPx,
+      0,
+      84
+    );
+
+    const movePadCenterX = clamp(
+      edgeMargin + movePadActivationRadius,
+      movePadActivationRadius + 6,
+      viewportWidth - movePadActivationRadius - 6
+    );
+    const movePadCenterY = clamp(
+      viewportHeight - bottomOffset - movePadActivationRadius,
+      movePadActivationRadius + 6,
+      viewportHeight - movePadActivationRadius - 6
+    );
+
+    touchControlLayout.movePad = {
+      centerX: movePadCenterX,
+      centerY: movePadCenterY,
+      radius: movePadRadius,
+      activationRadius: movePadActivationRadius,
+    };
+    touchControlLayout.lookZoneTop = clamp(
+      Number(mobileUiConfig.lookZoneTopPaddingPx) || MOBILE_UI_DEFAULTS.lookZoneTopPaddingPx,
+      0,
+      Math.max(0, viewportHeight * 0.65)
+    );
+
+    if (!state.showTouchControls || state.menuOpen) {
+      return;
+    }
+
+    drawCtx.beginPath();
+    drawCtx.arc(movePadCenterX, movePadCenterY, movePadActivationRadius, 0, Math.PI * 2);
+    drawCtx.fillStyle = "rgba(6, 18, 30, 0.16)";
+    drawCtx.fill();
+    drawCtx.lineWidth = 1.4;
+    drawCtx.strokeStyle = "rgba(155, 202, 255, 0.24)";
+    drawCtx.stroke();
+
+    drawCtx.beginPath();
+    drawCtx.arc(movePadCenterX, movePadCenterY, movePadRadius, 0, Math.PI * 2);
+    drawCtx.fillStyle = "rgba(11, 28, 44, 0.56)";
+    drawCtx.fill();
+    drawCtx.lineWidth = 1.8;
+    drawCtx.strokeStyle = "rgba(155, 223, 255, 0.52)";
+    drawCtx.stroke();
+
+    const stickMagnitude = Math.hypot(state.moveStickX, state.moveStickY);
+    const normalizedStickX = stickMagnitude > 1 ? state.moveStickX / stickMagnitude : state.moveStickX;
+    const normalizedStickY = stickMagnitude > 1 ? state.moveStickY / stickMagnitude : state.moveStickY;
+    const knobX = movePadCenterX + (normalizedStickX * movePadRadius);
+    const knobY = movePadCenterY - (normalizedStickY * movePadRadius);
+    const knobRadius = clamp(movePadRadius * 0.45, 14, 40);
+
+    drawCtx.beginPath();
+    drawCtx.arc(knobX, knobY, knobRadius, 0, Math.PI * 2);
+    drawCtx.fillStyle = "rgba(130, 236, 255, 0.74)";
+    drawCtx.fill();
+    drawCtx.lineWidth = 1.4;
+    drawCtx.strokeStyle = "rgba(214, 248, 255, 0.96)";
+    drawCtx.stroke();
+
+    pushTouchBlockedRect(
+      movePadCenterX - movePadActivationRadius,
+      movePadCenterY - movePadActivationRadius,
+      movePadActivationRadius * 2,
+      movePadActivationRadius * 2
+    );
+
+    const primaryRadius = clamp((Number(mobileUiConfig.actionButtonSizePx) || MOBILE_UI_DEFAULTS.actionButtonSizePx) * 0.5, 28, 78);
+    const jumpRadius = clamp((Number(mobileUiConfig.jumpButtonSizePx) || MOBILE_UI_DEFAULTS.jumpButtonSizePx) * 0.5, 22, 62);
+    const cancelRadius = clamp((Number(mobileUiConfig.cancelButtonSizePx) || MOBILE_UI_DEFAULTS.cancelButtonSizePx) * 0.5, 16, 44);
+
+    const actionGap = clamp(primaryRadius * 0.18, 8, 22);
+    const primaryCenterX = clamp(
+      viewportWidth - edgeMargin - primaryRadius,
+      primaryRadius + 6,
+      viewportWidth - primaryRadius - 6
+    );
+    const primaryCenterY = clamp(
+      viewportHeight - bottomOffset - primaryRadius,
+      primaryRadius + 6,
+      viewportHeight - primaryRadius - 6
+    );
+    const jumpCenterX = clamp(
+      primaryCenterX - (primaryRadius + jumpRadius + actionGap),
+      jumpRadius + 6,
+      viewportWidth - jumpRadius - 6
+    );
+    const jumpCenterY = clamp(
+      primaryCenterY - (jumpRadius * 0.42),
+      jumpRadius + 6,
+      viewportHeight - jumpRadius - 6
+    );
+    const cancelCenterX = clamp(
+      primaryCenterX,
+      cancelRadius + 6,
+      viewportWidth - cancelRadius - 6
+    );
+    const cancelCenterY = clamp(
+      primaryCenterY - (primaryRadius + cancelRadius + actionGap),
+      cancelRadius + 6,
+      viewportHeight - cancelRadius - 6
+    );
+
+    function drawActionButton(action, cx, cy, radius, label) {
+      const isPressed = !!state.pressedActions?.[action];
+      drawCtx.beginPath();
+      drawCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+      drawCtx.fillStyle = isPressed ? "rgba(72, 196, 255, 0.72)" : "rgba(16, 36, 56, 0.64)";
+      drawCtx.fill();
+      drawCtx.lineWidth = isPressed ? 2.4 : 1.6;
+      drawCtx.strokeStyle = isPressed ? "rgba(198, 244, 255, 0.98)" : "rgba(163, 218, 255, 0.54)";
+      drawCtx.stroke();
+
+      if (action === "primary") {
+        if (state.buildMode) {
+          drawCtx.strokeStyle = "rgba(220, 255, 236, 0.96)";
+          drawCtx.lineWidth = Math.max(2, radius * 0.095);
+          drawCtx.lineCap = "round";
+          drawCtx.lineJoin = "round";
+          drawCtx.beginPath();
+          drawCtx.moveTo(cx - radius * 0.3, cy + radius * 0.02);
+          drawCtx.lineTo(cx - radius * 0.08, cy + radius * 0.26);
+          drawCtx.lineTo(cx + radius * 0.34, cy - radius * 0.2);
+          drawCtx.stroke();
+        } else {
+          const arm = radius * 0.33;
+          const gap = radius * 0.11;
+          drawCtx.lineWidth = Math.max(2, radius * 0.09);
+          drawCtx.lineCap = "round";
+          drawCtx.strokeStyle = "rgba(226, 248, 255, 0.95)";
+          drawCtx.beginPath();
+          drawCtx.moveTo(cx - arm, cy);
+          drawCtx.lineTo(cx - gap, cy);
+          drawCtx.moveTo(cx + gap, cy);
+          drawCtx.lineTo(cx + arm, cy);
+          drawCtx.moveTo(cx, cy - arm);
+          drawCtx.lineTo(cx, cy - gap);
+          drawCtx.moveTo(cx, cy + gap);
+          drawCtx.lineTo(cx, cy + arm);
+          drawCtx.stroke();
+        }
+      } else if (action === "jump") {
+        drawCtx.strokeStyle = "rgba(224, 246, 255, 0.96)";
+        drawCtx.lineWidth = Math.max(2, radius * 0.11);
+        drawCtx.lineCap = "round";
+        drawCtx.lineJoin = "round";
+        drawCtx.beginPath();
+        drawCtx.moveTo(cx - radius * 0.32, cy + radius * 0.16);
+        drawCtx.lineTo(cx, cy - radius * 0.2);
+        drawCtx.lineTo(cx + radius * 0.32, cy + radius * 0.16);
+        drawCtx.stroke();
+      } else if (action === "cancel") {
+        drawCtx.strokeStyle = "rgba(246, 222, 231, 0.96)";
+        drawCtx.lineWidth = Math.max(2, radius * 0.14);
+        drawCtx.lineCap = "round";
+        drawCtx.beginPath();
+        drawCtx.moveTo(cx - radius * 0.32, cy - radius * 0.32);
+        drawCtx.lineTo(cx + radius * 0.32, cy + radius * 0.32);
+        drawCtx.moveTo(cx + radius * 0.32, cy - radius * 0.32);
+        drawCtx.lineTo(cx - radius * 0.32, cy + radius * 0.32);
+        drawCtx.stroke();
+      }
+
+      drawCtx.fillStyle = "rgba(234, 246, 255, 0.92)";
+      drawCtx.textAlign = "center";
+      drawCtx.textBaseline = "middle";
+      drawCtx.font = `700 ${clamp(radius * 0.25, 10, 16)}px ${FONT_STACK}`;
+      drawCtx.fillText(label, cx, cy + radius * 0.63);
+
+      touchActionZones.push({ action, cx, cy, radius });
+      pushTouchBlockedRect(cx - radius, cy - radius, radius * 2, radius * 2);
+    }
+
+    drawActionButton(
+      "primary",
+      primaryCenterX,
+      primaryCenterY,
+      primaryRadius,
+      state.buildMode ? "Place" : "Fire"
+    );
+    drawActionButton("jump", jumpCenterX, jumpCenterY, jumpRadius, "Jump");
+    if (state.buildMode) {
+      drawActionButton("cancel", cancelCenterX, cancelCenterY, cancelRadius, "Cancel");
+    }
+
     drawCtx.textAlign = "left";
     drawCtx.textBaseline = "alphabetic";
   }
@@ -875,18 +1286,53 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
     drawCtx.fillStyle = "rgba(4, 8, 20, 0.85)";
     drawCtx.fillRect(0, 0, viewportWidth, viewportHeight);
 
-    const panelWidth = clamp(viewportWidth * 0.82, 290, 470);
-    const panelPadding = clamp(panelWidth * 0.07, 16, 26);
-    const cardHeight = clamp(viewportHeight * 0.11, 64, 92);
-    const cardGap = clamp(cardHeight * 0.2, 10, 18);
-    const titleHeight = clamp(viewportHeight * 0.13, 78, 112);
+    const isMobileMenu = state.showTouchControls && state.touchPortrait;
+    const panelWidth = isMobileMenu
+      ? clamp(viewportWidth * 0.88, 286, 470)
+      : clamp(viewportWidth * 0.82, 290, 470);
+    const panelPadding = isMobileMenu
+      ? clamp(panelWidth * 0.06, 14, 22)
+      : clamp(panelWidth * 0.07, 16, 26);
+    let cardHeight = isMobileMenu
+      ? clamp(viewportHeight * 0.095, 56, 82)
+      : clamp(viewportHeight * 0.11, 64, 92);
+    let cardGap = isMobileMenu
+      ? clamp(cardHeight * 0.16, 8, 13)
+      : clamp(cardHeight * 0.2, 10, 18);
+    const titleHeight = isMobileMenu
+      ? clamp(viewportHeight * 0.11, 66, 94)
+      : clamp(viewportHeight * 0.13, 78, 112);
     const cardCount = Math.min(3, state.menuOptions.length);
-    const cardsHeight = cardCount > 0
+    let cardsHeight = cardCount > 0
       ? (cardCount * cardHeight) + ((cardCount - 1) * cardGap)
       : 0;
-    const panelHeight = titleHeight + cardsHeight + panelPadding * 2;
+    let panelHeight = titleHeight + cardsHeight + panelPadding * 2;
+    if (isMobileMenu) {
+      const topInset = clamp(viewportHeight * 0.035, 14, 26);
+      const bottomInset = clamp(viewportHeight * 0.02, 12, 20);
+      const maxPanelHeight = viewportHeight - topInset - bottomInset;
+      if (panelHeight > maxPanelHeight && cardCount > 0) {
+        const maxCardsHeight = Math.max(
+          cardCount * 46,
+          maxPanelHeight - titleHeight - panelPadding * 2
+        );
+        const nextCardHeight = (
+          maxCardsHeight - ((cardCount - 1) * cardGap)
+        ) / cardCount;
+        cardHeight = clamp(nextCardHeight, 46, cardHeight);
+        cardGap = clamp(cardHeight * 0.14, 6, 11);
+        cardsHeight = (cardCount * cardHeight) + ((cardCount - 1) * cardGap);
+        panelHeight = titleHeight + cardsHeight + panelPadding * 2;
+      }
+    }
     const panelX = (viewportWidth - panelWidth) * 0.5;
-    const panelY = (viewportHeight - panelHeight) * 0.5;
+    const panelY = isMobileMenu
+      ? clamp(
+        viewportHeight * 0.035,
+        8,
+        Math.max(8, viewportHeight - panelHeight - 8)
+      )
+      : (viewportHeight - panelHeight) * 0.5;
 
     drawPanel(
       drawCtx,
@@ -932,7 +1378,7 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
         hovered ? 1.8 : 1.2
       );
 
-      const iconSize = cardHeight * 0.68;
+      const iconSize = cardHeight * 0.9;
       const iconX = cardX + clamp(cardWidth * 0.03, 10, 16);
       const iconY = cardY + (cardHeight - iconSize) * 0.5;
       drawPanel(
@@ -951,9 +1397,23 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
       drawCtx.textAlign = "left";
       drawCtx.textBaseline = "middle";
       drawCtx.fillStyle = "rgba(240, 247, 255, 0.98)";
-      drawCtx.font = `600 ${clamp(cardHeight * 0.27, 13, 19)}px ${FONT_STACK}`;
+      const optionPrefix = state.showKeyboardHints ? `${i + 1}. ` : "";
+      const optionText = `${optionPrefix}${option.label}`;
+      const textMaxWidth = Math.max(
+        24,
+        cardWidth - (iconX + iconSize + clamp(cardWidth * 0.04, 12, 18) - cardX) - clamp(cardWidth * 0.04, 12, 18)
+      );
+      const fittedLabel = fitLabelText(
+        drawCtx,
+        optionText,
+        textMaxWidth,
+        clamp(cardHeight * 0.27, 13, 19),
+        11,
+        600
+      );
+      drawCtx.font = `600 ${fittedLabel.fontSize}px ${FONT_STACK}`;
       drawCtx.fillText(
-        `${i + 1}. ${option.label}`,
+        fittedLabel.text,
         iconX + iconSize + clamp(cardWidth * 0.04, 12, 18),
         cardY + cardHeight * 0.52
       );
@@ -989,13 +1449,16 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
 
     drawCtx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     drawCtx.clearRect(0, 0, viewportWidth, viewportHeight);
+    touchBlockedRects = [];
 
     drawJetpackHud();
     drawMoneyHud();
     drawTowerTray();
     drawBuildModeHint();
     drawCrosshair();
+    drawTouchControls();
     drawUpgradeMenu();
+    touchControlLayout.blockedRects = touchBlockedRects.slice();
 
     texture.needsUpdate = true;
   }
@@ -1033,6 +1496,38 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
     return result == null ? null : result;
   }
 
+  function hitTestTouchAction(x, y) {
+    if (!state.showTouchControls || state.menuOpen) {
+      return null;
+    }
+    for (let i = touchActionZones.length - 1; i >= 0; i -= 1) {
+      const zone = touchActionZones[i];
+      const dx = x - zone.cx;
+      const dy = y - zone.cy;
+      if ((dx * dx) + (dy * dy) <= zone.radius * zone.radius) {
+        return zone.action;
+      }
+    }
+    return null;
+  }
+
+  function getTouchControlLayout() {
+    const blockedRects = touchBlockedRects.slice();
+    for (const rect of towerSlotRects) {
+      blockedRects.push({
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      });
+    }
+    return {
+      movePad: { ...touchControlLayout.movePad },
+      lookZoneTop: touchControlLayout.lookZoneTop,
+      blockedRects,
+    };
+  }
+
   resize(width, height);
 
   return {
@@ -1043,5 +1538,7 @@ export function createUiOverlay({ width, height, maxPixelRatio = 2 }) {
     draw,
     hitTestMenuOption,
     hitTestTowerSlot,
+    hitTestTouchAction,
+    getTouchControlLayout,
   };
 }

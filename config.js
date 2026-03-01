@@ -60,6 +60,24 @@ export const GAME_CONFIG = {
     movePadRadiusPx: 45,
     // Number of upgrade options shown per wave-clear menu. Typical range: 2-5.
     upgradesShown: 3,
+    mobile: {
+      // Primary action button size in pixels.
+      actionButtonSizePx: 96,
+      // Jump/jetpack button size in pixels.
+      jumpButtonSizePx: 78,
+      // Build-cancel button size in pixels.
+      cancelButtonSizePx: 56,
+      // Distance from screen edges in pixels.
+      edgeMarginPx: 18,
+      // Bottom offset for controls in pixels.
+      controlBottomOffsetPx: 26,
+      // Multiplier applied to move stick activation radius.
+      moveStickActivationScale: 1.45,
+      // Top padding for look input zone in pixels.
+      lookZoneTopPaddingPx: 108,
+      // Multiplier applied to touch look deltas.
+      lookSensitivityScale: 1,
+    },
   },
 
   economy: {
@@ -72,70 +90,70 @@ export const GAME_CONFIG = {
   upgrades: [
     {
       id: "tower_aoe_unlock",
-      label: "Unlock AOE Tower",
+      label: "+AOE tower",
       iconId: "tower_aoe_add",
       maxCount: 1,
       grants: { unlockTowerType: "aoe" },
     },
     {
       id: "tower_slow_unlock",
-      label: "Unlock Slow Tower",
+      label: "+Slow tower",
       iconId: "tower_slow_add",
       maxCount: 1,
       grants: { unlockTowerType: "slow" },
     },
     {
       id: "tower_damage",
-      label: "Tower does more damage",
+      label: "+1 tower dmg",
       iconId: "tower_damage",
       maxCount: null,
       grants: { towerDamageAdd: 0.5 },
     },
     {
       id: "player_damage",
-      label: "I do more damage",
+      label: "+1 player dmg",
       iconId: "player_damage",
       maxCount: null,
       grants: { playerDamageAdd: 0.5 },
     },
     {
       id: "enemy_slow",
-      label: "Enemies move slower",
+      label: "-20% enemy spd",
       iconId: "enemy_slow",
       maxCount: null,
       grants: { enemySpeedMultiplier: 0.8 },
     },
     {
       id: "tower_fire_rate",
-      label: "Tower shoots faster",
+      label: "+tower fire",
       iconId: "tower_fire_rate",
       maxCount: null,
       grants: { towerFireRateMultiplier: 0.75 },
     },
     {
       id: "player_fire_rate",
-      label: "I shoot faster",
+      label: "+fire rate",
       iconId: "player_fire_rate",
       maxCount: null,
       grants: { playerFireRateMultiplier: 0.75 },
     },
     {
       id: "player_jetpack_efficiency",
-      label: "Jetpack fuel lasts longer",
+      label: "+jetpack fuel",
       iconId: "player_jetpack_efficiency",
       maxCount: 1,
       grants: { jetpackEfficiencyMultiplier: 2 },
     },
     {
       id: "player_weapon_charge_capacity",
-      label: "Double weapon charges",
+      label: "x2 charges",
       iconId: "player_weapon_charge_capacity",
       maxCount: 1,
       grants: { weaponMaxChargesMultiplier: 2 },
     },
     {
       id: "player_weapon_pierce",
-      label: "Shots pierce +1 enemy",
+      label: "+1 pierce",
       iconId: "player_weapon_pierce",
       maxCount: 1,
       grants: { weaponPierceAdd: 1 },
@@ -1028,6 +1046,15 @@ export const GAME_CONFIG = {
       offsetX: 0.35,
       offsetY: -0.3,
       offsetZ: -0.42,
+      // Mobile-first gun offsets. Portrait is tuned to keep reload bar/charges visible.
+      mobilePortraitOffsetX: 0.26,
+      mobilePortraitOffsetY: -0.34,
+      mobilePortraitOffsetZ: -0.56,
+      mobilePortraitScale: 0.78,
+      mobileLandscapeOffsetX: 0.3,
+      mobileLandscapeOffsetY: -0.29,
+      mobileLandscapeOffsetZ: -0.48,
+      mobileLandscapeScale: 0.9,
       barrelOffsetZ: -0.17,
       lightOffsetZ: -0.14,
 
@@ -1070,9 +1097,17 @@ export const GAME_CONFIG = {
       lightFlashBoost: 6.8,
 
       // 3D reload meter mounted directly on the gun.
+      // Desktop offset keeps reload meter above the weapon.
       reloadBarOffsetX: 0,
       reloadBarOffsetY: 0.11,
       reloadBarOffsetZ: -0.03,
+      // Mobile offsets place reload meter on the left side of the weapon.
+      mobilePortraitReloadBarOffsetX: -0.1,
+      mobilePortraitReloadBarOffsetY: 0.07,
+      mobilePortraitReloadBarOffsetZ: 0.01,
+      mobileLandscapeReloadBarOffsetX: -0.09,
+      mobileLandscapeReloadBarOffsetY: 0.085,
+      mobileLandscapeReloadBarOffsetZ: -0.005,
       reloadBarWidth: 0.17,
       reloadBarHeight: 0.03,
       reloadBarDepth: 0.03,
