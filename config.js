@@ -416,6 +416,10 @@ export const GAME_CONFIG = {
     // Move bounds inset from edge as cell-size fraction. Typical range: 0.3-0.6.
     moveInsetCellScale: 0.5,
 
+    // Extra non-path empty space outside the configured level bounds.
+    // Number of outside rings in cell units. Set 0 to disable.
+    outerEmptySpaceRings: 1,
+
     // Vertical wall-climb path tiles.
     wallPathTileSizeScale: 0.76,
     wallPathTileThicknessScale: 0.5,

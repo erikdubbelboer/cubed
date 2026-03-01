@@ -1,0 +1,168 @@
+# AGENTS.md
+
+## Project Learnings (Do Not Forget)
+
+### Runtime and Structure
+- This project runs directly in the browser with native ES modules.
+- `index.html` uses an `importmap` for `three` and `three/addons`; there is no required bundler/dev server pipeline for normal play.
+- `main.js` is the orchestration layer for systems (`grid`, `player`, `enemies`, `towers`, `uiOverlay`) and owns wave state, menu state, and economy state.
+
+### Economy System Contract
+- Money is owned in `main.js` (`playerMoney`), initialized from `GAME_CONFIG.economy.startingCash`.
+- Tower placement spending is delegated to `towers.js` through callbacks passed into `createTowerSystem({ getCurrentMoney, spendMoney })`.
+- Enemy kill rewards are emitted from `enemies.js` only on real death (inside `applyDamage` when health reaches 0), via `onEnemyDefeated(cashReward, enemyType)`.
+- Enemies that simply reach path end are removed but do not grant money.
+
+### Tower Unlock + Purchase Rules
+- Tower availability is unlock-based, not stock-based.
+- `towers.js` unlock state comes from `GAME_CONFIG.economy.startingUnlockedTowers`, with a hard fallback that always ensures `laser` is unlocked.
+- `GAME_CONFIG.towers.types.<type>.cost` is the purchase price per placement.
+- `towerSystem.selectTower(type)` returns `false` if the tower is locked or unaffordable.
+- `towerSystem.placeSelectedTower()` spends cash through `spendMoney` and cancels build mode if post-purchase money is insufficient for another of that type.
+
+### Upgrade System Rules
+- Upgrades are config-driven (`GAME_CONFIG.upgrades[]`), not hardcoded lists.
+- Upgrade availability is gated by:
+  - `maxCount` (tracked in `main.js` via `upgradeCountsById`), and
+  - unlock collisions (upgrade with `grants.unlockTowerType` is filtered out if already unlocked).
+- The first upgrade menu always forces `tower_aoe_unlock` when that upgrade is still available; remaining options are random from the filtered pool.
+- If no upgrades are available, `showUpgradeMenu()` must gracefully exit via `finishUpgradeMenuChoice()` instead of leaving the game stuck in `MENU`.
+- Menu flow supports two modes:
+  - advance to next wave on choice, or
+  - resume current `PLAYING/DELAY` state (used by pause overlay flow).
+- New grant wiring reminder:
+  - Add grant data in `GAME_CONFIG.upgrades[]`.
+  - Wire grant handling in `main.js:applyUpgradeGrants()`.
+  - Implement the target method on `player`, `towerSystem`, or `enemySystem`.
+  - Add a matching icon in `uiOverlay.js` (or fallback icon is shown).
+
+### Player Weapon Contract (Latest)
+- Player weapon is charge-based (not cooldown-per-shot):
+  - `player.weapon.baseMaxCharges` sets cap.
+  - `player.weapon.startingCharges` sets initial charge count (currently starts at `1`).
+  - Charges regenerate one at a time based on `currentFireCooldown`.
+- Burst firing has an explicit per-shot delay while holding fire:
+  - `player.weapon.burstShotDelay` is enforced through `shotDelayRemaining`.
+  - This prevents multiple charges from firing on consecutive frames.
+  - Fire-rate upgrades scale both recharge interval and burst delay.
+- `player_weapon_charge_capacity` multiplies max charges and immediately refills to the new cap.
+- Weapon charge HUD placement contract:
+  - Desktop: full-length reload bar with charge dots above the bar.
+  - Mobile: half-length reload bar, still anchored from the same left side so it does not drift into the weapon.
+  - Mobile dot ordering must grow leftward from the first dot (toward screen-left), not into the gun mesh.
+  - Dot count rebuilds when max charges change.
+
+### Projectile Hit + Pierce Contract
+- Projectile hit logic is single-target-per-contact (not radial splash):
+  - It checks damageable enemy meshes and applies damage to one closest valid target at contact.
+- Collision shape rule (latest, overrides older sphere assumptions):
+  - Enemy contact should be validated against the cube body volume, not only center-distance to `mesh.position`.
+  - Prefer `enemySystem.isPointNearEnemyMesh(enemyMesh, point, radius)` for projectile contact checks.
+  - Treat `enemyMesh.userData.bodyHalfSize` as primary cube size; `hitSphereRadius` is legacy/fallback.
+- Per-projectile anti-duplicate hit tracking is mandatory:
+  - Each projectile stores hit enemy mesh UUIDs.
+  - A projectile can never damage the same enemy twice.
+- Pierce behavior:
+  - `remainingPierceHits` starts from weapon pierce stat.
+  - Each enemy contact consumes one pierce allowance.
+  - When allowance is exhausted, projectile despawns on next enemy hit.
+- Tower/environment collision still immediately despawns the projectile.
+- New upgrade: `player_weapon_pierce` adds `+1` pierce via `grants.weaponPierceAdd`.
+
+### Enemy Offset + Hitbox Alignment (Latest)
+- Stacking visuals:
+  - Enemies move along a centerline path state (`pathCenter` / `pathForward`) but render with a small lateral offset (`pathOffsetLateral`) so stacked cubes do not perfectly overlap.
+  - Keep offset application in `setEnemyWorldPosition(...)` and movement-to-render sync in `updateEnemyTransformFromPath(...)`.
+- Visual/collision alignment:
+  - Enemy body center is `mesh.position + bodyCenterOffsetY`; use this for center-based distance checks and aiming.
+  - Point/radius damage for towers should go through enemy-system body-aware checks (`applyDamageAtPoint` now uses cube-body distance), not naive sphere checks.
+  - Cube collision extents should respect `visualRoot.scale` so hit pulses still align with what is rendered.
+- Cross-system consistency:
+  - `player.js`, `towers.js`, and `enemies.js` must agree on enemy hit geometry; if one side changes hit shape, update all three together.
+
+### Laser Beam Target/Loss Behavior (Latest)
+- Laser targeting should prefer damageable enemies (`getDamageableEnemies`) so dying/non-damageable enemies are dropped immediately.
+- On target loss/death, laser beam visuals should fade out quickly (config: `towers.types.laser.beamFadeOutDuration`) instead of hard-disappearing.
+- Laser impact placement should anchor to cube body size first (`bodyHalfSize`) to keep beam endpoint visually on/near cube surface.
+
+### UI Data Contract
+- `uiOverlay.setState(...)` expects `money` from `main.js` for cash HUD.
+- Tower tray entries are affordability-driven:
+  - `towerInventory[]` items should include `type`, `label`, `iconId`, `hotkey`, `affordable`, `cost`, and `remaining`.
+  - In current behavior, `remaining` is effectively an affordability sentinel (`1`/`0`), not inventory stock.
+- Tower tray visual contract (latest):
+  - Tray buttons no longer render tower name text (icon-only + cost badge + optional hotkey badge).
+  - Tower icons are centered in slot buttons and intentionally larger for quick recognition.
+  - On mobile portrait, tray is a vertical column under the top-right money panel.
+- If changing tray semantics, update both `towers.js:getTowerInventory()` and `uiOverlay.js:normalizeTowerInventory()` together.
+
+### Config Expectations
+- Economy tuning lives in:
+  - `GAME_CONFIG.economy.startingCash`
+  - `GAME_CONFIG.economy.startingUnlockedTowers`
+  - `GAME_CONFIG.towers.types.<type>.cost`
+  - `GAME_CONFIG.enemies.types.<enemy>.cashReward`
+- Enemy reward fallback behavior exists in code: if `cashReward` is absent/non-numeric, it falls back to enemy max health.
+- Mobile control tuning lives in `GAME_CONFIG.ui.mobile` (button sizes, edge margins, move-stick activation scale, look-zone padding, look sensitivity).
+- Gun/HUD mobile offsets and scale tuning live in `GAME_CONFIG.player.gun.*mobile*` fields (weapon transform + reload bar offsets).
+
+### Mobile Controls + Touch Routing (Latest, Override)
+- Desktop mouse listeners are explicitly gated by `!isTouchDevice`; keep desktop and touch paths separate.
+- Touch gameplay uses pointer events on `renderer.domElement` (`pointerdown/move/up/cancel`) with `passive: false`.
+- Pointer routing priority on touch down:
+  - upgrade menu card hit-test
+  - tower tray hit-test
+  - touch action buttons (`primary`, `jump`, `cancel`)
+  - move-stick activation circle
+  - look pointer claim (only if not in blocked UI rects / look-zone top exclusion)
+- Build-mode primary behavior must not leak into weapon fire:
+  - action-button tap in build mode schedules placement confirm only (`pendingBuildConfirm`)
+  - suppress hold-to-fire until that touch is released (`suppressPrimaryFireUntilRelease`)
+  - outside build mode, primary supports hold-to-fire.
+- `resetMobileInputState()` must clear move/look pointer ids, pressed buttons, and jump hold on pause/blur/focus transitions.
+- `player.setJumpHeld(bool)` is the mobile-safe jump/jetpack input path; rising edge triggers one jump, hold powers jetpack.
+
+### HUD + Menu Layout Contracts (Latest, Override)
+- Money HUD (top-right) shows only `$amount` now; the `"Cash"` label was removed and the panel is sized tighter.
+- Desktop build hint text is exactly `Q to cancel`, auto-sized to text, and anchored above the build tray.
+- Touch primary action button label/icon swaps by mode:
+  - normal gameplay: `Fire`
+  - build mode: `Place`
+- Upgrade option labels are intentionally short (config labels like `+1 tower dmg`, `x2 charges`) to avoid clipping.
+- Upgrade menu in mobile portrait is top-shifted and compacted (padding/card sizes/gaps) so all options fit without overlap.
+- Jetpack fuel HUD rules:
+  - hide fuel HUD at 100%
+  - mobile portrait uses a small vertical side bar (left side) instead of text/percent.
+
+### Debug Hooks Useful for Iteration
+- `window.gameDebug` exposes useful runtime helpers:
+  - `addMoney(amount)`, `getMoney()`, `unlockTower(type)`
+  - `placeBasicTower(x, z)`, `spawnEnemy(type)`
+  - `setForceTouchControls(bool)` for mobile UI testing on desktop
+
+### Quick Validation Notes
+- `node --check` is useful for fast syntax checks on edited files, but it is not a full runtime validation.
+- A practical syntax/integration smoke check is bundling entrypoint with `esbuild` and marking `three` imports external.
+
+### Terrain Collision Seam + Edge Egress (Latest, Override)
+- Raised terrain (`grid.heightObstacles`) now carries optional per-obstacle support metadata:
+  - `topInsetFromRadius` is supported by player movement checks.
+  - Terrain blocks set `topInsetFromRadius: 0` in `grid.js` so adjacent raised cells are continuously walkable with no support seam gap.
+- Player top-support resolution is now obstacle-aware:
+  - In `player.js:getSupportCameraYAtPosition(...)`, support inset uses:
+    - obstacle override when `obstacle.topInsetFromRadius` is finite.
+    - fallback to `player.collision.towerTopInsetFromRadius` for towers/legacy obstacles.
+  - Support bounds include `player.collision.supportEdgeEpsilon` to avoid floating-point boundary misses at block edges.
+- Important distinction (do not regress):
+  - Top support logic and horizontal side-collision logic are separate.
+  - Fixing seam support alone can still create small edge depenetration pops when stepping off terrain lips.
+- Terrain step-off smoothing (latest behavior):
+  - `player.collision.terrainEdgeSideCollisionGrace` defines a shallow vertical band near terrain tops where side push is ignored for terrain obstacles only.
+  - Terrain-only detection is keyed from `topInsetFromRadius <= 0` (current terrain obstacle contract).
+  - This keeps tower side collision behavior unchanged while removing the noticeable micro-teleport on terrain edge egress.
+- Current collision tuning values in config:
+  - `supportEdgeEpsilon: 1e-4`
+  - `terrainEdgeSideCollisionGrace: 0.12`
+- If edge feel tuning is needed later:
+  - Reduce `terrainEdgeSideCollisionGrace` for stronger edge blocking.
+  - Increase it for smoother step-off with less side-pop.

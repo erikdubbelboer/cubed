@@ -14,6 +14,10 @@ const ALTITUDE_CUBE_SIZE = CELL_SIZE;
 const WALL_PATH_TILE_SIZE = CELL_SIZE * GRID_CONFIG.wallPathTileSizeScale;
 const WALL_PATH_TILE_THICKNESS = TILE_HEIGHT * GRID_CONFIG.wallPathTileThicknessScale;
 const TERRAIN_OBSTACLE_HALF_SIZE = CELL_SIZE * 0.5;
+const OUTER_EMPTY_SPACE_RINGS = Math.max(
+  0,
+  Math.floor(Number(GRID_CONFIG.outerEmptySpaceRings ?? GRID_CONFIG.outerEmptyTerrainRings) || 0)
+);
 const WALL_CLIMB_PATH_OFFSET = GRID_CONFIG.wallClimbPathOffset;
 const WALL_PATH_TILE_VISUAL_OFFSET = WALL_PATH_TILE_THICKNESS * GRID_CONFIG.wallPathVisualOffsetScale;
 const LEVEL_PATH_MARKERS = new Set(["P", "S", "E"]);
@@ -234,6 +238,8 @@ function cellToWorld(cellX, cellZ, pathSurfaceY = getPathSurfaceY(cellX, cellZ))
 }
 
 export function createGrid(scene) {
+  const extendedGridCellSpan = GRID_SIZE + (OUTER_EMPTY_SPACE_RINGS * 2);
+  const extendedGridWorldSize = extendedGridCellSpan * CELL_SIZE;
   const farFloor = new THREE.Mesh(
     new THREE.PlaneGeometry(GRID_CONFIG.farFloorSize, GRID_CONFIG.farFloorSize),
     new THREE.MeshStandardMaterial({
@@ -251,9 +257,9 @@ export function createGrid(scene) {
 
   const platform = new THREE.Mesh(
     new THREE.BoxGeometry(
-      GRID_SIZE * CELL_SIZE + GRID_CONFIG.platformPadding,
+      extendedGridWorldSize + GRID_CONFIG.platformPadding,
       PLATFORM_HEIGHT,
-      GRID_SIZE * CELL_SIZE + GRID_CONFIG.platformPadding
+      extendedGridWorldSize + GRID_CONFIG.platformPadding
     ),
     new THREE.MeshStandardMaterial({
       color: GRID_CONFIG.platformColor,
@@ -269,8 +275,13 @@ export function createGrid(scene) {
 
   const pathSet = LEVEL_LAYOUT.pathSet;
   const half = (GRID_SIZE * CELL_SIZE) / 2;
+  const extendedHalf = half + (OUTER_EMPTY_SPACE_RINGS * CELL_SIZE);
+  const terrainMinCell = -OUTER_EMPTY_SPACE_RINGS;
+  const terrainMaxCellExclusive = GRID_SIZE + OUTER_EMPTY_SPACE_RINGS;
   const altitudeObstacles = [];
-  const altitudeSurfaceCells = [];
+  const buildRaycastObstacleBox = new THREE.Box3();
+  const buildRaycastHitPoint = new THREE.Vector3();
+  const buildRaycastBestPoint = new THREE.Vector3();
 
   const altitudeCubeGeo = new THREE.BoxGeometry(
     ALTITUDE_CUBE_SIZE,
@@ -291,10 +302,6 @@ export function createGrid(scene) {
       const worldX = -half + cellX * CELL_SIZE + CELL_SIZE / 2;
       const worldZ = -half + cellZ * CELL_SIZE + CELL_SIZE / 2;
       const supportHeight = cellHeightLevels * ALTITUDE_CUBE_SIZE;
-      const isPathCell = pathSet.has(cellKey(cellX, cellZ));
-      const surfaceY = isPathCell
-        ? getPathSurfaceY(cellX, cellZ)
-        : FLOOR_Y + supportHeight;
 
       altitudeObstacles.push({
         position: new THREE.Vector3(worldX, FLOOR_Y, worldZ),
@@ -305,14 +312,6 @@ export function createGrid(scene) {
         // Terrain tops should remain continuously walkable across adjacent cells.
         topInsetFromRadius: 0,
       });
-      altitudeSurfaceCells.push({
-        minX: worldX - CELL_SIZE * 0.5,
-        maxX: worldX + CELL_SIZE * 0.5,
-        minZ: worldZ - CELL_SIZE * 0.5,
-        maxZ: worldZ + CELL_SIZE * 0.5,
-        surfaceY,
-      });
-
       for (let level = 0; level < cellHeightLevels; level += 1) {
         const lightness = GRID_CONFIG.altitudeBaseLightness
           + checkerOffset
@@ -492,16 +491,21 @@ export function createGrid(scene) {
   }
   const moveInset = CELL_SIZE * GRID_CONFIG.moveInsetCellScale;
   const moveBounds = {
-    minX: -half + moveInset,
-    maxX: half - moveInset,
-    minZ: -half + moveInset,
-    maxZ: half - moveInset,
+    minX: -extendedHalf + moveInset,
+    maxX: extendedHalf - moveInset,
+    minZ: -extendedHalf + moveInset,
+    maxZ: extendedHalf - moveInset,
   };
 
   function worldToCell(worldX, worldZ) {
     const cx = Math.floor((worldX + half) / CELL_SIZE);
     const cz = Math.floor((worldZ + half) / CELL_SIZE);
-    if (cx < 0 || cx >= GRID_SIZE || cz < 0 || cz >= GRID_SIZE) {
+    if (
+      cx < terrainMinCell ||
+      cx >= terrainMaxCellExclusive ||
+      cz < terrainMinCell ||
+      cz >= terrainMaxCellExclusive
+    ) {
       return null;
     }
     return { x: cx, z: cz };
@@ -530,46 +534,64 @@ export function createGrid(scene) {
     if (!ray || !ray.origin || !ray.direction) {
       return false;
     }
-    if (Math.abs(ray.direction.y) < GRID_CONFIG.rayParallelEpsilon) {
-      return false;
+    const origin = ray.origin;
+    const direction = ray.direction;
+    let bestDistanceSq = Number.POSITIVE_INFINITY;
+
+    if (Math.abs(direction.y) >= GRID_CONFIG.rayParallelEpsilon) {
+      const floorT = (FLOOR_Y - origin.y) / direction.y;
+      if (floorT >= 0) {
+        const floorHitX = origin.x + direction.x * floorT;
+        const floorHitZ = origin.z + direction.z * floorT;
+        if (worldToCell(floorHitX, floorHitZ) !== null) {
+          buildRaycastBestPoint.set(floorHitX, FLOOR_Y, floorHitZ);
+          bestDistanceSq = buildRaycastBestPoint.distanceToSquared(origin);
+        }
+      }
     }
 
-    let bestT = Infinity;
-    const bestPoint = new THREE.Vector3();
-
-    function testHorizontalSurface(surfaceY, inBounds) {
-      const t = (surfaceY - ray.origin.y) / ray.direction.y;
-      if (t < 0 || t >= bestT) {
-        return;
+    for (const obstacle of altitudeObstacles) {
+      const obstacleHeight = Number(obstacle?.height);
+      const obstacleHalfSize = Number(obstacle?.halfSize);
+      if (!Number.isFinite(obstacleHeight) || obstacleHeight <= 0 || !Number.isFinite(obstacleHalfSize)) {
+        continue;
       }
-      const hitX = ray.origin.x + ray.direction.x * t;
-      const hitZ = ray.origin.z + ray.direction.z * t;
-      if (!inBounds(hitX, hitZ)) {
-        return;
-      }
-      bestT = t;
-      bestPoint.set(hitX, surfaceY, hitZ);
-    }
 
-    for (const surfaceCell of altitudeSurfaceCells) {
-      testHorizontalSurface(
-        surfaceCell.surfaceY,
-        (x, z) => (
-          x >= surfaceCell.minX &&
-          x <= surfaceCell.maxX &&
-          z >= surfaceCell.minZ &&
-          z <= surfaceCell.maxZ
-        )
+      const obstacleBaseY = Number(obstacle?.baseY);
+      const obstacleMinY = Number.isFinite(obstacleBaseY) ? obstacleBaseY : FLOOR_Y;
+      const obstaclePos = obstacle.position;
+      if (!obstaclePos) {
+        continue;
+      }
+
+      buildRaycastObstacleBox.min.set(
+        obstaclePos.x - obstacleHalfSize,
+        obstacleMinY,
+        obstaclePos.z - obstacleHalfSize
       );
+      buildRaycastObstacleBox.max.set(
+        obstaclePos.x + obstacleHalfSize,
+        obstacleMinY + obstacleHeight,
+        obstaclePos.z + obstacleHalfSize
+      );
+
+      const obstacleHit = ray.intersectBox(buildRaycastObstacleBox, buildRaycastHitPoint);
+      if (!obstacleHit) {
+        continue;
+      }
+
+      const hitDistanceSq = obstacleHit.distanceToSquared(origin);
+      if (hitDistanceSq >= bestDistanceSq) {
+        continue;
+      }
+      bestDistanceSq = hitDistanceSq;
+      buildRaycastBestPoint.copy(obstacleHit);
     }
 
-    testHorizontalSurface(FLOOR_Y, (x, z) => worldToCell(x, z) !== null);
-
-    if (!Number.isFinite(bestT)) {
+    if (!Number.isFinite(bestDistanceSq)) {
       return false;
     }
-
-    outPoint.copy(bestPoint);
+    outPoint.copy(buildRaycastBestPoint);
     return true;
   }
 
