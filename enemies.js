@@ -16,6 +16,11 @@ const HIT_PULSE_EMISSIVE_BOOST = ENEMY_CONFIG.hitPulseEmissiveBoost ?? 1.2;
 const HIT_PULSE_SCALE_BOOST = ENEMY_CONFIG.hitPulseScaleBoost ?? 0.08;
 const HIT_PULSE_FREQUENCY = ENEMY_CONFIG.hitPulseFrequency ?? 30;
 const HIT_PULSE_STACK_ADD = ENEMY_CONFIG.hitPulseStackAdd ?? 0.75;
+const ENEMY_STACK_OFFSET_MIN = Math.max(0, ENEMY_CONFIG.stackOffsetMin ?? 0.06);
+const ENEMY_STACK_OFFSET_MAX = Math.max(
+  ENEMY_STACK_OFFSET_MIN,
+  ENEMY_CONFIG.stackOffsetMax ?? 0.18
+);
 
 function getDirectionOnPlane(from, to) {
   const direction = to.clone().sub(from);
@@ -130,6 +135,137 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
   let spawnEventCursor = 0;
   let waveElapsedTime = 0;
   let enemySpeedMultiplier = 1;
+  let enemySpawnSerial = 0;
+  const tempCenterPosition = new THREE.Vector3();
+  const tempForwardDirection = new THREE.Vector3();
+  const tempRightDirection = new THREE.Vector3();
+  const tempLookTarget = new THREE.Vector3();
+  const tempCollisionCenterA = new THREE.Vector3();
+  const tempLocalPointA = new THREE.Vector3();
+  const tempQuatA = new THREE.Quaternion();
+
+  function pseudoRandom01(seed) {
+    const raw = Math.sin((seed * 127.1) + 311.7) * 43758.5453123;
+    return raw - Math.floor(raw);
+  }
+
+  function getRandomLateralOffset() {
+    if (ENEMY_STACK_OFFSET_MAX <= ENEMY_CONFIG.directionEpsilon) {
+      enemySpawnSerial += 1;
+      return 0;
+    }
+    const seed = enemySpawnSerial;
+    enemySpawnSerial += 1;
+    const magnitude = THREE.MathUtils.lerp(
+      ENEMY_STACK_OFFSET_MIN,
+      ENEMY_STACK_OFFSET_MAX,
+      pseudoRandom01(seed + 1.357)
+    );
+    const sign = pseudoRandom01(seed + 9.913) < 0.5 ? -1 : 1;
+    return magnitude * sign;
+  }
+
+  function setEnemyWorldPosition(enemy, centerPosition, forwardDirection = null) {
+    if (!enemy || !enemy.mesh) {
+      return;
+    }
+
+    if (centerPosition) {
+      enemy.pathCenter.copy(centerPosition);
+    }
+
+    if (forwardDirection) {
+      tempForwardDirection.copy(forwardDirection);
+      tempForwardDirection.y = 0;
+      if (tempForwardDirection.lengthSq() >= ENEMY_CONFIG.directionEpsilon) {
+        tempForwardDirection.normalize();
+        enemy.pathForward.copy(tempForwardDirection);
+      }
+    }
+
+    enemy.mesh.position.copy(enemy.pathCenter);
+    if (enemy.pathOffsetLateral !== 0) {
+      tempRightDirection.set(-enemy.pathForward.z, 0, enemy.pathForward.x);
+      enemy.mesh.position.addScaledVector(tempRightDirection, enemy.pathOffsetLateral);
+    }
+  }
+
+  function getEnemyCollisionCenter(enemy, out) {
+    if (!enemy?.mesh) {
+      return out.set(0, 0, 0);
+    }
+    out.copy(enemy.mesh.position);
+    const centerOffsetY = enemy.mesh.userData?.bodyCenterOffsetY;
+    if (typeof centerOffsetY === "number") {
+      out.y += centerOffsetY;
+    }
+    return out;
+  }
+
+  function pointDistanceSqToEnemyBody(enemy, point) {
+    if (!enemy?.mesh || !point) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    tempLocalPointA.copy(point).sub(enemy.mesh.position);
+    tempQuatA.copy(enemy.mesh.quaternion).invert();
+    tempLocalPointA.applyQuaternion(tempQuatA);
+
+    const centerOffsetY = enemy.mesh.userData?.bodyCenterOffsetY;
+    if (typeof centerOffsetY === "number") {
+      tempLocalPointA.y -= centerOffsetY;
+    }
+
+    const bodyHalfSize = enemy.mesh.userData?.bodyHalfSize;
+    const baseHalfSize = (typeof bodyHalfSize === "number" && bodyHalfSize > 0)
+      ? bodyHalfSize
+      : Math.max(0, Number(enemy.radius) || 0);
+    const visualScale = enemy.visualRoot?.scale;
+    const halfX = baseHalfSize * Math.max(0.001, Math.abs(visualScale?.x ?? 1));
+    const halfY = baseHalfSize * Math.max(0.001, Math.abs(visualScale?.y ?? 1));
+    const halfZ = baseHalfSize * Math.max(0.001, Math.abs(visualScale?.z ?? 1));
+
+    const dx = Math.max(0, Math.abs(tempLocalPointA.x) - halfX);
+    const dy = Math.max(0, Math.abs(tempLocalPointA.y) - halfY);
+    const dz = Math.max(0, Math.abs(tempLocalPointA.z) - halfZ);
+    return (dx * dx) + (dy * dy) + (dz * dz);
+  }
+
+  function isPointNearEnemyBody(enemy, point, extraRadius = 0) {
+    const radius = Math.max(0, Number(extraRadius) || 0);
+    return pointDistanceSqToEnemyBody(enemy, point) <= (radius * radius);
+  }
+
+  function updateEnemyTransformFromPath(enemy) {
+    const start = travelWaypoints[enemy.segmentIndex];
+    const end = travelWaypoints[enemy.segmentIndex + 1];
+    if (!start || !end) {
+      return;
+    }
+
+    const segmentLength = start.distanceTo(end);
+    const t = segmentLength <= ENEMY_CONFIG.directionEpsilon
+      ? 0
+      : (enemy.segmentProgress / segmentLength);
+    tempCenterPosition.lerpVectors(start, end, t);
+
+    tempForwardDirection.copy(end).sub(start);
+    tempForwardDirection.y = 0;
+    if (tempForwardDirection.lengthSq() >= ENEMY_CONFIG.directionEpsilon) {
+      tempForwardDirection.normalize();
+      enemy.pathForward.copy(tempForwardDirection);
+    } else if (enemy.pathForward.lengthSq() < ENEMY_CONFIG.directionEpsilon) {
+      enemy.pathForward.set(0, 0, 1);
+    }
+
+    setEnemyWorldPosition(enemy, tempCenterPosition, enemy.pathForward);
+
+    if (enemy.pathForward.lengthSq() >= ENEMY_CONFIG.directionEpsilon) {
+      tempLookTarget.copy(enemy.mesh.position).add(enemy.pathForward);
+      tempLookTarget.y = enemy.mesh.position.y;
+      enemy.mesh.lookAt(tempLookTarget);
+    }
+  }
 
   function upgradeSlowEnemies(multiplier = ENEMY_CONFIG.slowUpgradeMultiplier) {
     const speedMultiplier = Number(multiplier);
@@ -308,17 +444,8 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     }
 
     scene.add(enemyMesh);
-    enemyMesh.position.copy(travelWaypoints[0]);
 
-    const initiallyBehindPortal = spawnPortalPlane
-      ? spawnPortalPlane.distanceToPoint(enemyMesh.position) < enemyType.radius * ENEMY_CONFIG.portalRevealRadiusFactor
-      : false;
-    healthBarRoot.visible = !initiallyBehindPortal;
-    enemyMesh.userData.bodyCenterOffsetY = bodyMesh.position.y;
-    enemyMesh.userData.bodyHalfSize = enemyType.size * 0.5;
-    enemyMesh.userData.hitSphereRadius = enemyType.radius;
-
-    return {
+    const enemy = {
       mesh: enemyMesh,
       bodyMesh,
       bodyMaterial,
@@ -348,7 +475,22 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       type: normalizedType,
       tempSlowMultiplier: 1,
       tempSlowRemaining: 0,
+      pathCenter: travelWaypoints[0].clone(),
+      pathForward: getDirectionOnPlane(travelWaypoints[0], travelWaypoints[1]),
+      pathOffsetLateral: getRandomLateralOffset(),
     };
+
+    setEnemyWorldPosition(enemy, enemy.pathCenter, enemy.pathForward);
+
+    const initiallyBehindPortal = spawnPortalPlane
+      ? spawnPortalPlane.distanceToPoint(enemy.mesh.position) < enemyType.radius * ENEMY_CONFIG.portalRevealRadiusFactor
+      : false;
+    healthBarRoot.visible = !initiallyBehindPortal;
+    enemyMesh.userData.bodyCenterOffsetY = bodyMesh.position.y;
+    enemyMesh.userData.bodyHalfSize = enemyType.size * 0.5;
+    enemyMesh.userData.hitSphereRadius = enemyType.radius;
+
+    return enemy;
   }
 
   function updateHealthBar(enemy) {
@@ -595,7 +737,14 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       if (!enemy.alive || enemy.dying || enemy.portalClippingActive) {
         continue;
       }
-      if (!sphereIntersectsAabb(enemy.mesh.position, enemy.radius, minPoint, maxPoint)) {
+      if (
+        !sphereIntersectsAabb(
+          getEnemyCollisionCenter(enemy, tempCollisionCenterA),
+          enemy.radius,
+          minPoint,
+          maxPoint
+        )
+      ) {
         continue;
       }
       if (applyTemporarySlowToEnemyMesh(enemy.mesh, multiplier, duration)) {
@@ -688,18 +837,10 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
           }
         }
 
-        if (enemy.alive) {
-          const t = segmentLength === 0 ? 0 : enemy.segmentProgress / segmentLength;
-          enemy.mesh.position.lerpVectors(start, end, t);
+      }
 
-          const dx = end.x - enemy.mesh.position.x;
-          const dz = end.z - enemy.mesh.position.z;
-          if ((dx * dx + dz * dz) > ENEMY_CONFIG.lookAtEpsilon) {
-            const lookTarget = end.clone();
-            lookTarget.y = enemy.mesh.position.y;
-            enemy.mesh.lookAt(lookTarget);
-          }
-        }
+      if (enemy.alive) {
+        updateEnemyTransformFromPath(enemy);
       }
 
       updateHitPulse(enemy, deltaSeconds);
@@ -724,12 +865,12 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
   }
 
   function applyDamageAtPoint(point, hitRadius, damage) {
+    const safeHitRadius = Math.max(0, Number(hitRadius) || 0);
     let hitAny = false;
     for (const enemy of activeEnemies) {
       if (!enemy.alive) continue;
       if (enemy.portalClippingActive) continue;
-      const maxHitDistance = enemy.radius + hitRadius;
-      if (enemy.mesh.position.distanceToSquared(point) <= maxHitDistance * maxHitDistance) {
+      if (isPointNearEnemyBody(enemy, point, safeHitRadius)) {
         applyDamage(enemy, damage);
         hitAny = true;
       }
@@ -763,6 +904,14 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     return false;
   }
 
+  function isPointNearEnemyMesh(enemyMesh, point, radius = 0) {
+    const enemy = findActiveEnemyByMesh(enemyMesh);
+    if (!enemy || !enemy.alive || enemy.dying || enemy.portalClippingActive) {
+      return false;
+    }
+    return isPointNearEnemyBody(enemy, point, radius);
+  }
+
   function getTargetInRange(origin, range) {
     let closest = null;
     let closestDistSq = range * range;
@@ -770,7 +919,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     for (const enemy of activeEnemies) {
       if (!enemy.alive) continue;
       if (enemy.portalClippingActive) continue;
-      const distSq = origin.distanceToSquared(enemy.mesh.position);
+      const distSq = origin.distanceToSquared(getEnemyCollisionCenter(enemy, tempCollisionCenterA));
       if (distSq <= closestDistSq) {
         closestDistSq = distSq;
         closest = enemy;
@@ -803,12 +952,15 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     applyTemporarySlowInAabb,
     applyDamageAtPoint,
     applyDamageToEnemyMesh,
+    isPointNearEnemyMesh,
     startWave,
     isWaveClear,
     upgradeSlowEnemies,
     forceSpawnEnemy: (type, spawnPos) => {
       const enemy = createEnemyMesh(normalizeEnemyType(type));
-      enemy.mesh.position.copy(spawnPos || travelWaypoints[0]);
+      if (spawnPos) {
+        setEnemyWorldPosition(enemy, spawnPos, enemy.pathForward);
+      }
       activeEnemies.push(enemy);
     }
   };

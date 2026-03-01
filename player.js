@@ -9,6 +9,8 @@ const MIN_COLLISION_DISTANCE_SQ = PLAYER_CONFIG.collision.minDistanceSq;
 const PLAYER_HEAD_CLEARANCE = PLAYER_CONFIG.collision.headClearance;
 const TOWER_TOP_SNAP_DOWN = PLAYER_CONFIG.collision.towerTopSnapDown;
 const TOWER_TOP_SNAP_UP = PLAYER_CONFIG.collision.towerTopSnapUp;
+const SUPPORT_EDGE_EPSILON = PLAYER_CONFIG.collision.supportEdgeEpsilon ?? 0;
+const TERRAIN_EDGE_SIDE_COLLISION_GRACE = PLAYER_CONFIG.collision.terrainEdgeSideCollisionGrace ?? 0;
 
 export function createPlayer({ scene, camera, domElement, eyeHeight, getMovementObstacles }) {
   const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
@@ -239,6 +241,7 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
   });
   const projectileVelocity = new THREE.Vector3();
   const projectileDirection = new THREE.Vector3();
+  const projectileEnemyCollisionCenter = new THREE.Vector3();
   const projectiles = [];
   const projectileImpacts = [];
   const projectileSpeed = PLAYER_CONFIG.weapon.projectileSpeed;
@@ -816,10 +819,28 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
         }
 
         const enemyRadius = Number(enemyMesh.userData?.hitSphereRadius);
-        const collisionRadius = Number.isFinite(enemyRadius) ? enemyRadius : 0;
+        const enemyHalfSize = Number(enemyMesh.userData?.bodyHalfSize);
+        const collisionRadius = Number.isFinite(enemyHalfSize)
+          ? enemyHalfSize
+          : (Number.isFinite(enemyRadius) ? enemyRadius : 0);
+        projectileEnemyCollisionCenter.copy(enemyMesh.position);
+        const centerOffsetY = enemyMesh.userData?.bodyCenterOffsetY;
+        if (typeof centerOffsetY === "number") {
+          projectileEnemyCollisionCenter.y += centerOffsetY;
+        }
         const maxHitDistance = collisionRadius + projectileHitRadius;
-        const distSq = enemyMesh.position.distanceToSquared(projectile.mesh.position);
-        if (distSq > maxHitDistance * maxHitDistance) {
+        const distSq = projectileEnemyCollisionCenter.distanceToSquared(projectile.mesh.position);
+        let intersects = false;
+        if (typeof enemySystem.isPointNearEnemyMesh === "function") {
+          intersects = enemySystem.isPointNearEnemyMesh(
+            enemyMesh,
+            projectile.mesh.position,
+            projectileHitRadius
+          );
+        } else {
+          intersects = distSq <= maxHitDistance * maxHitDistance;
+        }
+        if (!intersects) {
           continue;
         }
 
@@ -911,10 +932,14 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
         }
 
         const topY = obstacleBaseY + obstacleHeight;
+        const insetRatio = Number.isFinite(obstacle?.topInsetFromRadius)
+          ? obstacle.topInsetFromRadius
+          : PLAYER_CONFIG.collision.towerTopInsetFromRadius;
+        const supportHalf = Math.max(0, obstacleHalfSize - PLAYER_COLLISION_RADIUS * insetRatio);
         const withinTopX = Math.abs(x - obstaclePos.x)
-          <= (obstacleHalfSize - PLAYER_COLLISION_RADIUS * PLAYER_CONFIG.collision.towerTopInsetFromRadius);
+          <= (supportHalf + SUPPORT_EDGE_EPSILON);
         const withinTopZ = Math.abs(z - obstaclePos.z)
-          <= (obstacleHalfSize - PLAYER_COLLISION_RADIUS * PLAYER_CONFIG.collision.towerTopInsetFromRadius);
+          <= (supportHalf + SUPPORT_EDGE_EPSILON);
         const nearTop = feetY >= (topY - TOWER_TOP_SNAP_DOWN) && feetY <= (topY + TOWER_TOP_SNAP_UP);
         if (withinTopX && withinTopZ && nearTop) {
           supportY = Math.max(supportY, topY + eyeHeight);
@@ -993,7 +1018,15 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
             const playerFeetY = camera.position.y - eyeHeight;
             const playerHeadY = camera.position.y + PLAYER_HEAD_CLEARANCE;
             const obstacleTopY = obstacleBaseY + obstacleHeight;
-            const verticalOverlap = playerHeadY > obstacleBaseY && playerFeetY < obstacleTopY;
+            const isTerrainTopObstacle = Number.isFinite(obstacle?.topInsetFromRadius)
+              && obstacle.topInsetFromRadius <= 0;
+            const sideCollisionTopY = isTerrainTopObstacle
+              ? Math.max(
+                obstacleBaseY + SUPPORT_EDGE_EPSILON,
+                obstacleTopY - TERRAIN_EDGE_SIDE_COLLISION_GRACE
+              )
+              : obstacleTopY;
+            const verticalOverlap = playerHeadY > obstacleBaseY && playerFeetY < sideCollisionTopY;
             if (!verticalOverlap) {
               continue;
             }

@@ -302,6 +302,8 @@ export function createGrid(scene) {
         // Path tiles are visual overlays; keep collision at the support-cube top.
         height: supportHeight,
         baseY: FLOOR_Y,
+        // Terrain tops should remain continuously walkable across adjacent cells.
+        topInsetFromRadius: 0,
       });
       altitudeSurfaceCells.push({
         minX: worldX - CELL_SIZE * 0.5,

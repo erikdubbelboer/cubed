@@ -45,6 +45,7 @@ const LASER_PULSE_DURATION = LASER_TOWER_CONFIG.pulseDuration;
 const LASER_BEAM_BASE_OPACITY = LASER_TOWER_CONFIG.beamBaseOpacity;
 const LASER_BEAM_PULSE_OPACITY_BOOST = LASER_TOWER_CONFIG.beamPulseOpacityBoost;
 const LASER_BEAM_PULSE_WIDTH_BOOST = LASER_TOWER_CONFIG.beamPulseWidthBoost;
+const LASER_BEAM_FADE_OUT_DURATION = Math.max(0.01, LASER_TOWER_CONFIG.beamFadeOutDuration ?? 0.08);
 const LASER_FLASH_BASE_OPACITY = LASER_TOWER_CONFIG.flashBaseOpacity;
 const LASER_FLASH_PULSE_OPACITY_BOOST = LASER_TOWER_CONFIG.flashPulseOpacityBoost;
 const LASER_FLASH_BASE_SCALE = LASER_TOWER_CONFIG.flashBaseScale;
@@ -201,6 +202,7 @@ export function createTowerSystem({
   const tempVecE = new THREE.Vector3();
   const tempVecF = new THREE.Vector3();
   const tempVecG = new THREE.Vector3();
+  const tempVecH = new THREE.Vector3();
   const tempColorA = new THREE.Color();
   const tempColorB = new THREE.Color();
   const upVector = new THREE.Vector3(0, 1, 0);
@@ -1021,6 +1023,9 @@ export function createTowerSystem({
       height: towerSpec.height,
       baseY: basePosition.y,
       beamVisual: null,
+      beamFadeTimer: 0,
+      beamFadeStartBeamOpacity: LASER_BEAM_BASE_OPACITY,
+      beamFadeStartFlashOpacity: LASER_FLASH_BASE_OPACITY,
       cornerIndex: null,
       bobClock: Math.random() * Math.PI * 2,
       bobPhase: Math.random() * Math.PI * 2,
@@ -1302,46 +1307,57 @@ export function createTowerSystem({
     let bestTarget = null;
     let bestDistSq = maxRangeSq;
 
-    if (typeof enemySystem.getEnemies === "function") {
-      const enemyMeshes = enemySystem.getEnemies();
-      if (Array.isArray(enemyMeshes)) {
-        for (const enemyMesh of enemyMeshes) {
-          if (!enemyMesh || !enemyMesh.visible) {
-            continue;
-          }
-          if (
-            skipSlowed
-            && typeof enemySystem.isEnemyMeshSlowed === "function"
-            && enemySystem.isEnemyMeshSlowed(enemyMesh)
-          ) {
-            continue;
-          }
+    let enemyMeshes = null;
+    if (typeof enemySystem.getDamageableEnemies === "function") {
+      const damageableMeshes = enemySystem.getDamageableEnemies();
+      if (Array.isArray(damageableMeshes)) {
+        enemyMeshes = damageableMeshes;
+      }
+    }
+    if (!enemyMeshes && typeof enemySystem.getEnemies === "function") {
+      const allEnemyMeshes = enemySystem.getEnemies();
+      if (Array.isArray(allEnemyMeshes)) {
+        enemyMeshes = allEnemyMeshes;
+      }
+    }
 
-          tempVecD.copy(enemyMesh.position);
-          const aimOffsetY = enemyMesh.userData?.bodyCenterOffsetY;
-          if (typeof aimOffsetY === "number") {
-            tempVecD.y += aimOffsetY;
-          }
-
-          const distSq = tower.mesh.position.distanceToSquared(tempVecD);
-          if (distSq > bestDistSq) {
-            continue;
-          }
-
-          if (!hasLineOfSightToPoint(tower, tempVecD)) {
-            continue;
-          }
-
-          bestDistSq = distSq;
-          bestTarget = {
-            mesh: enemyMesh,
-            position: enemyMesh.position,
-            aimPoint: tempVecD.clone(),
-          };
+    if (Array.isArray(enemyMeshes)) {
+      for (const enemyMesh of enemyMeshes) {
+        if (!enemyMesh || !enemyMesh.visible) {
+          continue;
         }
-        if (bestTarget) {
-          return bestTarget;
+        if (
+          skipSlowed
+          && typeof enemySystem.isEnemyMeshSlowed === "function"
+          && enemySystem.isEnemyMeshSlowed(enemyMesh)
+        ) {
+          continue;
         }
+
+        tempVecD.copy(enemyMesh.position);
+        const aimOffsetY = enemyMesh.userData?.bodyCenterOffsetY;
+        if (typeof aimOffsetY === "number") {
+          tempVecD.y += aimOffsetY;
+        }
+
+        const distSq = tower.mesh.position.distanceToSquared(tempVecD);
+        if (distSq > bestDistSq) {
+          continue;
+        }
+
+        if (!hasLineOfSightToPoint(tower, tempVecD)) {
+          continue;
+        }
+
+        bestDistSq = distSq;
+        bestTarget = {
+          mesh: enemyMesh,
+          position: enemyMesh.position,
+          aimPoint: tempVecD.clone(),
+        };
+      }
+      if (bestTarget) {
+        return bestTarget;
       }
     }
 
@@ -1383,6 +1399,15 @@ export function createTowerSystem({
     return [];
   }
 
+  function getEnemyCollisionCenter(enemyMesh, out) {
+    out.copy(enemyMesh.position);
+    const centerOffsetY = enemyMesh.userData?.bodyCenterOffsetY;
+    if (typeof centerOffsetY === "number") {
+      out.y += centerOffsetY;
+    }
+    return out;
+  }
+
   function hasDamageableEnemyInRange(tower, enemySystem) {
     const range = tower.range ?? AOE_RANGE;
     const rangeSq = range * range;
@@ -1390,7 +1415,7 @@ export function createTowerSystem({
       if (!enemyMesh || !enemyMesh.visible) {
         continue;
       }
-      if (tower.mesh.position.distanceToSquared(enemyMesh.position) <= rangeSq) {
+      if (tower.mesh.position.distanceToSquared(getEnemyCollisionCenter(enemyMesh, tempVecH)) <= rangeSq) {
         return true;
       }
     }
@@ -1433,6 +1458,65 @@ export function createTowerSystem({
     scene.remove(beamVisual.flash);
     beamVisual.beam.material.dispose();
     beamVisual.flash.material.dispose();
+  }
+
+  function clearLaserBeamVisual(tower) {
+    if (!tower) {
+      return;
+    }
+    if (tower.beamVisual) {
+      destroyLaserBeamVisual(tower.beamVisual);
+      tower.beamVisual = null;
+    }
+    tower.beamFadeTimer = 0;
+    tower.beamFadeStartBeamOpacity = LASER_BEAM_BASE_OPACITY;
+    tower.beamFadeStartFlashOpacity = LASER_FLASH_BASE_OPACITY;
+  }
+
+  function startLaserBeamFadeOut(tower) {
+    if (!tower?.beamVisual || (tower.beamFadeTimer ?? 0) > 0) {
+      return;
+    }
+    const beamOpacity = tower.beamVisual.beam?.material?.opacity;
+    const flashOpacity = tower.beamVisual.flash?.material?.opacity;
+    tower.beamFadeTimer = LASER_BEAM_FADE_OUT_DURATION;
+    tower.beamFadeStartBeamOpacity = Number.isFinite(beamOpacity)
+      ? beamOpacity
+      : LASER_BEAM_BASE_OPACITY;
+    tower.beamFadeStartFlashOpacity = Number.isFinite(flashOpacity)
+      ? flashOpacity
+      : LASER_FLASH_BASE_OPACITY;
+  }
+
+  function updateLaserBeamFadeOut(tower, deltaSeconds) {
+    if (!tower?.beamVisual) {
+      return;
+    }
+    const currentTimer = Math.max(0, Number(tower.beamFadeTimer) || 0);
+    if (currentTimer <= 0) {
+      return;
+    }
+
+    const nextTimer = Math.max(0, currentTimer - deltaSeconds);
+    const fadeRatio = nextTimer / LASER_BEAM_FADE_OUT_DURATION;
+    tower.beamFadeTimer = nextTimer;
+
+    if (tower.beamVisual.beam?.material) {
+      tower.beamVisual.beam.material.opacity = Math.max(
+        0,
+        (tower.beamFadeStartBeamOpacity ?? LASER_BEAM_BASE_OPACITY) * fadeRatio
+      );
+    }
+    if (tower.beamVisual.flash?.material) {
+      tower.beamVisual.flash.material.opacity = Math.max(
+        0,
+        (tower.beamFadeStartFlashOpacity ?? LASER_FLASH_BASE_OPACITY) * fadeRatio
+      );
+    }
+
+    if (nextTimer <= 0) {
+      clearLaserBeamVisual(tower);
+    }
   }
 
   function randomDirection(out) {
@@ -1613,7 +1697,7 @@ export function createTowerSystem({
     const enemyRadius = typeof enemyMesh?.userData?.hitSphereRadius === "number"
       ? enemyMesh.userData.hitSphereRadius
       : 0;
-    const dist = pulse.origin.distanceTo(enemyMesh.position);
+    const dist = pulse.origin.distanceTo(getEnemyCollisionCenter(enemyMesh, tempVecH));
     const halfShell = Math.max(0.01, AOE_SHELL_THICKNESS * 0.5);
     const shellMin = Math.max(0, pulse.currentRadius - halfShell);
     const shellMax = pulse.currentRadius + halfShell;
@@ -1657,7 +1741,11 @@ export function createTowerSystem({
           hit = enemySystem.applyDamageToEnemyMesh(enemyMesh, pulse.damage);
         } else if (typeof enemySystem.applyDamageAtPoint === "function") {
           const enemyRadius = enemyMesh?.userData?.hitSphereRadius ?? 0;
-          hit = enemySystem.applyDamageAtPoint(enemyMesh.position, enemyRadius, pulse.damage);
+          hit = enemySystem.applyDamageAtPoint(
+            getEnemyCollisionCenter(enemyMesh, tempVecH),
+            enemyRadius,
+            pulse.damage
+          );
         }
 
         if (hit) {
@@ -1768,10 +1856,7 @@ export function createTowerSystem({
   }
 
   function updateSlowTowerCombat(tower, deltaSeconds, enemySystem) {
-    if (tower.beamVisual) {
-      destroyLaserBeamVisual(tower.beamVisual);
-      tower.beamVisual = null;
-    }
+    clearLaserBeamVisual(tower);
 
     updateSlowTowerBobbing(tower, deltaSeconds);
     tower.cooldown = Math.max(0, tower.cooldown - deltaSeconds);
@@ -1804,10 +1889,8 @@ export function createTowerSystem({
 
     const target = findTargetWithLineOfSight(tower, enemySystem);
     if (!target || !target.mesh || !target.mesh.visible) {
-      if (tower.beamVisual) {
-        destroyLaserBeamVisual(tower.beamVisual);
-        tower.beamVisual = null;
-      }
+      startLaserBeamFadeOut(tower);
+      updateLaserBeamFadeOut(tower, deltaSeconds);
       tower.pulseTimer = 0;
       if (ringMaterial) {
         ringMaterial.emissiveIntensity = LASER_IDLE_GLOW_INTENSITY;
@@ -1817,6 +1900,7 @@ export function createTowerSystem({
       }
       return;
     }
+    tower.beamFadeTimer = 0;
 
     const targetPoint = target.aimPoint
       ? target.aimPoint.clone()
@@ -1825,17 +1909,17 @@ export function createTowerSystem({
     const impactPoint = targetPoint.clone();
     const targetHalfSize = target.mesh?.userData?.bodyHalfSize;
     const targetSphereRadius = target.mesh?.userData?.hitSphereRadius;
-    tempVecD.copy(target.position).sub(origin);
+    tempVecD.copy(targetPoint).sub(origin);
     if (tempVecD.lengthSq() >= TOWER_CONFIG.segmentEpsilon) {
-      const baseRadius = typeof targetSphereRadius === "number"
-        ? targetSphereRadius
-        : (typeof targetHalfSize === "number" ? targetHalfSize : 0);
+      const baseRadius = typeof targetHalfSize === "number"
+        ? targetHalfSize
+        : (typeof targetSphereRadius === "number" ? targetSphereRadius : 0);
       if (baseRadius > 0) {
-        // Force the impact just outside the enemy hit sphere, never inside it.
+        // Keep beam impact just outside the visible cube body.
         const outsideFactor = Math.max(1.02, LASER_IMPACT_SURFACE_INSET_SCALE);
-        const outsideDistance = (baseRadius * outsideFactor) + 0.03;
+        const outsideDistance = (baseRadius * outsideFactor) + 0.01;
         tempVecD.normalize();
-        impactPoint.copy(target.position).addScaledVector(tempVecD, -outsideDistance);
+        impactPoint.copy(targetPoint).addScaledVector(tempVecD, -outsideDistance);
       }
     }
 
@@ -1891,10 +1975,7 @@ export function createTowerSystem({
   }
 
   function updateAoeTowerCombat(tower, deltaSeconds, enemySystem) {
-    if (tower.beamVisual) {
-      destroyLaserBeamVisual(tower.beamVisual);
-      tower.beamVisual = null;
-    }
+    clearLaserBeamVisual(tower);
 
     updateAoeTowerBobbing(tower, deltaSeconds);
 

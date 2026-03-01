@@ -581,6 +581,8 @@ export const GAME_CONFIG = {
         beamPulseOpacityBoost: 0.26,
         beamPulseWidthBoost: 0.34,
         beamMaxOpacity: 0.98,
+        // Time (seconds) to fade the beam when target is lost/dead.
+        beamFadeOutDuration: 0.08,
         // Muzzle flash alpha baseline/boost and cap.
         flashBaseOpacity: 0.45,
         flashPulseOpacityBoost: 0.45,
@@ -774,6 +776,10 @@ export const GAME_CONFIG = {
     // Movement/facing precision tolerances.
     directionEpsilon: 1e-6,
     lookAtEpsilon: 1e-4,
+    // Small lateral spread so stacked enemies do not perfectly overlap.
+    // Applied perpendicular to the current path direction.
+    stackOffsetMin: 0.06,
+    stackOffsetMax: 0.18,
 
     // Enemy archetypes.
     types: {
@@ -928,6 +934,10 @@ export const GAME_CONFIG = {
       radius: 0.55,
       // Small-value threshold to avoid divide-by-zero in collision solve.
       minDistanceSq: 1e-6,
+      // Extra tolerance for top support checks to avoid seam misses on boundaries.
+      supportEdgeEpsilon: 1e-4,
+      // Ignore terrain side push for this depth below the top edge to smooth step-off.
+      terrainEdgeSideCollisionGrace: 0.12,
       // Camera-to-head clearance used in vertical overlap checks. Typical range: 0-0.5.
       headClearance: 0.2,
       // Tolerance to snap onto tower tops while moving vertically (units).
