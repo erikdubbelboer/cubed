@@ -3,9 +3,9 @@
 ## Project Learnings (Do Not Forget)
 
 ### Runtime and Structure
-- This project runs directly in the browser with native ES modules.
-- `index.html` uses an `importmap` for `three` and `three/addons`; there is no required bundler/dev server pipeline for normal play.
-- `main.js` is the orchestration layer for systems (`grid`, `player`, `enemies`, `towers`, `uiOverlay`) and owns wave state, menu state, and economy state.
+- This project is an npm + Vite browser game using native ES modules in source.
+- `index.html` loads `/src/main.js`; `three` and `three/addons` resolve from npm dependencies through Vite.
+- Source files live in `src/`; `src/main.js` is the orchestration layer for systems (`grid`, `player`, `enemies`, `towers`, `uiOverlay`) and owns wave state, menu state, and economy state.
 
 ### Economy System Contract
 - Money is owned in `main.js` (`playerMoney`), initialized from `GAME_CONFIG.economy.startingCash`.
@@ -142,7 +142,7 @@
 
 ### Quick Validation Notes
 - `node --check` is useful for fast syntax checks on edited files, but it is not a full runtime validation.
-- A practical syntax/integration smoke check is bundling entrypoint with `esbuild` and marking `three` imports external.
+- Primary workflow checks are `npm run dev` for local runtime and `npm run build` for production bundling.
 
 ### Terrain Collision Seam + Edge Egress (Latest, Override)
 - Raised terrain (`grid.heightObstacles`) now carries optional per-obstacle support metadata:
