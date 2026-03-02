@@ -19,6 +19,9 @@ const FIRST_MENU_FORCED_UPGRADE_ID = "tower_aoe_unlock";
 const MOBILE_LOOK_SENSITIVITY_SCALE = Number.isFinite(Number(MOBILE_UI_CONFIG.lookSensitivityScale))
   ? Math.max(0.1, Number(MOBILE_UI_CONFIG.lookSensitivityScale))
   : 1;
+const GAME_SPEED_NORMAL = 1;
+const GAME_SPEED_FAST = 2;
+const DESKTOP_SPEED_TOGGLE_KEY = "KeyF";
 
 const app = document.getElementById("app");
 
@@ -204,6 +207,9 @@ PORTAL_MATERIAL.toneMapped = false;
 
 const clock = new THREE.Clock();
 let isPaused = false;
+let manualPauseRequested = false;
+let gameSpeedMultiplier = GAME_SPEED_NORMAL;
+let suppressNextDesktopCanvasClick = false;
 
 function getPathDirection(from, to) {
   const direction = to.clone().sub(from);
@@ -267,25 +273,48 @@ function placePathGates() {
   return spawnPortal;
 }
 
+function getAutoPauseRequested() {
+  const isLocked = !!document.pointerLockElement;
+  return document.hidden || !document.hasFocus() || (!isTouchDevice && !isLocked);
+}
+
+function applyPausedState(nextPaused) {
+  if (nextPaused === isPaused) {
+    return;
+  }
+
+  isPaused = nextPaused;
+  if (isPaused) {
+    if (player) {
+      player.resetMovement();
+    }
+    resetMobileInputState();
+    return;
+  }
+
+  clock.getDelta();
+}
+
+function refreshPauseState() {
+  applyPausedState(manualPauseRequested || getAutoPauseRequested());
+}
+
 function updatePauseState() {
   // Use a small timeout to ensure Three.js has updated the internal isLocked state
   // and browser has updated pointerLockElement.
-  setTimeout(() => {
-    const isLocked = !!document.pointerLockElement;
-    const shouldPause = document.hidden || !document.hasFocus() || (!isTouchDevice && !isLocked);
+  setTimeout(refreshPauseState, 0);
+}
 
-    if (shouldPause !== isPaused) {
-      isPaused = shouldPause;
-      if (isPaused) {
-        if (player) {
-          player.resetMovement();
-        }
-        resetMobileInputState();
-      } else if (!isPaused) {
-        clock.getDelta();
-      }
-    }
-  }, 0);
+function toggleManualPause() {
+  manualPauseRequested = !manualPauseRequested;
+  refreshPauseState();
+}
+
+function toggleGameSpeed() {
+  gameSpeedMultiplier = gameSpeedMultiplier >= GAME_SPEED_FAST
+    ? GAME_SPEED_NORMAL
+    : GAME_SPEED_FAST;
+  return gameSpeedMultiplier;
 }
 
 // Listeners for player lock moved into initGame after player is created
@@ -326,6 +355,18 @@ function handlePrimaryAction() {
     return;
   }
   player.tryShoot();
+}
+
+function handleHudButtonAction(buttonId) {
+  if (buttonId === "pause") {
+    toggleManualPause();
+    return true;
+  }
+  if (buttonId === "speed") {
+    toggleGameSpeed();
+    return true;
+  }
+  return false;
 }
 
 document.addEventListener("visibilitychange", updatePauseState);
@@ -666,6 +707,15 @@ function applyMobileGameplayInput() {
 }
 
 if (!isTouchDevice) {
+  renderer.domElement.addEventListener("click", (event) => {
+    if (!suppressNextDesktopCanvasClick) {
+      return;
+    }
+    suppressNextDesktopCanvasClick = false;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+
   window.addEventListener("mousemove", (event) => {
     if (!player) return;
     if (waveState === "MENU" && player.controls.isLocked) {
@@ -678,7 +728,26 @@ if (!isTouchDevice) {
   }, true);
 
   window.addEventListener("mousedown", (event) => {
-    if (isPaused || !player || !towerSystem) {
+    if (!player || !towerSystem) {
+      return;
+    }
+
+    if (event.button === 0) {
+      suppressNextDesktopCanvasClick = false;
+      if (!player.controls.isLocked) {
+        const pointer = getCanvasPointerPosition(event);
+        const hudButton = uiOverlay.hitTestHudButton(pointer.x, pointer.y);
+        if (hudButton === "speed") {
+          handleHudButtonAction(hudButton);
+          suppressNextDesktopCanvasClick = true;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return;
+        }
+      }
+    }
+
+    if (isPaused) {
       return;
     }
 
@@ -751,7 +820,7 @@ if (isTouchDevice) {
   }
 
   mobilePointerTarget.addEventListener("pointerdown", (event) => {
-    if (event.pointerType !== "touch" || !player || !towerSystem || isPaused) {
+    if (event.pointerType !== "touch" || !player || !towerSystem) {
       return;
     }
 
@@ -761,6 +830,18 @@ if (isTouchDevice) {
       if (pickedIndex >= 0) {
         applyUpgradeChoice(pickedIndex);
       }
+      event.preventDefault();
+      return;
+    }
+
+    const touchedHudButton = uiOverlay.hitTestHudButton(pointer.x, pointer.y);
+    if (touchedHudButton) {
+      handleHudButtonAction(touchedHudButton);
+      event.preventDefault();
+      return;
+    }
+
+    if (isPaused) {
       event.preventDefault();
       return;
     }
@@ -907,6 +988,11 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.code === DESKTOP_SPEED_TOGGLE_KEY && !event.repeat) {
+    toggleGameSpeed();
+    return;
+  }
+
   if (waveState === "MENU") {
     if (event.code === "Digit1" || event.code === "Digit2" || event.code === "Digit3") {
       const optionIndex = Number(event.code.slice(-1)) - 1;
@@ -1032,8 +1118,9 @@ function showUpgradeMenu(options = {}) {
 }
 
 function animate() {
-  const deltaSeconds = clock.getDelta();
-  gameTime += deltaSeconds;
+  const rawDeltaSeconds = clock.getDelta();
+  const simulationDeltaSeconds = rawDeltaSeconds * gameSpeedMultiplier;
+  gameTime += simulationDeltaSeconds;
   PORTAL_UNIFORMS.uTime.value = gameTime;
 
   if (!isPaused) {
@@ -1043,7 +1130,7 @@ function animate() {
         waveDelay = WAVE_CONFIG.upgradeDelaySeconds;
       }
     } else if (waveState === "DELAY") {
-      waveDelay -= deltaSeconds;
+      waveDelay -= simulationDeltaSeconds;
       if (waveDelay <= 0) {
         waveState = "MENU";
         showUpgradeMenu();
@@ -1055,9 +1142,9 @@ function animate() {
       if (isPrimaryDown) {
         handlePrimaryAction();
       }
-      player.update(deltaSeconds, enemySystem);
-      enemySystem.update(deltaSeconds, camera);
-      towerSystem.update(deltaSeconds, enemySystem);
+      player.update(simulationDeltaSeconds, enemySystem);
+      enemySystem.update(simulationDeltaSeconds, camera);
+      towerSystem.update(simulationDeltaSeconds, enemySystem);
     }
   }
 
@@ -1095,6 +1182,10 @@ function animate() {
     buildMode: towerSystem ? towerSystem.isBuildMode() : false,
     showKeyboardHints: !showTouchControls,
     showTouchControls,
+    showPauseButton: showTouchControls,
+    showSpeedButton: true,
+    paused: isPaused,
+    speedMultiplier: gameSpeedMultiplier,
     touchPortrait,
     moveStickX: mobileInput.moveX,
     moveStickY: mobileInput.moveY,

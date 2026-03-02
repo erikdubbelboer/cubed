@@ -574,6 +574,10 @@ export function createUiOverlay({
     buildMode: false,
     showKeyboardHints: true,
     showTouchControls: false,
+    showPauseButton: false,
+    showSpeedButton: false,
+    paused: false,
+    speedMultiplier: 1,
     touchPortrait: false,
     moveStickX: 0,
     moveStickY: 0,
@@ -586,6 +590,7 @@ export function createUiOverlay({
 
   let menuOptionRects = [];
   let towerSlotRects = [];
+  let hudButtonRects = [];
   let touchActionZones = [];
   let touchBlockedRects = [];
   const touchControlLayout = {
@@ -666,6 +671,18 @@ export function createUiOverlay({
     }
     if (typeof partialState.showTouchControls === "boolean") {
       state.showTouchControls = partialState.showTouchControls;
+    }
+    if (typeof partialState.showPauseButton === "boolean") {
+      state.showPauseButton = partialState.showPauseButton;
+    }
+    if (typeof partialState.showSpeedButton === "boolean") {
+      state.showSpeedButton = partialState.showSpeedButton;
+    }
+    if (typeof partialState.paused === "boolean") {
+      state.paused = partialState.paused;
+    }
+    if (typeof partialState.speedMultiplier === "number" && Number.isFinite(partialState.speedMultiplier)) {
+      state.speedMultiplier = Math.max(0.1, partialState.speedMultiplier);
     }
     if (typeof partialState.touchPortrait === "boolean") {
       state.touchPortrait = partialState.touchPortrait;
@@ -860,6 +877,96 @@ export function createUiOverlay({
     );
 
     pushTouchBlockedRect(panelX, panelY, panelWidth, panelHeight);
+  }
+
+  function drawHudUtilityButtons() {
+    hudButtonRects = [];
+    if (state.menuOpen) {
+      return;
+    }
+
+    const showPause = !!state.showPauseButton;
+    const showSpeed = !!state.showSpeedButton;
+    if (!showPause && !showSpeed) {
+      return;
+    }
+
+    const {
+      panelX,
+      panelY,
+      panelHeight,
+    } = getMoneyPanelRect();
+    const buttonHeight = clamp(panelHeight * 0.92, 30, 54);
+    const buttonRadius = clamp(buttonHeight * 0.27, 7, 12);
+    const buttonGap = clamp(buttonHeight * 0.18, 6, 12);
+    const labelFontSize = clamp(buttonHeight * 0.42, 11, 18);
+
+    const buttons = [];
+    if (showPause) {
+      buttons.push({
+        id: "pause",
+        label: state.paused ? "Resume" : "Pause",
+        active: state.paused,
+      });
+    }
+    if (showSpeed) {
+      const fastMode = state.speedMultiplier >= 1.5;
+      buttons.push({
+        id: "speed",
+        label: fastMode ? "1x" : "2x",
+        active: fastMode,
+      });
+    }
+    if (buttons.length === 0) {
+      return;
+    }
+
+    drawCtx.font = `700 ${labelFontSize}px ${FONT_STACK}`;
+    let nextRightX = panelX - buttonGap;
+    for (const button of buttons) {
+      const textWidth = drawCtx.measureText(button.label).width;
+      const buttonWidth = clamp(textWidth + (buttonHeight * 0.86), 44, 126);
+      const x = Math.max(6, nextRightX - buttonWidth);
+      const y = panelY + (panelHeight - buttonHeight) * 0.5;
+      const fillStyle = button.active
+        ? "rgba(44, 92, 128, 0.9)"
+        : "rgba(14, 30, 45, 0.76)";
+      const strokeStyle = button.active
+        ? "rgba(147, 228, 255, 0.92)"
+        : "rgba(152, 214, 255, 0.48)";
+
+      drawPanel(
+        drawCtx,
+        x,
+        y,
+        buttonWidth,
+        buttonHeight,
+        buttonRadius,
+        fillStyle,
+        strokeStyle,
+        button.active ? 1.6 : 1.2
+      );
+      drawCtx.fillStyle = "rgba(233, 247, 255, 0.96)";
+      drawCtx.textAlign = "center";
+      drawCtx.textBaseline = "middle";
+      drawCtx.font = `700 ${labelFontSize}px ${FONT_STACK}`;
+      drawCtx.fillText(button.label, x + buttonWidth * 0.5, y + buttonHeight * 0.54);
+
+      hudButtonRects.push({
+        id: button.id,
+        x,
+        y,
+        width: buttonWidth,
+        height: buttonHeight,
+      });
+      if (state.showTouchControls) {
+        pushTouchBlockedRect(x, y, buttonWidth, buttonHeight);
+      }
+      nextRightX = x - buttonGap;
+    }
+
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "alphabetic";
   }
 
   function drawTowerTray() {
@@ -1453,6 +1560,7 @@ export function createUiOverlay({
 
     drawJetpackHud();
     drawMoneyHud();
+    drawHudUtilityButtons();
     drawTowerTray();
     drawBuildModeHint();
     drawCrosshair();
@@ -1511,6 +1619,14 @@ export function createUiOverlay({
     return null;
   }
 
+  function hitTestHudButton(x, y) {
+    if (state.menuOpen) {
+      return null;
+    }
+    const result = hitTestRectList(hudButtonRects, x, y, (rect) => rect.id);
+    return result == null ? null : result;
+  }
+
   function getTouchControlLayout() {
     const blockedRects = touchBlockedRects.slice();
     for (const rect of towerSlotRects) {
@@ -1539,6 +1655,7 @@ export function createUiOverlay({
     hitTestMenuOption,
     hitTestTowerSlot,
     hitTestTouchAction,
+    hitTestHudButton,
     getTouchControlLayout,
   };
 }
