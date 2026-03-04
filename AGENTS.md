@@ -218,6 +218,19 @@
 - Level containment:
   - Player movement is clamped to level bounds in `player.js` via `movementBounds`.
   - This acts as an infinite-height invisible wall in X/Z (jetpack cannot bypass map bounds).
+  - A visual-only holodeck boundary overlay now exists in `grid.js`:
+    - `grid.updateBoundaryWallVisual(playerPosition)` updates a faint transparent grid effect near boundaries.
+    - Full perimeter wall grids remain static in world space; only reveal masking changes with player movement.
+    - Reveal patch is circular (wall-plane circle), centered from player projection onto each wall.
+    - Circle center now tracks the camera/player world position directly on each wall projection (no radius-based center clamping).
+    - Only the 4 vertical perimeter walls are rendered (no ceiling/floor shell).
+    - Reveal is proximity-based with config-driven fade (`GAME_CONFIG.grid.boundaryWall`); pulse controls were removed.
+    - Boundary grid lines are rendered as mesh strips (not `LineSegments`) so `boundaryWall.lineThickness` visibly works across WebGL platforms.
+    - Wall visibility uses shader mask uniforms; `diameter` controls circular reveal size and `patchFeather` controls edge softness.
+    - Boundary wall visual height is auto-derived from terrain + player vertical mobility (jump/jetpack), not config-driven `height`.
+    - Wall material ignores scene fog so `maxOpacity`/color remain readable on bright white scenes.
+    - `boundaryWall.color` is config-driven; use high-contrast values against the bright floor/background.
+    - Collision/containment remains clamp-only in `player.js`; boundary visuals must not change physics.
   - Enemy routing is level-cell bounded, so enemies cannot leave the level either.
 
 ### AGENTS.md

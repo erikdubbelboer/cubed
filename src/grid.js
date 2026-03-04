@@ -19,6 +19,24 @@ const LEVEL_MARKERS = new Set([".", "P", "S", "E", "X"]);
 const LEGACY_PATH_MARKERS = new Set(["P"]);
 const CELL_TOKEN_WIDTH = 2;
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function saturate(value) {
+  return clamp(value, 0, 1);
+}
+
+function smoothstep01(value) {
+  const t = saturate(value);
+  return t * t * (3 - (2 * t));
+}
+
+function finiteOrFallback(value, fallback) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
 function cellKey(cellX, cellZ) {
   return `${cellX},${cellZ}`;
 }
@@ -405,6 +423,354 @@ export function createGrid(scene) {
     maxZ: levelBounds.maxZ - moveInset,
   };
 
+  const boundaryWallConfigRaw = GRID_CONFIG.boundaryWall ?? {};
+  const boundaryWallConfig = {
+    enabled: boundaryWallConfigRaw.enabled !== false,
+    color: Number.isFinite(Number(boundaryWallConfigRaw.color))
+      ? Number(boundaryWallConfigRaw.color)
+      : 0x7edbff,
+    maxOpacity: saturate(finiteOrFallback(boundaryWallConfigRaw.maxOpacity, 0.22)),
+    revealDistance: Math.max(0.001, finiteOrFallback(boundaryWallConfigRaw.revealDistance, CELL_SIZE * 1.5)),
+    fullOpacityDistance: Math.max(0, finiteOrFallback(boundaryWallConfigRaw.fullOpacityDistance, CELL_SIZE * 0.375)),
+    diameter: Math.max(
+      CELL_SIZE * 0.5,
+      finiteOrFallback(boundaryWallConfigRaw.diameter ?? boundaryWallConfigRaw.patchWidth, CELL_SIZE * 2.75)
+    ),
+    lineSpacing: Math.max(0.25, finiteOrFallback(boundaryWallConfigRaw.lineSpacing, CELL_SIZE * 0.225)),
+    lineThickness: Math.max(0.01, finiteOrFallback(boundaryWallConfigRaw.lineThickness, 0.1)),
+    inset: Math.max(0, finiteOrFallback(boundaryWallConfigRaw.inset, 0.02)),
+    baseYOffset: finiteOrFallback(boundaryWallConfigRaw.baseYOffset, 0),
+  };
+  boundaryWallConfig.fullOpacityDistance = Math.min(
+    boundaryWallConfig.fullOpacityDistance,
+    boundaryWallConfig.revealDistance
+  );
+  boundaryWallConfig.patchFeather = Math.max(
+    0.01,
+    finiteOrFallback(boundaryWallConfigRaw.patchFeather, Math.max(0.1, boundaryWallConfig.lineSpacing))
+  );
+
+  const boundaryWallGroup = new THREE.Group();
+  boundaryWallGroup.name = "BoundaryWallGroup";
+  boundaryWallGroup.visible = false;
+  scene.add(boundaryWallGroup);
+
+  const boundaryWallEntries = [];
+  const boundaryWallColor = new THREE.Color(boundaryWallConfig.color);
+
+  const BOUNDARY_WALL_VERTEX_SHADER = `
+    varying vec3 vWorldPos;
+
+    void main() {
+      vec4 worldPos = modelMatrix * vec4(position, 1.0);
+      vWorldPos = worldPos.xyz;
+      gl_Position = projectionMatrix * viewMatrix * worldPos;
+    }
+  `;
+
+  const BOUNDARY_WALL_FRAGMENT_SHADER = `
+    uniform vec3 uColor;
+    uniform float uOpacity;
+    uniform float uRevealCenterAlong;
+    uniform float uRevealCenterY;
+    uniform float uRevealRadius;
+    uniform float uRevealFeather;
+    uniform float uAxisIsX;
+    varying vec3 vWorldPos;
+
+    void main() {
+      float alongCoord = mix(vWorldPos.z, vWorldPos.x, uAxisIsX);
+      float deltaAlong = alongCoord - uRevealCenterAlong;
+      float deltaY = vWorldPos.y - uRevealCenterY;
+      float distanceToCenter = length(vec2(deltaAlong, deltaY));
+      float feather = max(0.0001, min(uRevealFeather, uRevealRadius));
+      float innerRadius = max(0.0, uRevealRadius - feather);
+      float revealMask = 1.0 - smoothstep(innerRadius, uRevealRadius, distanceToCenter);
+      float alpha = uOpacity * revealMask;
+      if (alpha <= 0.0005) {
+        discard;
+      }
+      gl_FragColor = vec4(uColor, alpha);
+    }
+  `;
+
+  function appendQuadTriangles(positionArray, a, b, c, d) {
+    positionArray.push(
+      a.x, a.y, a.z,
+      b.x, b.y, b.z,
+      d.x, d.y, d.z,
+      b.x, b.y, b.z,
+      c.x, c.y, c.z,
+      d.x, d.y, d.z
+    );
+  }
+
+  function createBoundaryGridGeometry(width, height, spacing, thickness) {
+    const lineCountX = Math.max(1, Math.round(width / spacing));
+    const lineCountY = Math.max(1, Math.round(height / spacing));
+    const halfWidth = width * 0.5;
+    const halfThickness = Math.max(0.001, thickness * 0.5);
+    const positions = [];
+    const pointA = new THREE.Vector3();
+    const pointB = new THREE.Vector3();
+    const pointC = new THREE.Vector3();
+    const pointD = new THREE.Vector3();
+
+    for (let xIndex = 0; xIndex <= lineCountX; xIndex += 1) {
+      const t = xIndex / lineCountX;
+      const x = -halfWidth + (t * width);
+      const left = Math.max(-halfWidth, x - halfThickness);
+      const right = Math.min(halfWidth, x + halfThickness);
+      if (right <= left) {
+        continue;
+      }
+      pointA.set(left, 0, 0);
+      pointB.set(left, height, 0);
+      pointC.set(right, height, 0);
+      pointD.set(right, 0, 0);
+      appendQuadTriangles(positions, pointA, pointB, pointC, pointD);
+    }
+
+    for (let yIndex = 0; yIndex <= lineCountY; yIndex += 1) {
+      const t = yIndex / lineCountY;
+      const y = t * height;
+      const bottom = Math.max(0, y - halfThickness);
+      const top = Math.min(height, y + halfThickness);
+      if (top <= bottom) {
+        continue;
+      }
+      pointA.set(-halfWidth, bottom, 0);
+      pointB.set(-halfWidth, top, 0);
+      pointC.set(halfWidth, top, 0);
+      pointD.set(halfWidth, bottom, 0);
+      appendQuadTriangles(positions, pointA, pointB, pointC, pointD);
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+    return geometry;
+  }
+
+  function createBoundaryWallMaterial({
+    alongAxis,
+    revealRadius,
+    revealFeather,
+    initialRevealCenterAlong,
+    initialRevealCenterY,
+  }) {
+    const uniforms = {
+      uColor: { value: boundaryWallColor },
+      uOpacity: { value: 0 },
+      uRevealCenterAlong: { value: initialRevealCenterAlong },
+      uRevealCenterY: { value: initialRevealCenterY },
+      uRevealRadius: { value: revealRadius },
+      uRevealFeather: { value: revealFeather },
+      uAxisIsX: { value: alongAxis === "x" ? 1 : 0 },
+    };
+    const material = new THREE.ShaderMaterial({
+      uniforms,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      side: THREE.DoubleSide,
+      fog: false,
+      vertexShader: BOUNDARY_WALL_VERTEX_SHADER,
+      fragmentShader: BOUNDARY_WALL_FRAGMENT_SHADER,
+    });
+    material.toneMapped = false;
+    return { material, uniforms };
+  }
+
+  function hideBoundaryWallVisual() {
+    boundaryWallGroup.visible = false;
+    for (const wall of boundaryWallEntries) {
+      wall.mesh.visible = false;
+      wall.uniforms.uOpacity.value = 0;
+    }
+  }
+
+  if (boundaryWallConfig.enabled && boundaryWallConfig.maxOpacity > 0 && boundaryWallConfig.revealDistance > 0) {
+    const boundsWidth = levelBounds.maxX - levelBounds.minX;
+    const boundsDepth = levelBounds.maxZ - levelBounds.minZ;
+    const maxInsetBySpan = Math.max(0, (Math.min(boundsWidth, boundsDepth) * 0.5) - 0.001);
+    const safeInset = Math.min(boundaryWallConfig.inset, maxInsetBySpan);
+    const wallMinX = levelBounds.minX + safeInset;
+    const wallMaxX = levelBounds.maxX - safeInset;
+    const wallMinZ = levelBounds.minZ + safeInset;
+    const wallMaxZ = levelBounds.maxZ - safeInset;
+    const wallBaseY = FLOOR_Y + boundaryWallConfig.baseYOffset;
+    const maxTerrainTopY = altitudeObstacles.reduce((maxTopY, obstacle) => {
+      const obstacleHeight = Number(obstacle?.height);
+      const obstacleBaseY = Number.isFinite(Number(obstacle?.baseY))
+        ? Number(obstacle.baseY)
+        : FLOOR_Y;
+      if (!Number.isFinite(obstacleHeight) || obstacleHeight <= 0) {
+        return maxTopY;
+      }
+      return Math.max(maxTopY, obstacleBaseY + obstacleHeight);
+    }, FLOOR_Y);
+    const playerConfig = GAME_CONFIG.player ?? {};
+    const movementConfig = playerConfig.movement ?? {};
+    const jetpackConfig = playerConfig.jetpack ?? {};
+    const eyeHeightEstimate = Math.max(0, finiteOrFallback(GRID_CONFIG.eyeHeight, 1.7));
+    const jumpVelocity = Math.max(0, finiteOrFallback(movementConfig.jumpVelocity, 0));
+    const gravity = Math.max(0.001, finiteOrFallback(movementConfig.gravity, 24));
+    const jumpRiseEstimate = (jumpVelocity * jumpVelocity) / (2 * gravity);
+    const jetpackRiseEstimate = Math.max(0, finiteOrFallback(jetpackConfig.maxRiseSpeed, 0))
+      * Math.max(0, finiteOrFallback(jetpackConfig.maxFuel, 0));
+    const estimatedReachAboveFloor = eyeHeightEstimate + jumpRiseEstimate + jetpackRiseEstimate;
+    const terrainHeightAboveFloor = Math.max(0, maxTerrainTopY - FLOOR_Y);
+    const wallHeight = Math.max(
+      CELL_SIZE * 3,
+      terrainHeightAboveFloor + estimatedReachAboveFloor + (CELL_SIZE * 2)
+    );
+    const wallTopY = wallBaseY + wallHeight;
+    const revealRadius = Math.max(0.25, boundaryWallConfig.diameter * 0.5);
+    const revealFeather = Math.min(revealRadius, boundaryWallConfig.patchFeather);
+
+    function createWallEntry({
+      planeAxis,
+      planeCoord,
+      alongAxis,
+      spanMin,
+      spanMax,
+      rotationY,
+    }) {
+      const spanLength = Math.max(0.001, spanMax - spanMin);
+      const spanCenter = (spanMin + spanMax) * 0.5;
+      const geometry = createBoundaryGridGeometry(
+        spanLength,
+        wallHeight,
+        boundaryWallConfig.lineSpacing,
+        boundaryWallConfig.lineThickness
+      );
+      const { material, uniforms } = createBoundaryWallMaterial({
+        alongAxis,
+        revealRadius,
+        revealFeather,
+        initialRevealCenterAlong: spanCenter,
+        initialRevealCenterY: (wallBaseY + wallTopY) * 0.5,
+      });
+
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.visible = false;
+      mesh.position.y = wallBaseY;
+      mesh.rotation.y = rotationY;
+      if (planeAxis === "x") {
+        mesh.position.x = planeCoord;
+        mesh.position.z = spanCenter;
+      } else {
+        mesh.position.z = planeCoord;
+        mesh.position.x = spanCenter;
+      }
+      boundaryWallGroup.add(mesh);
+
+      return {
+        mesh,
+        uniforms,
+        planeAxis,
+        planeCoord,
+        alongAxis,
+        spanMin,
+        spanMax,
+        revealRadius,
+        baseY: wallBaseY,
+        topY: wallTopY,
+      };
+    }
+
+    boundaryWallEntries.push(
+      createWallEntry({
+        planeAxis: "x",
+        planeCoord: wallMinX,
+        alongAxis: "z",
+        spanMin: wallMinZ,
+        spanMax: wallMaxZ,
+        rotationY: Math.PI * 0.5,
+      }),
+      createWallEntry({
+        planeAxis: "x",
+        planeCoord: wallMaxX,
+        alongAxis: "z",
+        spanMin: wallMinZ,
+        spanMax: wallMaxZ,
+        rotationY: -Math.PI * 0.5,
+      }),
+      createWallEntry({
+        planeAxis: "z",
+        planeCoord: wallMinZ,
+        alongAxis: "x",
+        spanMin: wallMinX,
+        spanMax: wallMaxX,
+        rotationY: 0,
+      }),
+      createWallEntry({
+        planeAxis: "z",
+        planeCoord: wallMaxZ,
+        alongAxis: "x",
+        spanMin: wallMinX,
+        spanMax: wallMaxX,
+        rotationY: Math.PI,
+      })
+    );
+  }
+
+  function computeBoundaryRevealAlpha(distanceToPlane) {
+    if (!Number.isFinite(distanceToPlane) || distanceToPlane > boundaryWallConfig.revealDistance) {
+      return 0;
+    }
+    if (distanceToPlane <= boundaryWallConfig.fullOpacityDistance) {
+      return boundaryWallConfig.maxOpacity;
+    }
+
+    const fadeSpan = boundaryWallConfig.revealDistance - boundaryWallConfig.fullOpacityDistance;
+    if (fadeSpan <= 1e-6) {
+      return boundaryWallConfig.maxOpacity;
+    }
+
+    const linearFade = 1 - (
+      (distanceToPlane - boundaryWallConfig.fullOpacityDistance)
+      / fadeSpan
+    );
+    return boundaryWallConfig.maxOpacity * smoothstep01(linearFade);
+  }
+
+  function updateBoundaryWallVisual(playerPosition) {
+    if (!boundaryWallConfig.enabled || boundaryWallEntries.length === 0 || !playerPosition) {
+      hideBoundaryWallVisual();
+      return;
+    }
+
+    let anyVisible = false;
+
+    for (const wall of boundaryWallEntries) {
+      const planeCoordinate = wall.planeAxis === "x" ? playerPosition.x : playerPosition.z;
+      const distanceToPlane = Math.abs(planeCoordinate - wall.planeCoord);
+      let alpha = computeBoundaryRevealAlpha(distanceToPlane);
+      if (alpha <= 0.0001) {
+        wall.mesh.visible = false;
+        wall.uniforms.uOpacity.value = 0;
+        continue;
+      }
+
+      const revealCenterAlong = wall.alongAxis === "x"
+        ? playerPosition.x
+        : playerPosition.z;
+      const revealCenterY = playerPosition.y;
+
+      alpha = clamp(Math.max(0, alpha), 0, boundaryWallConfig.maxOpacity);
+      wall.uniforms.uOpacity.value = alpha;
+      wall.uniforms.uRevealCenterAlong.value = revealCenterAlong;
+      wall.uniforms.uRevealCenterY.value = revealCenterY;
+      wall.mesh.visible = alpha > 0.0001;
+      anyVisible = anyVisible || wall.mesh.visible;
+    }
+
+    boundaryWallGroup.visible = anyVisible;
+  }
+
   function worldToCell(worldX, worldZ) {
     const cx = Math.floor((worldX + half) / CELL_SIZE);
     const cz = Math.floor((worldZ + half) / CELL_SIZE);
@@ -534,6 +900,7 @@ export function createGrid(scene) {
     getCellSurfaceY,
     getBuildSurfaceYAtWorld,
     raycastBuildSurface,
+    updateBoundaryWallVisual,
     isSameCell,
   };
 }

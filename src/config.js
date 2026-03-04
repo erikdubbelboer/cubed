@@ -417,6 +417,31 @@ export const GAME_CONFIG = {
     pathTileScale: 0.94,
     // Move bounds inset from edge as cell-size fraction. Typical range: 0.3-0.6.
     moveInsetCellScale: 0.5,
+    // Visual-only holodeck-style boundary wall reveal.
+    boundaryWall: {
+      // Master toggle for boundary wall rendering.
+      enabled: true,
+      // Grid line color.
+      color: 0x3dcfff,
+      // Maximum wall opacity when very close to a boundary.
+      maxOpacity: 0.12,
+      // Start fading in when player is within this many world units of a boundary.
+      revealDistance: 5,
+      // Distance where the wall reaches max opacity.
+      fullOpacityDistance: 1,
+      // Diameter of the circular reveal patch on each wall.
+      diameter: 10,
+      // Soft edge width of the circular reveal in world units.
+      patchFeather: 0.9,
+      // Distance between grid lines.
+      lineSpacing: 0.9,
+      // Thickness of each hologrid line in world units.
+      lineThickness: 0.05,
+      // Small inward shift from level bounds to avoid z-fighting with edges.
+      inset: 0.02,
+      // Vertical offset from floor.
+      baseYOffset: 0,
+    },
 
     // Extra non-path empty space outside the configured level bounds.
     // Number of outside rings in cell units. Set 0 to disable.

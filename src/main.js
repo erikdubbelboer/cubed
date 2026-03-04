@@ -1475,6 +1475,11 @@ function animate() {
       towerSystem.update(simulationDeltaSeconds, enemySystem);
     }
   }
+
+  if (typeof grid.updateBoundaryWallVisual === "function") {
+    grid.updateBoundaryWallVisual(camera.position);
+  }
+
   syncBuildPhasePathPreviewVisibility();
   syncPokiGameplayState();
 
