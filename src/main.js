@@ -1,18 +1,19 @@
 import * as THREE from "three";
 import { createGrid } from "./grid.js";
 import { createPlayer } from "./player.js";
-import { createEnemySystem, getLargestEnemySize } from "./enemies.js";
+import { createEnemySystem } from "./enemies.js";
 import { createTowerSystem } from "./towers.js";
 import { createUiOverlay } from "./uiOverlay.js";
 import { GAME_CONFIG } from "./config.js";
 
 const SCENE_CONFIG = GAME_CONFIG.scene;
 const LIGHT_CONFIG = GAME_CONFIG.lights;
-const PORTAL_CONFIG = GAME_CONFIG.portal;
 const UI_CONFIG = GAME_CONFIG.ui;
 const MOBILE_UI_CONFIG = UI_CONFIG.mobile ?? {};
 const WAVE_CONFIG = GAME_CONFIG.waves;
 const ECONOMY_CONFIG = GAME_CONFIG.economy ?? {};
+const ENEMY_CONFIG = GAME_CONFIG.enemies ?? {};
+const ENEMY_TYPES = ENEMY_CONFIG.types ?? {};
 const CONFIGURED_ROUNDS = Array.isArray(WAVE_CONFIG.rounds) ? WAVE_CONFIG.rounds : [];
 const UPGRADE_DEFINITIONS = Array.isArray(GAME_CONFIG.upgrades) ? GAME_CONFIG.upgrades : [];
 const FIRST_MENU_FORCED_UPGRADE_ID = "tower_aoe_unlock";
@@ -22,6 +23,92 @@ const MOBILE_LOOK_SENSITIVITY_SCALE = Number.isFinite(Number(MOBILE_UI_CONFIG.lo
 const GAME_SPEED_NORMAL = 1;
 const GAME_SPEED_FAST = 2;
 const DESKTOP_SPEED_TOGGLE_KEY = "KeyF";
+const DEFAULT_BUILD_PHASE_DURATION_SECONDS = 300;
+const BUILD_PHASE_DURATION_SECONDS = Number.isFinite(Number(WAVE_CONFIG.buildPhaseDurationSeconds))
+  ? Math.max(0, Number(WAVE_CONFIG.buildPhaseDurationSeconds))
+  : DEFAULT_BUILD_PHASE_DURATION_SECONDS;
+const DEFAULT_PREVIEW_ENEMY_TYPE = Object.prototype.hasOwnProperty.call(ENEMY_TYPES, "red")
+  ? "red"
+  : (Object.keys(ENEMY_TYPES)[0] ?? "red");
+const DEFAULT_PREVIEW_ENEMY_SIZE = Math.max(
+  0.2,
+  Number(ENEMY_TYPES[DEFAULT_PREVIEW_ENEMY_TYPE]?.size) || 1
+);
+const ENEMY_PATH_Y_OFFSET = Number.isFinite(Number(GAME_CONFIG.grid?.enemyPathYOffset))
+  ? Number(GAME_CONFIG.grid.enemyPathYOffset)
+  : 0;
+const ENEMY_BODY_Y_OFFSET = Number.isFinite(Number(ENEMY_CONFIG.bodyYOffset))
+  ? Number(ENEMY_CONFIG.bodyYOffset)
+  : 0;
+const BUILD_PREVIEW_TRAIL_Y_OFFSET = ENEMY_PATH_Y_OFFSET + ENEMY_BODY_Y_OFFSET + (DEFAULT_PREVIEW_ENEMY_SIZE * 0.5);
+const BUILD_PREVIEW_TRAIL_COLORS = [
+  0x79f0c5,
+  0x74b8ff,
+  0xffb86f,
+  0xd1a6ff,
+  0x96f1b0,
+  0xff98a4,
+];
+const BUILD_PREVIEW_TRAIL_OPACITY = 0.7;
+const BUILD_PREVIEW_TRAIL_SPEED_MIN = 2.2;
+const BUILD_PREVIEW_TRAIL_SPEED_MAX = 4.6;
+const BUILD_PREVIEW_VOXEL_COUNT_MIN = 24;
+const BUILD_PREVIEW_VOXEL_COUNT_MAX = 64;
+const BUILD_PREVIEW_VOXEL_SIZE_MIN = 0.1;
+const BUILD_PREVIEW_VOXEL_SIZE_MAX = 0.24;
+const BUILD_PREVIEW_VOXEL_LATERAL_JITTER = 0.46;
+const BUILD_PREVIEW_VOXEL_VERTICAL_JITTER = 0.2;
+const BUILD_PREVIEW_VOXEL_FADE_DISTANCE = 1.45;
+const BUILD_PREVIEW_BURST_DURATION_MIN = 0.35;
+const BUILD_PREVIEW_BURST_DURATION_MAX = 0.85;
+const BUILD_PREVIEW_BURST_GAP_MIN = 1.6;
+const BUILD_PREVIEW_BURST_GAP_MAX = 3.3;
+const BUILD_PREVIEW_BURST_SPAWN_STAGGER_MAX = 0.75;
+const BUILD_PREVIEW_BURST_SPAWN_FRACTION = 0.58;
+const FPS_SAMPLE_WINDOW_SECONDS = 0.35;
+const BUILD_PREVIEW_VOXEL_VERTEX_SHADER = `
+varying vec3 vLocalPos;
+varying vec3 vWorldPos;
+varying vec3 vWorldNormal;
+
+void main() {
+  vLocalPos = position;
+  vec4 worldPos = modelMatrix * vec4(position, 1.0);
+  vWorldPos = worldPos.xyz;
+  vWorldNormal = normalize(mat3(modelMatrix) * normal);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+const BUILD_PREVIEW_VOXEL_FRAGMENT_SHADER = `
+uniform vec3 uColor;
+uniform float uOpacity;
+uniform float uTime;
+varying vec3 vLocalPos;
+varying vec3 vWorldPos;
+varying vec3 vWorldNormal;
+
+float hash31(vec3 p) {
+  return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
+}
+
+void main() {
+  float edgeDist = max(max(abs(vLocalPos.x), abs(vLocalPos.y)), abs(vLocalPos.z));
+  float edge = smoothstep(0.3, 0.49, edgeDist);
+
+  float timeCell = floor(uTime * 12.0);
+  float sparkleNoise = hash31(floor(vWorldPos * 11.0) + vec3(timeCell));
+  float sparkle = step(0.965, sparkleNoise);
+
+  float flowBand = 0.82 + (0.18 * sin((vWorldPos.x + vWorldPos.z) * 6.2 + uTime * 8.8));
+  float viewFresnel = pow(1.0 - max(0.0, dot(normalize(vWorldNormal), normalize(cameraPosition - vWorldPos))), 2.0);
+
+  vec3 baseColor = uColor * (0.7 + flowBand * 0.45);
+  vec3 edgeColor = vec3(0.8, 0.95, 1.0) * (edge * 0.45 + viewFresnel * 0.4 + sparkle * 0.7);
+  vec3 finalColor = baseColor + edgeColor;
+  float alpha = uOpacity * clamp(0.62 + edge * 0.38 + sparkle * 0.16, 0.0, 1.0);
+  gl_FragColor = vec4(finalColor, alpha);
+}
+`;
 
 const app = document.getElementById("app");
 
@@ -34,8 +121,6 @@ scene.fog = new THREE.Fog(
   SCENE_CONFIG.fogNear,
   SCENE_CONFIG.fogFar
 );
-
-let gameTime = 0;
 
 const camera = new THREE.PerspectiveCamera(
   SCENE_CONFIG.cameraFov,
@@ -101,109 +186,32 @@ directionalLight.shadow.normalBias = LIGHT_CONFIG.directional.shadowNormalBias;
 scene.add(directionalLight);
 
 const grid = createGrid(scene);
-camera.position.set(0, grid.eyeHeight, grid.moveBounds.maxZ - SCENE_CONFIG.cameraStartOffsetZ);
+const hasPlayerSpawnCell = !!(
+  grid.playerSpawnCell
+  && Number.isInteger(grid.playerSpawnCell.x)
+  && Number.isInteger(grid.playerSpawnCell.z)
+);
+if (hasPlayerSpawnCell && typeof grid.cellToWorldCenter === "function") {
+  const spawnCenter = grid.cellToWorldCenter(grid.playerSpawnCell.x, grid.playerSpawnCell.z);
+  const spawnSurfaceY = typeof grid.getBuildSurfaceYAtWorld === "function"
+    ? grid.getBuildSurfaceYAtWorld(spawnCenter.x, spawnCenter.z)
+    : 0;
+  camera.position.set(spawnCenter.x, spawnSurfaceY + grid.eyeHeight, spawnCenter.z);
+} else {
+  camera.position.set(0, grid.eyeHeight, grid.moveBounds.maxZ - SCENE_CONFIG.cameraStartOffsetZ);
+}
 camera.lookAt(0, grid.eyeHeight, 0);
+
+const buildPhasePathPreviewGroup = new THREE.Group();
+buildPhasePathPreviewGroup.visible = false;
+buildPhasePathPreviewGroup.name = "BuildPathPreviewGroup";
+scene.add(buildPhasePathPreviewGroup);
+const buildPhasePathPreviewParticleGeometry = new THREE.BoxGeometry(1, 1, 1);
+const buildPhasePathPreviewTrails = [];
 
 let player;
 let enemySystem;
 let towerSystem;
-
-const LARGEST_ENEMY_SIZE = getLargestEnemySize();
-const PORTAL_FACE_SIZE = LARGEST_ENEMY_SIZE * PORTAL_CONFIG.faceSizeFromLargestEnemy;
-const PORTAL_WIDTH = PORTAL_FACE_SIZE;
-const PORTAL_HEIGHT = PORTAL_FACE_SIZE;
-const PORTAL_THICKNESS = PORTAL_CONFIG.thickness;
-const PORTAL_Y_OFFSET = PORTAL_CONFIG.yOffset;
-const PORTAL_ENTRY_DISTANCE = PORTAL_FACE_SIZE * PORTAL_CONFIG.entryDistanceFromFaceSize;
-const PORTAL_GEOMETRY = new THREE.BoxGeometry(PORTAL_WIDTH, PORTAL_HEIGHT, PORTAL_THICKNESS);
-
-const PORTAL_UNIFORMS = {
-  uTime: { value: 0 },
-  uColorA: { value: new THREE.Color(PORTAL_CONFIG.colorA) },
-  uColorB: { value: new THREE.Color(PORTAL_CONFIG.colorB) },
-  uEdgeColor: { value: new THREE.Color(PORTAL_CONFIG.edgeColor) },
-  uOpacity: { value: PORTAL_CONFIG.opacity },
-};
-
-const PORTAL_MATERIAL = new THREE.ShaderMaterial({
-  uniforms: PORTAL_UNIFORMS,
-  transparent: true,
-  depthWrite: false,
-  side: THREE.DoubleSide,
-  vertexShader: `
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: `
-    uniform float uTime;
-    uniform vec3 uColorA;
-    uniform vec3 uColorB;
-    uniform vec3 uEdgeColor;
-    uniform float uOpacity;
-    varying vec2 vUv;
-
-    float hash21(vec2 p) {
-      p = fract(p * vec2(123.34, 345.45));
-      p += dot(p, p + 34.345);
-      return fract(p.x * p.y);
-    }
-
-    float noise2(vec2 p) {
-      vec2 i = floor(p);
-      vec2 f = fract(p);
-
-      float a = hash21(i);
-      float b = hash21(i + vec2(1.0, 0.0));
-      float c = hash21(i + vec2(0.0, 1.0));
-      float d = hash21(i + vec2(1.0, 1.0));
-
-      vec2 u = f * f * (3.0 - 2.0 * f);
-      return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
-    }
-
-    float fbm(vec2 p) {
-      float value = 0.0;
-      float amplitude = 0.5;
-      for (int i = 0; i < 5; i++) {
-        value += noise2(p) * amplitude;
-        p = p * 2.03 + vec2(13.7, 8.4);
-        amplitude *= 0.5;
-      }
-      return value;
-    }
-
-    void main() {
-      vec2 uv = vUv * 2.0 - 1.0;
-      float radial = length(uv);
-
-      vec2 flowUv = uv * 2.2;
-      flowUv += vec2(
-        sin(uTime * 0.9 + uv.y * 6.0),
-        cos(uTime * 0.75 + uv.x * 7.0)
-      ) * 0.22;
-
-      float flowA = fbm(flowUv * 1.65 + vec2(uTime * 0.35, -uTime * 0.24));
-      float flowB = fbm(flowUv * 3.2 + vec2(-uTime * 0.55, uTime * 0.43));
-      float flow = mix(flowA, flowB, 0.5);
-
-      float innerMask = smoothstep(1.18, 0.05, radial);
-      float rimMask = smoothstep(0.63, 1.02, radial);
-      float pulse = 0.55 + 0.45 * sin(uTime * 2.4 + radial * 14.0 + flow * 6.0);
-
-      vec3 waterColor = mix(uColorA, uColorB, flow);
-      vec3 color = waterColor + uEdgeColor * rimMask * pulse * 0.9;
-      float alpha = uOpacity * innerMask * (0.6 + 0.4 * flow);
-      alpha += rimMask * 0.2;
-      alpha = clamp(alpha, 0.0, 0.92);
-
-      gl_FragColor = vec4(color, alpha);
-    }
-  `,
-});
-PORTAL_MATERIAL.toneMapped = false;
 
 const clock = new THREE.Clock();
 let isPaused = false;
@@ -267,8 +275,12 @@ function initPokiSdkEarly() {
   }
 }
 
+function isGameplayWaveState(state) {
+  return state === "PLAYING" || state === "DELAY" || state === "BUILD";
+}
+
 function getIsGameplayActiveForPoki() {
-  return !isPaused && (waveState === "PLAYING" || waveState === "DELAY");
+  return !isPaused && isGameplayWaveState(waveState);
 }
 
 function markPokiUserInteraction() {
@@ -299,68 +311,6 @@ function syncPokiGameplayState() {
 window.addEventListener("pointerdown", markPokiUserInteraction, { capture: true, passive: true });
 window.addEventListener("click", markPokiUserInteraction, { capture: true, passive: true });
 initPokiSdkEarly();
-
-function getPathDirection(from, to) {
-  const direction = to.clone().sub(from);
-  direction.y = 0;
-  if (direction.lengthSq() < 1e-6) {
-    return new THREE.Vector3(0, 0, 1);
-  }
-  return direction.normalize();
-}
-
-function placePathEndpointGate(position, facingDirection) {
-  const gate = new THREE.Mesh(PORTAL_GEOMETRY, PORTAL_MATERIAL);
-  gate.castShadow = false;
-  gate.receiveShadow = true;
-  const portalForward = facingDirection.clone();
-  portalForward.y = 0;
-  if (portalForward.lengthSq() < 1e-6) {
-    portalForward.set(0, 0, 1);
-  } else {
-    portalForward.normalize();
-  }
-  const derivedPathSurfaceY = Number.isFinite(position.y)
-    ? position.y - GAME_CONFIG.grid.enemyPathYOffset
-    : (grid.pathTileTopY ?? grid.tileTopY ?? 0);
-  const pathSurfaceY = typeof grid.getBuildSurfaceYAtWorld === "function"
-    ? grid.getBuildSurfaceYAtWorld(position.x, position.z)
-    : derivedPathSurfaceY;
-  gate.position.set(position.x, pathSurfaceY + PORTAL_HEIGHT * 0.5 + PORTAL_Y_OFFSET, position.z);
-  const lookTarget = gate.position.clone().add(portalForward);
-  gate.lookAt(lookTarget);
-  scene.add(gate);
-
-  const portalPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(
-    portalForward,
-    new THREE.Vector3(position.x, pathSurfaceY, position.z)
-  );
-
-  return {
-    mesh: gate,
-    position: gate.position.clone(),
-    forward: portalForward.clone(),
-    plane: portalPlane,
-    entryDistance: PORTAL_ENTRY_DISTANCE,
-  };
-}
-
-function placePathGates() {
-  const points = grid.pathWaypoints;
-  if (!Array.isArray(points) || points.length < 2) {
-    return null;
-  }
-
-  const spawnPoint = points[0];
-  const spawnFacing = getPathDirection(points[0], points[1]);
-  const spawnPortal = placePathEndpointGate(spawnPoint, spawnFacing);
-
-  const endPoint = points[points.length - 1];
-  const endFacing = getPathDirection(points[points.length - 2], points[points.length - 1]);
-  placePathEndpointGate(endPoint, endFacing);
-
-  return spawnPortal;
-}
 
 function getAutoPauseRequested() {
   const isLocked = !!document.pointerLockElement;
@@ -454,6 +404,12 @@ function handleHudButtonAction(buttonId) {
   if (buttonId === "speed") {
     toggleGameSpeed();
     return true;
+  }
+  if (buttonId === "next_wave") {
+    if (waveState === "BUILD") {
+      return startQueuedWaveNow();
+    }
+    return false;
   }
   return false;
 }
@@ -623,9 +579,10 @@ function finishUpgradeMenuChoice() {
   player.setMenuMode(false);
   resetMobileInputState();
   if (menuAdvancesWaveOnChoice) {
-    startWave(currentWave + 1);
+    startBuildPhase(currentWave + 1);
   } else {
     waveState = menuResumeWaveState;
+    syncBuildPhasePathPreviewVisibility();
   }
   menuAdvancesWaveOnChoice = true;
   menuResumeWaveState = "PLAYING";
@@ -680,6 +637,232 @@ function isPointInsideAnyRect(x, y, rects) {
     }
   }
   return false;
+}
+
+function clearBuildPhasePathPreview() {
+  for (const trail of buildPhasePathPreviewTrails) {
+    trail?.material?.dispose?.();
+  }
+  buildPhasePathPreviewTrails.length = 0;
+  while (buildPhasePathPreviewGroup.children.length > 0) {
+    const effectRoot = buildPhasePathPreviewGroup.children[buildPhasePathPreviewGroup.children.length - 1];
+    buildPhasePathPreviewGroup.remove(effectRoot);
+  }
+}
+
+function randomBetween(min, max) {
+  const safeMin = Number.isFinite(min) ? min : 0;
+  const safeMax = Number.isFinite(max) ? max : safeMin;
+  if (safeMax <= safeMin) {
+    return safeMin;
+  }
+  return safeMin + (Math.random() * (safeMax - safeMin));
+}
+
+function createBuildPhasePreviewRoute(routeCells) {
+  const points = [];
+  for (const cell of routeCells) {
+    const cellX = Number.parseInt(cell?.x, 10);
+    const cellZ = Number.parseInt(cell?.z, 10);
+    if (!Number.isInteger(cellX) || !Number.isInteger(cellZ)) {
+      continue;
+    }
+    const center = grid.cellToWorldCenter(cellX, cellZ);
+    if (!center) {
+      continue;
+    }
+    const surfaceY = typeof grid.getCellSurfaceY === "function"
+      ? grid.getCellSurfaceY(cellX, cellZ)
+      : center.y;
+    points.push(new THREE.Vector3(
+      center.x,
+      surfaceY + BUILD_PREVIEW_TRAIL_Y_OFFSET,
+      center.z
+    ));
+  }
+
+  if (points.length < 2) {
+    return null;
+  }
+
+  const segmentLengths = [];
+  let totalLength = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const segmentLength = points[i - 1].distanceTo(points[i]);
+    segmentLengths.push(segmentLength);
+    totalLength += segmentLength;
+  }
+
+  if (!Number.isFinite(totalLength) || totalLength <= 0.0001) {
+    return null;
+  }
+
+  return {
+    points,
+    segmentLengths,
+    totalLength,
+  };
+}
+
+function sampleBuildPhasePreviewRoutePoint(route, distanceAlongRoute, out) {
+  if (!route || route.points.length < 2 || route.segmentLengths.length < 1) {
+    if (route?.points?.length > 0) {
+      out.copy(route.points[0]);
+    } else {
+      out.set(0, 0, 0);
+    }
+    return out;
+  }
+
+  const routeLength = route.totalLength;
+  if (!Number.isFinite(routeLength) || routeLength <= 0.0001) {
+    out.copy(route.points[0]);
+    return out;
+  }
+
+  let remaining = distanceAlongRoute;
+  if (remaining <= 0) {
+    out.copy(route.points[0]);
+    return out;
+  }
+  if (remaining >= routeLength) {
+    out.copy(route.points[route.points.length - 1]);
+    return out;
+  }
+  let segmentIndex = 0;
+  while (
+    segmentIndex < route.segmentLengths.length - 1
+    && remaining > route.segmentLengths[segmentIndex]
+  ) {
+    remaining -= route.segmentLengths[segmentIndex];
+    segmentIndex += 1;
+  }
+
+  const start = route.points[segmentIndex];
+  const end = route.points[segmentIndex + 1];
+  const segmentLength = route.segmentLengths[segmentIndex] || 1;
+  const t = segmentLength <= 0.0001 ? 0 : (remaining / segmentLength);
+  out.lerpVectors(start, end, t);
+  return out;
+}
+
+const buildPreviewTempHead = new THREE.Vector3();
+const buildPreviewTempTail = new THREE.Vector3();
+const buildPreviewTempDir = new THREE.Vector3();
+const buildPreviewTempRight = new THREE.Vector3();
+const buildPreviewTempCenter = new THREE.Vector3();
+
+function updateBuildPhasePreviewTrail(trail, deltaSeconds) {
+  if (!trail || !trail.route || !trail.material || !Array.isArray(trail.particles)) {
+    return;
+  }
+
+  trail.time += deltaSeconds;
+  const shaderUniforms = trail.material.uniforms;
+  if (shaderUniforms?.uTime) {
+    shaderUniforms.uTime.value = trail.time;
+  }
+  if (shaderUniforms?.uOpacity) {
+    shaderUniforms.uOpacity.value = BUILD_PREVIEW_TRAIL_OPACITY;
+  }
+
+  const routeLength = Number(trail.route.totalLength) || 0;
+  if (routeLength <= 0.0001) {
+    return;
+  }
+
+  trail.burstTimer -= deltaSeconds;
+  if (trail.burstActive) {
+    if (trail.burstTimer <= 0) {
+      trail.burstActive = false;
+      trail.burstTimer = randomBetween(BUILD_PREVIEW_BURST_GAP_MIN, BUILD_PREVIEW_BURST_GAP_MAX);
+    }
+  } else if (trail.burstTimer <= 0) {
+    trail.burstActive = true;
+    trail.burstTimer = randomBetween(BUILD_PREVIEW_BURST_DURATION_MIN, BUILD_PREVIEW_BURST_DURATION_MAX);
+    trail.burstId += 1;
+    for (const particle of trail.particles) {
+      particle.spawnDelay = randomBetween(0, BUILD_PREVIEW_BURST_SPAWN_STAGGER_MAX);
+      particle.spawnThisBurst = Math.random() < BUILD_PREVIEW_BURST_SPAWN_FRACTION;
+      particle.lastBurstSpawnId = -1;
+    }
+  }
+
+  for (const particle of trail.particles) {
+    if (!particle?.mesh) {
+      continue;
+    }
+
+    if (!particle.active) {
+      particle.mesh.visible = false;
+      if (!trail.burstActive || !particle.spawnThisBurst) {
+        continue;
+      }
+      if (particle.lastBurstSpawnId === trail.burstId) {
+        continue;
+      }
+      particle.spawnDelay -= deltaSeconds;
+      if (particle.spawnDelay > 0) {
+        continue;
+      }
+      particle.active = true;
+      particle.lastBurstSpawnId = trail.burstId;
+      particle.progressDistance = randomBetween(-BUILD_PREVIEW_VOXEL_FADE_DISTANCE, 0);
+      particle.speed = randomBetween(BUILD_PREVIEW_TRAIL_SPEED_MIN, BUILD_PREVIEW_TRAIL_SPEED_MAX);
+    }
+
+    particle.progressDistance += particle.speed * deltaSeconds;
+    if (particle.progressDistance > routeLength + BUILD_PREVIEW_VOXEL_FADE_DISTANCE) {
+      particle.active = false;
+      particle.mesh.visible = false;
+      continue;
+    }
+
+    sampleBuildPhasePreviewRoutePoint(trail.route, particle.progressDistance, buildPreviewTempHead);
+    sampleBuildPhasePreviewRoutePoint(trail.route, particle.progressDistance + 0.2, buildPreviewTempTail);
+
+    buildPreviewTempDir.copy(buildPreviewTempTail).sub(buildPreviewTempHead);
+    buildPreviewTempDir.y = 0;
+    if (buildPreviewTempDir.lengthSq() <= 0.000001) {
+      buildPreviewTempDir.set(0, 0, 1);
+    }
+    buildPreviewTempDir.normalize();
+
+    buildPreviewTempRight.set(-buildPreviewTempDir.z, 0, buildPreviewTempDir.x);
+    buildPreviewTempCenter.copy(buildPreviewTempHead)
+      .addScaledVector(buildPreviewTempRight, particle.lateralOffset);
+    buildPreviewTempCenter.y += particle.verticalOffset;
+
+    const fadeIn = clamp(particle.progressDistance / BUILD_PREVIEW_VOXEL_FADE_DISTANCE, 0, 1);
+    const fadeOut = clamp((routeLength - particle.progressDistance) / BUILD_PREVIEW_VOXEL_FADE_DISTANCE, 0, 1);
+    const life = Math.min(fadeIn, fadeOut);
+    if (life <= 0.01) {
+      particle.active = false;
+      particle.mesh.visible = false;
+      continue;
+    }
+
+    particle.mesh.visible = true;
+    particle.mesh.position.copy(buildPreviewTempCenter);
+    const pulse = 0.9 + (Math.sin((trail.time * 7.8) + particle.phase) * 0.1);
+    const voxelScale = particle.baseSize * pulse * life;
+    particle.mesh.scale.set(voxelScale, voxelScale, voxelScale);
+  }
+
+}
+
+function syncBuildPhasePathPreviewVisibility() {
+  buildPhasePathPreviewGroup.visible = waveState === "BUILD" && buildPhasePathPreviewTrails.length > 0;
+}
+
+function rebuildBuildPhasePathPreview() {
+  clearBuildPhasePathPreview();
+  // Route preview visuals intentionally disabled.
+  syncBuildPhasePathPreviewVisibility();
+}
+
+function updateBuildPhasePathPreview() {
+  // Route preview visuals intentionally disabled.
 }
 
 function resetMobileInputState() {
@@ -760,7 +943,7 @@ function applyMobileGameplayInput() {
     return;
   }
 
-  const inGameplayState = waveState === "PLAYING" || waveState === "DELAY";
+  const inGameplayState = isGameplayWaveState(waveState);
   if (!inGameplayState || isPaused) {
     player.setVirtualMove(0, 0);
     if (typeof player.setJumpHeld === "function") {
@@ -826,8 +1009,7 @@ if (!isTouchDevice) {
       if (!player.controls.isLocked) {
         const pointer = getCanvasPointerPosition(event);
         const hudButton = uiOverlay.hitTestHudButton(pointer.x, pointer.y);
-        if (hudButton === "speed") {
-          handleHudButtonAction(hudButton);
+        if (hudButton && handleHudButtonAction(hudButton)) {
           suppressNextDesktopCanvasClick = true;
           event.preventDefault();
           event.stopImmediatePropagation();
@@ -1058,7 +1240,7 @@ window.addEventListener("keydown", (event) => {
       });
       return;
     }
-    const resumeWaveState = waveState === "DELAY" ? "DELAY" : "PLAYING";
+    const resumeWaveState = normalizeMenuResumeWaveState(waveState);
     waveState = "MENU";
     showUpgradeMenu({
       advanceWaveOnChoice: false,
@@ -1078,7 +1260,11 @@ window.addEventListener("keydown", (event) => {
   }
 
   if (event.code === DESKTOP_SPEED_TOGGLE_KEY && !event.repeat) {
-    toggleGameSpeed();
+    if (waveState === "BUILD") {
+      startQueuedWaveNow();
+    } else {
+      toggleGameSpeed();
+    }
     return;
   }
 
@@ -1120,6 +1306,18 @@ window.addEventListener("keydown", (event) => {
 let waveState = "PLAYING";
 let currentWave = WAVE_CONFIG.initialWave;
 let waveDelay = 0;
+let queuedWaveNumber = null;
+let buildPhaseRemainingSeconds = 0;
+let fpsDisplay = 0;
+let fpsSampleTime = 0;
+let fpsSampleFrames = 0;
+
+function normalizeMenuResumeWaveState(state) {
+  if (state === "DELAY" || state === "BUILD") {
+    return state;
+  }
+  return "PLAYING";
+}
 
 function getEffectiveWaveNumber(wave) {
   if (CONFIGURED_ROUNDS.length === 0) {
@@ -1142,9 +1340,37 @@ function getWaveSegmentsForWave(wave) {
   return CONFIGURED_ROUNDS[effectiveWave - 1] ?? [];
 }
 
+function startBuildPhase(nextWave) {
+  queuedWaveNumber = Math.max(1, Math.floor(Number(nextWave) || (currentWave + 1)));
+  buildPhaseRemainingSeconds = BUILD_PHASE_DURATION_SECONDS;
+  waveState = "BUILD";
+  rebuildBuildPhasePathPreview();
+  syncBuildPhasePathPreviewVisibility();
+  if (buildPhaseRemainingSeconds <= 0) {
+    startQueuedWaveNow();
+  }
+}
+
+function startQueuedWaveNow() {
+  if (!Number.isInteger(queuedWaveNumber) || queuedWaveNumber < 1) {
+    return false;
+  }
+  const nextWave = queuedWaveNumber;
+  queuedWaveNumber = null;
+  buildPhaseRemainingSeconds = 0;
+  clearBuildPhasePathPreview();
+  syncBuildPhasePathPreviewVisibility();
+  startWave(nextWave);
+  return true;
+}
+
 function startWave(wave) {
   currentWave = wave;
   waveState = "PLAYING";
+  queuedWaveNumber = null;
+  buildPhaseRemainingSeconds = 0;
+  clearBuildPhasePathPreview();
+  syncBuildPhasePathPreviewVisibility();
 
   const waveSegments = getWaveSegmentsForWave(wave);
   if (Array.isArray(waveSegments)) {
@@ -1170,7 +1396,7 @@ function showUpgradeMenu(options = {}) {
     resumeWaveState = "PLAYING",
   } = options;
   menuAdvancesWaveOnChoice = advanceWaveOnChoice;
-  menuResumeWaveState = resumeWaveState === "DELAY" ? "DELAY" : "PLAYING";
+  menuResumeWaveState = normalizeMenuResumeWaveState(resumeWaveState);
 
   player.setMenuMode(true);
   resetMobileInputState();
@@ -1209,8 +1435,15 @@ function showUpgradeMenu(options = {}) {
 function animate() {
   const rawDeltaSeconds = clock.getDelta();
   const simulationDeltaSeconds = rawDeltaSeconds * gameSpeedMultiplier;
-  gameTime += simulationDeltaSeconds;
-  PORTAL_UNIFORMS.uTime.value = gameTime;
+  if (rawDeltaSeconds > 0 && Number.isFinite(rawDeltaSeconds)) {
+    fpsSampleTime += rawDeltaSeconds;
+    fpsSampleFrames += 1;
+    if (fpsSampleTime >= FPS_SAMPLE_WINDOW_SECONDS) {
+      fpsDisplay = fpsSampleFrames / fpsSampleTime;
+      fpsSampleTime = 0;
+      fpsSampleFrames = 0;
+    }
+  }
 
   if (!isPaused) {
     if (waveState === "PLAYING") {
@@ -1224,9 +1457,15 @@ function animate() {
         waveState = "MENU";
         showUpgradeMenu();
       }
+    } else if (waveState === "BUILD") {
+      buildPhaseRemainingSeconds = Math.max(0, buildPhaseRemainingSeconds - rawDeltaSeconds);
+      if (buildPhaseRemainingSeconds <= 0) {
+        startQueuedWaveNow();
+      }
+      updateBuildPhasePathPreview(rawDeltaSeconds);
     }
 
-    if (waveState === "PLAYING" || waveState === "DELAY") {
+    if (isGameplayWaveState(waveState)) {
       applyMobileGameplayInput();
       if (isPrimaryDown) {
         handlePrimaryAction();
@@ -1236,6 +1475,7 @@ function animate() {
       towerSystem.update(simulationDeltaSeconds, enemySystem);
     }
   }
+  syncBuildPhasePathPreviewVisibility();
   syncPokiGameplayState();
 
   const towerInventory = towerSystem
@@ -1273,9 +1513,13 @@ function animate() {
     showKeyboardHints: !showTouchControls,
     showTouchControls,
     showPauseButton: showTouchControls,
-    showSpeedButton: true,
+    showSpeedButton: waveState !== "BUILD",
+    buildPhaseActive: waveState === "BUILD",
+    buildPhaseRemainingSeconds,
+    showNextWaveButton: waveState === "BUILD",
     paused: isPaused,
     speedMultiplier: gameSpeedMultiplier,
+    fps: fpsDisplay,
     touchPortrait,
     moveStickX: mobileInput.moveX,
     moveStickY: mobileInput.moveY,
@@ -1292,13 +1536,12 @@ function animate() {
 
 // Start game
 function initGame() {
-  const spawnPortal = placePathGates();
-
   player = createPlayer({
     scene,
     camera,
     domElement: renderer.domElement,
     eyeHeight: grid.eyeHeight,
+    movementBounds: grid.levelBounds ?? grid.moveBounds,
     getMovementObstacles: () => {
       const terrainObstacles = Array.isArray(grid.heightObstacles) ? grid.heightObstacles : [];
       const towerObstacles = towerSystem ? towerSystem.getMovementObstacles() : [];
@@ -1312,8 +1555,7 @@ function initGame() {
     },
   });
 
-  enemySystem = createEnemySystem(scene, grid.pathWaypoints, {
-    spawnPortal,
+  enemySystem = createEnemySystem(scene, grid, {
     onEnemyDefeated: (cashReward) => {
       addMoney(cashReward);
     },
@@ -1324,7 +1566,24 @@ function initGame() {
     grid,
     getCurrentMoney: () => playerMoney,
     spendMoney: (amount) => trySpendMoney(amount),
+    canBlockCell: (cellX, cellZ) => {
+      if (!enemySystem) {
+        return true;
+      }
+      return enemySystem.canBlockCell(cellX, cellZ);
+    },
+    onBlockedCellsChanged: (blockedCells) => {
+      if (!enemySystem) {
+        return true;
+      }
+      const didUpdate = enemySystem.setBlockedCells(blockedCells);
+      if (didUpdate && waveState === "BUILD") {
+        rebuildBuildPhasePathPreview();
+      }
+      return didUpdate;
+    },
   });
+  enemySystem.setBlockedCells(towerSystem.getBlockedCells());
 
   player.controls.addEventListener("unlock", () => {
     updatePauseState();
@@ -1338,15 +1597,14 @@ function initGame() {
   // Debug API to let browser scripts skip UI
   window.gameDebug = {
     setPlayerPos: (x, z) => {
-      if (player) player.controls.getObject().position.set(x, player.eyeHeight, z);
+      if (player) player.controls.getObject().position.set(x, grid.eyeHeight, z);
     },
     placeBasicTower: (x, z) => {
       if (towerSystem) towerSystem.forcePlaceTower(x, z, "laser");
     },
     spawnEnemy: (type = "red") => {
       if (enemySystem) {
-        const spawner = grid.pathWaypoints[0];
-        enemySystem.forceSpawnEnemy(type, spawner);
+        enemySystem.forceSpawnEnemy(type, 0);
       }
     },
     addMoney: (amount = 100) => {
@@ -1372,7 +1630,7 @@ function initGame() {
     getForceTouchControls: () => forceTouchControls,
   };
 
-  startWave(WAVE_CONFIG.initialWave);
+  startBuildPhase(WAVE_CONFIG.initialWave);
   reportPokiGameLoadingFinished();
   animate();
 }

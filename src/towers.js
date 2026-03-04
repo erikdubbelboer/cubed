@@ -36,7 +36,6 @@ const SLOW_TOWER_HEIGHT = SLOW_TOWER_CONFIG.height;
 const SLOW_HOVER_BASE_Y = SLOW_TOWER_CONFIG.hoverBaseY;
 const SLOW_BOB_AMPLITUDE = SLOW_TOWER_CONFIG.bobAmplitude;
 const SLOW_BOB_FREQUENCY = SLOW_TOWER_CONFIG.bobFrequency;
-const TOWER_PLACEMENT_GAP = TOWER_CONFIG.placementGap;
 const LASER_RING_HALF_EXTENT = LASER_TOWER_CONFIG.ringHalfExtent;
 const LASER_RING_THICKNESS = LASER_TOWER_CONFIG.ringThickness;
 const LASER_ACTIVE_GLOW_INTENSITY = LASER_TOWER_CONFIG.activeGlowIntensity;
@@ -69,14 +68,16 @@ export function createTowerSystem({
   grid,
   getCurrentMoney = null,
   spendMoney = null,
+  canBlockCell = null,
+  onBlockedCellsChanged = null,
 } = {}) {
   const raycaster = new THREE.Raycaster();
   const aimPoint = new THREE.Vector2(0, 0);
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -grid.tileTopY);
   const groundHit = new THREE.Vector3();
-  const pathWaypoints = Array.isArray(grid.pathWaypoints) ? grid.pathWaypoints : [];
   const terrainObstacles = Array.isArray(grid.heightObstacles) ? grid.heightObstacles : [];
-  const pathHalfWidth = grid.cellSize * TOWER_CONFIG.pathHalfWidthCellScale;
+  const spawnCells = Array.isArray(grid.spawnCells) ? grid.spawnCells : [];
+  const endCell = grid.endCell ?? null;
 
   const beamGeometry = new THREE.CylinderGeometry(
     LASER_TOWER_CONFIG.beamRadius,
@@ -243,9 +244,21 @@ export function createTowerSystem({
   const towers = [];
   let previewValid = false;
   let previewPosition = null;
+  let previewCell = null;
+
+  const reservedCellKeys = new Set(
+    spawnCells.map((cell) => `${cell.x},${cell.z}`)
+  );
+  if (endCell && Number.isInteger(endCell.x) && Number.isInteger(endCell.z)) {
+    reservedCellKeys.add(`${endCell.x},${endCell.z}`);
+  }
 
   let towerDamageMultiplier = 1;
   let towerFireRateMultiplier = 1;
+
+  function makeCellKey(cellX, cellZ) {
+    return `${cellX},${cellZ}`;
+  }
 
   function normalizeTowerType(type) {
     if (typeof type !== "string") {
@@ -320,6 +333,35 @@ export function createTowerSystem({
       return true;
     }
     return !!spendMoney(cost, type);
+  }
+
+  function isReservedCell(cellX, cellZ) {
+    return reservedCellKeys.has(makeCellKey(cellX, cellZ));
+  }
+
+  function findTowerAtCell(cellX, cellZ) {
+    for (const tower of towers) {
+      if (tower.cellX === cellX && tower.cellZ === cellZ) {
+        return tower;
+      }
+    }
+    return null;
+  }
+
+  function getBlockedCells() {
+    return towers
+      .map((tower) => ({
+        x: tower.cellX,
+        z: tower.cellZ,
+      }))
+      .filter((cell) => Number.isInteger(cell.x) && Number.isInteger(cell.z));
+  }
+
+  function notifyBlockedCellsChanged() {
+    if (typeof onBlockedCellsChanged !== "function") {
+      return;
+    }
+    onBlockedCellsChanged(getBlockedCells());
   }
 
   function isTowerTypeUnlocked(type) {
@@ -845,69 +887,32 @@ export function createTowerSystem({
 
   const pathRangeHighlights = createPathRangeHighlights();
 
-  function distancePointToSegmentXZ(point, segStart, segEnd) {
-    const sx = segStart.x;
-    const sz = segStart.z;
-    const ex = segEnd.x;
-    const ez = segEnd.z;
-    const dx = ex - sx;
-    const dz = ez - sz;
-    const lengthSq = dx * dx + dz * dz;
-
-    if (lengthSq < TOWER_CONFIG.segmentEpsilon) {
-      return Math.hypot(point.x - sx, point.z - sz);
-    }
-
-    const t = Math.max(0, Math.min(1, ((point.x - sx) * dx + (point.z - sz) * dz) / lengthSq));
-    const closestX = sx + dx * t;
-    const closestZ = sz + dz * t;
-    return Math.hypot(point.x - closestX, point.z - closestZ);
-  }
-
-  function overlapsTrack(position, towerRadius) {
-    if (pathWaypoints.length < 2) {
-      return false;
-    }
-    const minDistanceFromPath = pathHalfWidth + towerRadius;
-    for (let i = 0; i < pathWaypoints.length - 1; i += 1) {
-      const start = pathWaypoints[i];
-      const end = pathWaypoints[i + 1];
-      if (distancePointToSegmentXZ(position, start, end) < minDistanceFromPath) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  function overlapsOtherTower(position, towerRadius) {
-    for (const tower of towers) {
-      const minDistance = towerRadius + (tower.radius ?? LASER_TOWER_RADIUS) + TOWER_PLACEMENT_GAP;
-      const dx = position.x - tower.mesh.position.x;
-      const dz = position.z - tower.mesh.position.z;
-      if ((dx * dx + dz * dz) < (minDistance * minDistance)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  function isInsideBuildBounds(position, towerRadius) {
+  function isInsideBuildBounds(position) {
     return (
-      position.x >= grid.moveBounds.minX + towerRadius &&
-      position.x <= grid.moveBounds.maxX - towerRadius &&
-      position.z >= grid.moveBounds.minZ + towerRadius &&
-      position.z <= grid.moveBounds.maxZ - towerRadius
+      position.x >= grid.moveBounds.minX &&
+      position.x <= grid.moveBounds.maxX &&
+      position.z >= grid.moveBounds.minZ &&
+      position.z <= grid.moveBounds.maxZ
     );
   }
 
-  function isPlacementValid(position, towerRadius) {
-    if (!isInsideBuildBounds(position, towerRadius)) {
+  function isPlacementValid(cellX, cellZ, worldPosition) {
+    if (!Number.isInteger(cellX) || !Number.isInteger(cellZ)) {
       return false;
     }
-    if (overlapsTrack(position, towerRadius)) {
+    if (!worldPosition || !isInsideBuildBounds(worldPosition)) {
       return false;
     }
-    if (overlapsOtherTower(position, towerRadius)) {
+    if (typeof grid.isCellInsideLevel === "function" && !grid.isCellInsideLevel(cellX, cellZ)) {
+      return false;
+    }
+    if (isReservedCell(cellX, cellZ)) {
+      return false;
+    }
+    if (findTowerAtCell(cellX, cellZ)) {
+      return false;
+    }
+    if (typeof canBlockCell === "function" && !canBlockCell(cellX, cellZ)) {
       return false;
     }
     return true;
@@ -945,6 +950,7 @@ export function createTowerSystem({
     hidePathRangeHighlights();
     previewValid = false;
     previewPosition = null;
+    previewCell = null;
     return true;
   }
 
@@ -955,6 +961,7 @@ export function createTowerSystem({
     hidePathRangeHighlights();
     previewValid = false;
     previewPosition = null;
+    previewCell = null;
   }
 
   function updatePreviewFromCamera() {
@@ -968,6 +975,7 @@ export function createTowerSystem({
       hidePathRangeHighlights();
       previewValid = false;
       previewPosition = null;
+      previewCell = null;
       return;
     }
 
@@ -980,32 +988,42 @@ export function createTowerSystem({
       hidePathRangeHighlights();
       previewValid = false;
       previewPosition = null;
+      previewCell = null;
       return;
     }
 
-    const x = Math.min(
-      grid.moveBounds.maxX - towerSpec.radius,
-      Math.max(grid.moveBounds.minX + towerSpec.radius, groundHit.x)
-    );
-    const z = Math.min(
-      grid.moveBounds.maxZ - towerSpec.radius,
-      Math.max(grid.moveBounds.minZ + towerSpec.radius, groundHit.z)
-    );
-    const y = getBuildSurfaceY(x, z);
+    const targetCell = typeof grid.worldToCell === "function"
+      ? grid.worldToCell(groundHit.x, groundHit.z)
+      : null;
+    if (!targetCell || !Number.isInteger(targetCell.x) || !Number.isInteger(targetCell.z)) {
+      preview.visible = false;
+      hidePathRangeHighlights();
+      previewValid = false;
+      previewPosition = null;
+      previewCell = null;
+      return;
+    }
+
+    const center = typeof grid.cellToWorldCenter === "function"
+      ? grid.cellToWorldCenter(targetCell.x, targetCell.z)
+      : new THREE.Vector3(groundHit.x, 0, groundHit.z);
+    const y = getBuildSurfaceY(center.x, center.z);
 
     preview.visible = true;
-    preview.position.set(x, y, z);
+    preview.position.set(center.x, y, center.z);
     if (!previewPosition) {
       previewPosition = new THREE.Vector3();
     }
     previewPosition.copy(preview.position);
-    previewValid = canAffordTower(selectedTowerType) && isPlacementValid(previewPosition, towerSpec.radius);
+    previewCell = { x: targetCell.x, z: targetCell.z };
+    previewValid = canAffordTower(selectedTowerType)
+      && isPlacementValid(previewCell.x, previewCell.z, previewPosition);
     setPreviewValidityVisual(previewValid);
     setPathRangeHighlightValidityVisual(previewValid);
     updatePathRangeHighlights(previewPosition);
   }
 
-  function createTowerEntry(towerType, towerMesh, basePosition) {
+  function createTowerEntry(towerType, towerMesh, basePosition, cell) {
     const towerSpec = getTowerSpec(towerType);
     if (!towerSpec) {
       return null;
@@ -1022,6 +1040,8 @@ export function createTowerSystem({
       halfSize: towerSpec.halfSize,
       height: towerSpec.height,
       baseY: basePosition.y,
+      cellX: cell?.x,
+      cellZ: cell?.z,
       beamVisual: null,
       beamFadeTimer: 0,
       beamFadeStartBeamOpacity: LASER_BEAM_BASE_OPACITY,
@@ -1047,7 +1067,15 @@ export function createTowerSystem({
       || !selectedTowerType
       || !isTowerTypeUnlocked(selectedTowerType)
       || !previewPosition
+      || !previewCell
     ) {
+      return false;
+    }
+
+    if (!isPlacementValid(previewCell.x, previewCell.z, previewPosition)) {
+      previewValid = false;
+      setPreviewValidityVisual(false);
+      setPathRangeHighlightValidityVisual(false);
       return false;
     }
 
@@ -1056,7 +1084,7 @@ export function createTowerSystem({
     towerMesh.position.copy(previewPosition);
     scene.add(towerMesh);
 
-    const towerEntry = createTowerEntry(normalizedType, towerMesh, previewPosition);
+    const towerEntry = createTowerEntry(normalizedType, towerMesh, previewPosition, previewCell);
     if (!towerEntry) {
       scene.remove(towerMesh);
       return false;
@@ -1066,6 +1094,7 @@ export function createTowerSystem({
       return false;
     }
     towers.push(towerEntry);
+    notifyBlockedCellsChanged();
     if (!canAffordTower(normalizedType)) {
       cancelPlacement();
     }
@@ -2090,6 +2119,7 @@ export function createTowerSystem({
     getTowerInventory,
     getSelectedTowerType,
     getMovementObstacles,
+    getBlockedCells,
     getTowerCost,
     canAffordTower,
     unlockTowerType,
@@ -2105,8 +2135,21 @@ export function createTowerSystem({
       }
       unlockTowerType(normalizedType);
 
-      const towerPosition = new THREE.Vector3(x, getBuildSurfaceY(x, z), z);
-      if (!isPlacementValid(towerPosition, towerSpec.radius)) {
+      const targetCell = typeof grid.worldToCell === "function"
+        ? grid.worldToCell(x, z)
+        : null;
+      if (!targetCell || !Number.isInteger(targetCell.x) || !Number.isInteger(targetCell.z)) {
+        return false;
+      }
+      const center = typeof grid.cellToWorldCenter === "function"
+        ? grid.cellToWorldCenter(targetCell.x, targetCell.z)
+        : new THREE.Vector3(x, 0, z);
+      const towerPosition = new THREE.Vector3(
+        center.x,
+        getBuildSurfaceY(center.x, center.z),
+        center.z
+      );
+      if (!isPlacementValid(targetCell.x, targetCell.z, towerPosition)) {
         return false;
       }
 
@@ -2114,12 +2157,13 @@ export function createTowerSystem({
 
       towerMesh.position.copy(towerPosition);
       scene.add(towerMesh);
-      const towerEntry = createTowerEntry(normalizedType, towerMesh, towerPosition);
+      const towerEntry = createTowerEntry(normalizedType, towerMesh, towerPosition, targetCell);
       if (!towerEntry) {
         scene.remove(towerMesh);
         return false;
       }
       towers.push(towerEntry);
+      notifyBlockedCellsChanged();
       return true;
     }
   };

@@ -165,6 +165,8 @@ export const GAME_CONFIG = {
     initialWave: 1,
     // Delay after clearing a wave before upgrade menu (seconds). Typical range: 0.5-4.
     upgradeDelaySeconds: 2.0,
+    // Build phase duration after each upgrade choice (seconds). Typical range: 30-600.
+    buildPhaseDurationSeconds: 300,
     // Behavior once the configured rounds are exhausted.
     // "stay_on_last": keep replaying the final configured round.
     afterLastRound: "stay_on_last",
@@ -471,21 +473,22 @@ export const GAME_CONFIG = {
 
     // Level layout uses 2 chars per cell: [height][marker], optionally space-separated per cell.
     // Height uses base36 digits: 0-9, A-Z. A space in the height slot is treated as 0.
-    // Marker: . empty, P path, S start, E end. A space in the marker slot is treated as '.'.
+    // Marker: . empty, P legacy path, S spawn, E destination, X player spawn.
+    // A space in the marker slot is treated as '.'.
     // Rows are z=0..size-1 (top-to-bottom), columns x=0..size-1 (left-to-right).
     levelLayoutAscii: [
-      "2. 2. 1. 1.  .  .  .  .  .  .  .  .",
-      "2E 2P 1P 1P  .  .  .  .  .  .  .  .",
-      "2. 2. 1. 1P  .  .  .  .  .  .  .  .",
-      "1. 1P 1P 1P  .  .  .  .  .  .  .  .",
-      " .  P  .  .  . 1. 1. 1.  .  .  .  .",
-      " .  P  P  P  P 1P 1P 1.  .  .  .  .",
-      " .  .  .  .  . 1. 1P 1.  .  .  .  .",
-      " .  .  P  P  P 1P 1P 1.  .  .  .  .",
-      " .  .  P  .  .  .  .  .  .  .  .  .",
-      " .  .  P  P  P  P  P  P  P  P  S  .",
+      " .  .  .  . 1. 1.  .  .  .  .  .  .",
+      " .  . 0X  E 1. 1.  .  .  .  .  .  .",
+      " .  .  .  . 1. 1.  .  .  .  .  .  .",
+      " .  . 1. 1. 1. 1.  .  .  .  S  .  .",
       " .  .  .  .  .  .  .  .  .  .  .  .",
       " .  .  .  .  .  .  .  .  .  .  .  .",
+      " .  .  .  . 1. 1.  .  .  .  .  .  .",
+      " .  .  .  . 1. 1.  .  .  .  .  .  .",
+      " .  .  .  .  .  .  .  .  .  .  .  .",
+      " .  .  .  .  .  .  .  .  .  S  .  .",
+      " .  .  .  . 1. 1.  .  .  .  .  .  .",
+      " .  .  .  . 1. 1.  .  .  .  .  .  .",
     ].join("\n"),
   },
 
@@ -745,6 +748,12 @@ export const GAME_CONFIG = {
     spawnInterval: 1.2,
     // "Slow enemies" upgrade multiplier. <1 slows, >1 speeds up. Typical range: 0.4-1.2.
     slowUpgradeMultiplier: 0.8,
+    // Number of route variants cached per spawn.
+    pathVariantCount: 6,
+    // Candidate pool size considered before diversity filtering.
+    pathCandidatePoolSize: 24,
+    // Penalizes overlap when selecting route variants (higher => more diverse).
+    pathOverlapPenalty: 0.45,
     // Fallback portal entry distance = radius * multiplier. Typical range: 1.5-4.
     portalEntryDistanceFromRadius: 2.6,
     // Portal clipping is removed after enemy crosses this radius fraction. Typical range: 0.2-1.

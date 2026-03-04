@@ -29,7 +29,12 @@
 - If no upgrades are available, `showUpgradeMenu()` must gracefully exit via `finishUpgradeMenuChoice()` instead of leaving the game stuck in `MENU`.
 - Menu flow supports two modes:
   - advance to next wave on choice, or
-  - resume current `PLAYING/DELAY` state (used by pause overlay flow).
+  - resume current `PLAYING/DELAY/BUILD` state (used by pause overlay flow).
+- Between-wave flow now includes a build phase:
+  - `PLAYING -> DELAY -> MENU -> BUILD -> PLAYING(next wave)`.
+  - Build phase duration is config-driven via `GAME_CONFIG.waves.buildPhaseDurationSeconds` (default 300s).
+  - Session start now enters `BUILD` before wave 1 begins.
+  - `Start Wave` HUD action can skip the remaining build timer.
 - New grant wiring reminder:
   - Add grant data in `GAME_CONFIG.upgrades[]`.
   - Wire grant handling in `main.js:applyUpgradeGrants()`.
@@ -133,6 +138,14 @@
 - Jetpack fuel HUD rules:
   - hide fuel HUD at 100%
   - mobile portrait uses a small vertical side bar (left side) instead of text/percent.
+- Build-phase HUD rules:
+  - show `Build: mm:ss` timer while `waveState === "BUILD"`.
+  - show a `Start Wave` utility button during build phase to launch queued wave immediately.
+  - build phase replaces the `1x/2x` speed button with `Start Wave`.
+  - desktop `F` key starts the queued wave during build phase (outside build it still toggles speed).
+- FPS counter:
+  - HUD renders `FPS <value>` in the top-left during gameplay HUD rendering.
+  - FPS label auto-shifts downward when build timer or desktop jetpack bar occupies the top-left area.
 
 ### Debug Hooks Useful for Iteration
 - `window.gameDebug` exposes useful runtime helpers:
@@ -166,6 +179,46 @@
 - If edge feel tuning is needed later:
   - Reduce `terrainEdgeSideCollisionGrace` for stronger edge blocking.
   - Increase it for smoother step-off with less side-pop.
+
+### Dynamic Enemy Pathfinding + Grid Build Blocking (Latest, Override)
+- Path-following via `grid.pathWaypoints` was removed.
+- `grid.levelLayoutAscii` marker contract now supports:
+  - `S`: enemy spawn (multiple allowed)
+  - `E`: destination/end (exactly one)
+  - `X`: player spawn (optional, max one)
+  - `P`: legacy path marker (visual only; no longer used for enemy routing)
+- `createGrid(scene)` now exposes marker-centric data:
+  - `spawnCells[]`, `endCell`, `playerSpawnCell`
+  - `getCellHeight(cellX, cellZ)`, `getCellSurfaceY(cellX, cellZ)`, `isCellInsideLevel(cellX, cellZ)`
+  - `worldToCell(...)` / `cellToWorldCenter(...)` still drive build snap + navigation.
+- Enemy movement is now navigation-graph based in `enemies.js`:
+  - Cardinal neighbors only (no diagonals), so no corner cutting.
+  - Height rule: neighbors are traversable only when `getCellHeight` is exactly equal (no wall climbing).
+  - Route variety: up to 6 spawn->end variants chosen from a larger shortest-path candidate pool with overlap penalty.
+  - Spawn alternation is round-robin across `spawnCells` per wave (`0,1,0,1...`), reset on `startWave`.
+  - Endpoint behavior: enemies despawn only once their full body is inside the end cube volume.
+  - Enemies still do **not** collide with each other.
+- Tower placement is grid-snapped in `towers.js`:
+  - Preview and placement snap to the hovered cell center.
+  - One tower per cell (`cellX/cellZ` stored on tower entries).
+  - `S`/`E` cells are reserved and cannot be built on.
+  - Towers can still be built on raised terrain/wall blocks.
+- Path blocking contract between towers and enemies:
+  - `enemySystem.canBlockCell(cellX, cellZ)` validates that **every** spawn still has a route to `E`.
+  - `enemySystem.setBlockedCells(cells)` applies tower blockers and immediately reroutes active enemies.
+  - `enemySystem.getRoutePreviewPaths()` exposes current per-spawn route pools for build-phase route-trail rendering.
+  - `createTowerSystem(...)` now accepts callbacks:
+    - `canBlockCell`
+    - `onBlockedCellsChanged`
+- Reroute mode decision:
+  - Active enemies reroute immediately after each blocker change (mid-run, no waiting for next cell).
+- Build-phase path preview contract:
+  - Route preview visuals are currently disabled by request (no lines/cubes/ghosts rendered during build phase).
+  - `rebuildBuildPhasePathPreview()` and `updateBuildPhasePathPreview()` are intentionally no-op style hooks for future re-enabling.
+- Level containment:
+  - Player movement is clamped to level bounds in `player.js` via `movementBounds`.
+  - This acts as an infinite-height invisible wall in X/Z (jetpack cannot bypass map bounds).
+  - Enemy routing is level-cell bounded, so enemies cannot leave the level either.
 
 ### AGENTS.md
 

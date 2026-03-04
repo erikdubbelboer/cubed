@@ -12,7 +12,14 @@ const TOWER_TOP_SNAP_UP = PLAYER_CONFIG.collision.towerTopSnapUp;
 const SUPPORT_EDGE_EPSILON = PLAYER_CONFIG.collision.supportEdgeEpsilon ?? 0;
 const TERRAIN_EDGE_SIDE_COLLISION_GRACE = PLAYER_CONFIG.collision.terrainEdgeSideCollisionGrace ?? 0;
 
-export function createPlayer({ scene, camera, domElement, eyeHeight, getMovementObstacles }) {
+export function createPlayer({
+  scene,
+  camera,
+  domElement,
+  eyeHeight,
+  getMovementObstacles,
+  movementBounds = null,
+}) {
   const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
   const controls = new PointerLockControls(camera, domElement);
   controls.pointerSpeed = PLAYER_CONFIG.controls.pointerSpeed;
@@ -385,6 +392,22 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
 
   let playerDamageMultiplier = 1;
   let playerFireRateMultiplier = 1;
+
+  const hasMovementBounds = !!(
+    movementBounds
+    && Number.isFinite(Number(movementBounds.minX))
+    && Number.isFinite(Number(movementBounds.maxX))
+    && Number.isFinite(Number(movementBounds.minZ))
+    && Number.isFinite(Number(movementBounds.maxZ))
+  );
+  const clampedBounds = hasMovementBounds
+    ? {
+      minX: Number(movementBounds.minX),
+      maxX: Number(movementBounds.maxX),
+      minZ: Number(movementBounds.minZ),
+      maxZ: Number(movementBounds.maxZ),
+    }
+    : null;
 
   function upgradePlayerDamage(addAmount = PLAYER_CONFIG.upgrades.damageUpgradeAdd) {
     const amount = Number(addAmount);
@@ -1233,6 +1256,27 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
         camera.position.y = supportAfterCollision;
         verticalVelocity = 0;
       }
+    }
+
+    if (clampedBounds) {
+      const minX = Math.min(
+        clampedBounds.minX + PLAYER_COLLISION_RADIUS,
+        clampedBounds.maxX - PLAYER_COLLISION_RADIUS
+      );
+      const maxX = Math.max(
+        clampedBounds.minX + PLAYER_COLLISION_RADIUS,
+        clampedBounds.maxX - PLAYER_COLLISION_RADIUS
+      );
+      const minZ = Math.min(
+        clampedBounds.minZ + PLAYER_COLLISION_RADIUS,
+        clampedBounds.maxZ - PLAYER_COLLISION_RADIUS
+      );
+      const maxZ = Math.max(
+        clampedBounds.minZ + PLAYER_COLLISION_RADIUS,
+        clampedBounds.maxZ - PLAYER_COLLISION_RADIUS
+      );
+      camera.position.x = THREE.MathUtils.clamp(camera.position.x, minX, maxX);
+      camera.position.z = THREE.MathUtils.clamp(camera.position.z, minZ, maxZ);
     }
   }
 

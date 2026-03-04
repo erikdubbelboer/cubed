@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GAME_CONFIG } from "./config.js";
 
 const ENEMY_CONFIG = GAME_CONFIG.enemies;
+const GRID_CONFIG = GAME_CONFIG.grid;
 const BASE_SPEED = ENEMY_CONFIG.baseSpeed;
 const DISSOLVE_DEATH_DURATION = ENEMY_CONFIG.dissolveDuration;
 const DISSOLVE_EDGE_WIDTH = ENEMY_CONFIG.dissolveEdgeWidth;
@@ -21,6 +22,13 @@ const ENEMY_STACK_OFFSET_MAX = Math.max(
   ENEMY_STACK_OFFSET_MIN,
   ENEMY_CONFIG.stackOffsetMax ?? 0.18
 );
+const ENEMY_PATH_Y_OFFSET = GRID_CONFIG.enemyPathYOffset;
+const ROUTE_VARIANT_COUNT = Math.max(1, Math.floor(Number(ENEMY_CONFIG.pathVariantCount) || 6));
+const ROUTE_CANDIDATE_POOL_SIZE = Math.max(
+  ROUTE_VARIANT_COUNT,
+  Math.floor(Number(ENEMY_CONFIG.pathCandidatePoolSize) || 24)
+);
+const ROUTE_OVERLAP_PENALTY = Math.max(0, Number(ENEMY_CONFIG.pathOverlapPenalty) || 0.45);
 
 function getDirectionOnPlane(from, to) {
   const direction = to.clone().sub(from);
@@ -31,39 +39,10 @@ function getDirectionOnPlane(from, to) {
   return direction.normalize();
 }
 
-function getLargestEnemyRadius() {
-  return Object.values(ENEMY_TYPES).reduce((largest, enemyType) => {
-    return Math.max(largest, enemyType.radius);
-  }, 0);
-}
-
 export function getLargestEnemySize() {
   return Object.values(ENEMY_TYPES).reduce((largest, enemyType) => {
     return Math.max(largest, enemyType.size);
   }, 0);
-}
-
-function setClippingOnMaterial(materialOrMaterials, clippingPlane) {
-  if (!materialOrMaterials) return;
-
-  const materials = Array.isArray(materialOrMaterials)
-    ? materialOrMaterials
-    : [materialOrMaterials];
-
-  for (const material of materials) {
-    if (!material) continue;
-    material.clippingPlanes = clippingPlane ? [clippingPlane] : null;
-    material.clipShadows = !!clippingPlane;
-    material.needsUpdate = true;
-  }
-}
-
-function applyVisualClipping(root, clippingPlane) {
-  if (!root) return;
-  root.traverse((child) => {
-    if (!child.isMesh || !child.material) return;
-    setClippingOnMaterial(child.material, clippingPlane);
-  });
 }
 
 function normalizeEnemyType(rawType) {
@@ -79,7 +58,6 @@ function normalizeEnemyType(rawType) {
     return FALLBACK_ENEMY_TYPE_KEY;
   }
 
-  // Strip unsupported prefixes while preserving the underlying base type.
   const unsupportedPrefixes = ["regrow-", "camo-", "invisible-"];
   let changed = true;
   while (changed) {
@@ -102,33 +80,81 @@ function normalizeEnemyType(rawType) {
   return FALLBACK_ENEMY_TYPE_KEY;
 }
 
-export function createEnemySystem(scene, pathWaypoints, options = {}) {
-  if (!Array.isArray(pathWaypoints) || pathWaypoints.length < 2) {
-    throw new Error("Enemy system requires at least two path waypoints.");
+function cellKey(cellX, cellZ) {
+  return `${cellX},${cellZ}`;
+}
+
+function parseCellKey(key) {
+  const [xText, zText] = String(key).split(",");
+  return {
+    x: Number.parseInt(xText, 10),
+    z: Number.parseInt(zText, 10),
+  };
+}
+
+function cloneCell(cell) {
+  return { x: cell.x, z: cell.z };
+}
+
+function makeUndirectedEdgeKey(aKey, bKey) {
+  return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
+}
+
+function makeDirectedEdgeKey(aKey, bKey) {
+  return `${aKey}>${bKey}`;
+}
+
+function samePathPrefix(pathA, pathB, prefixLength) {
+  if (!pathA || !pathB || prefixLength <= 0) {
+    return false;
+  }
+  if (pathA.length < prefixLength || pathB.length < prefixLength) {
+    return false;
+  }
+  for (let i = 0; i < prefixLength; i += 1) {
+    if (pathA[i].x !== pathB[i].x || pathA[i].z !== pathB[i].z) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function createPathObject(cells) {
+  const normalizedCells = cells.map((cell) => ({ x: cell.x, z: cell.z }));
+  const keys = normalizedCells.map((cell) => cellKey(cell.x, cell.z));
+  const edgeSet = new Set();
+  for (let i = 0; i < keys.length - 1; i += 1) {
+    edgeSet.add(makeUndirectedEdgeKey(keys[i], keys[i + 1]));
+  }
+  return {
+    cells: normalizedCells,
+    key: keys.join("->"),
+    cost: Math.max(0, normalizedCells.length - 1),
+    edgeSet,
+  };
+}
+
+function comparePathObjects(a, b) {
+  if (a.cost !== b.cost) {
+    return a.cost - b.cost;
+  }
+  return a.key.localeCompare(b.key);
+}
+
+export function createEnemySystem(scene, grid, options = {}) {
+  const spawnCells = Array.isArray(grid?.spawnCells)
+    ? grid.spawnCells.map((cell) => cloneCell(cell))
+    : [];
+  const endCell = grid?.endCell ? cloneCell(grid.endCell) : null;
+
+  if (spawnCells.length === 0 || !endCell) {
+    throw new Error("Enemy system requires at least one spawn cell and one end cell.");
   }
 
-  const spawnPathDirection = getDirectionOnPlane(pathWaypoints[0], pathWaypoints[1]);
-  const spawnPortalConfig = options?.spawnPortal ?? null;
-  const hasSpawnPortal = !!spawnPortalConfig;
-  const spawnPortalForward = hasSpawnPortal && spawnPortalConfig.forward
-    ? spawnPortalConfig.forward.clone().setY(0).normalize()
-    : spawnPathDirection;
-  const maxEnemyRadius = getLargestEnemyRadius();
+  const gridSize = Math.max(1, Math.floor(Number(grid?.gridSize) || 0));
   const onEnemyDefeated = typeof options?.onEnemyDefeated === "function"
     ? options.onEnemyDefeated
     : null;
-  const spawnPortalPlane = hasSpawnPortal
-    ? (spawnPortalConfig.plane?.clone() ?? null)
-    : null;
-  const spawnEntryDistance = hasSpawnPortal
-    ? (spawnPortalConfig.entryDistance ?? (maxEnemyRadius * ENEMY_CONFIG.portalEntryDistanceFromRadius))
-    : 0;
-
-  const travelWaypoints = pathWaypoints.map((waypoint) => waypoint.clone());
-  if (hasSpawnPortal) {
-    const entryPoint = pathWaypoints[0].clone().addScaledVector(spawnPortalForward, -spawnEntryDistance);
-    travelWaypoints.unshift(entryPoint);
-  }
 
   const activeEnemies = [];
   let scheduledSpawns = [];
@@ -136,6 +162,13 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
   let waveElapsedTime = 0;
   let enemySpeedMultiplier = 1;
   let enemySpawnSerial = 0;
+  let spawnCellCursor = 0;
+
+  const blockedCells = new Set();
+  const spawnCellSet = new Set(spawnCells.map((cell) => cellKey(cell.x, cell.z)));
+  const endCellKey = cellKey(endCell.x, endCell.z);
+  const routePoolsBySpawnIndex = new Map();
+
   const tempCenterPosition = new THREE.Vector3();
   const tempForwardDirection = new THREE.Vector3();
   const tempRightDirection = new THREE.Vector3();
@@ -143,6 +176,333 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
   const tempCollisionCenterA = new THREE.Vector3();
   const tempLocalPointA = new THREE.Vector3();
   const tempQuatA = new THREE.Quaternion();
+
+  const endCellSurfaceY = typeof grid?.getCellSurfaceY === "function"
+    ? grid.getCellSurfaceY(endCell.x, endCell.z)
+    : 0;
+  const endCellCenter = typeof grid?.cellToWorldCenter === "function"
+    ? grid.cellToWorldCenter(endCell.x, endCell.z, endCellSurfaceY)
+    : new THREE.Vector3();
+  const endHalfSize = (Number(grid?.cellSize) || 0) * 0.5;
+
+  function isCellInsideLevel(cellX, cellZ) {
+    if (typeof grid?.isCellInsideLevel === "function") {
+      return !!grid.isCellInsideLevel(cellX, cellZ);
+    }
+    return cellX >= 0 && cellX < gridSize && cellZ >= 0 && cellZ < gridSize;
+  }
+
+  function getCellHeight(cellX, cellZ) {
+    if (!isCellInsideLevel(cellX, cellZ)) {
+      return null;
+    }
+    if (typeof grid?.getCellHeight === "function") {
+      const height = Number(grid.getCellHeight(cellX, cellZ));
+      return Number.isFinite(height) ? height : 0;
+    }
+    return 0;
+  }
+
+  function getCellSurfaceY(cellX, cellZ) {
+    if (typeof grid?.getCellSurfaceY === "function") {
+      return Number(grid.getCellSurfaceY(cellX, cellZ)) || 0;
+    }
+    return 0;
+  }
+
+  function getEnemyCenterForCell(cellX, cellZ, out = new THREE.Vector3()) {
+    const surfaceY = getCellSurfaceY(cellX, cellZ);
+    if (typeof grid?.cellToWorldCenter === "function") {
+      out.copy(grid.cellToWorldCenter(cellX, cellZ, surfaceY + ENEMY_PATH_Y_OFFSET));
+      return out;
+    }
+    return out.set(0, surfaceY + ENEMY_PATH_Y_OFFSET, 0);
+  }
+
+  function isBlocked(cellX, cellZ, extraBlockedSet = null) {
+    const key = cellKey(cellX, cellZ);
+    return blockedCells.has(key) || (!!extraBlockedSet && extraBlockedSet.has(key));
+  }
+
+  function isReservedEndpoint(cellX, cellZ) {
+    const key = cellKey(cellX, cellZ);
+    return key === endCellKey || spawnCellSet.has(key);
+  }
+
+  function getNeighborCells(cellX, cellZ, extraBlockedSet = null, bannedNodes = null, bannedEdges = null) {
+    const neighbors = [];
+    const currentHeight = getCellHeight(cellX, cellZ);
+    if (!Number.isFinite(currentHeight)) {
+      return neighbors;
+    }
+
+    const offsets = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ];
+
+    const fromKey = cellKey(cellX, cellZ);
+    for (const [dx, dz] of offsets) {
+      const nx = cellX + dx;
+      const nz = cellZ + dz;
+      const nextKey = cellKey(nx, nz);
+      if (!isCellInsideLevel(nx, nz)) {
+        continue;
+      }
+      if (bannedNodes?.has(nextKey)) {
+        continue;
+      }
+      if (bannedEdges?.has(makeDirectedEdgeKey(fromKey, nextKey))) {
+        continue;
+      }
+
+      const neighborHeight = getCellHeight(nx, nz);
+      if (!Number.isFinite(neighborHeight) || neighborHeight !== currentHeight) {
+        continue;
+      }
+      if (isBlocked(nx, nz, extraBlockedSet) && nextKey !== endCellKey) {
+        continue;
+      }
+      neighbors.push({ x: nx, z: nz });
+    }
+
+    return neighbors;
+  }
+
+  function findShortestPathCells(startCell, targetCell, options = {}) {
+    if (!startCell || !targetCell) {
+      return null;
+    }
+
+    const extraBlockedSet = options.extraBlockedSet ?? null;
+    const bannedNodes = options.bannedNodes ?? null;
+    const bannedEdges = options.bannedEdges ?? null;
+    const allowStartBlocked = !!options.allowStartBlocked;
+
+    if (!isCellInsideLevel(startCell.x, startCell.z) || !isCellInsideLevel(targetCell.x, targetCell.z)) {
+      return null;
+    }
+
+    const startKey = cellKey(startCell.x, startCell.z);
+    const targetKey = cellKey(targetCell.x, targetCell.z);
+
+    const startHeight = getCellHeight(startCell.x, startCell.z);
+    const targetHeight = getCellHeight(targetCell.x, targetCell.z);
+    if (!Number.isFinite(startHeight) || !Number.isFinite(targetHeight)) {
+      return null;
+    }
+
+    if (!allowStartBlocked && isBlocked(startCell.x, startCell.z, extraBlockedSet) && startKey !== targetKey) {
+      return null;
+    }
+    if (isBlocked(targetCell.x, targetCell.z, extraBlockedSet) && targetKey !== startKey) {
+      return null;
+    }
+    if (bannedNodes?.has(startKey) || bannedNodes?.has(targetKey)) {
+      return null;
+    }
+
+    const queue = [startKey];
+    const visited = new Set([startKey]);
+    const previousByKey = new Map();
+
+    let queueCursor = 0;
+    while (queueCursor < queue.length) {
+      const currentKey = queue[queueCursor];
+      queueCursor += 1;
+
+      if (currentKey === targetKey) {
+        break;
+      }
+
+      const currentCell = parseCellKey(currentKey);
+      const neighbors = getNeighborCells(
+        currentCell.x,
+        currentCell.z,
+        extraBlockedSet,
+        bannedNodes,
+        bannedEdges
+      );
+
+      for (const neighbor of neighbors) {
+        const neighborKey = cellKey(neighbor.x, neighbor.z);
+        if (visited.has(neighborKey)) {
+          continue;
+        }
+        visited.add(neighborKey);
+        previousByKey.set(neighborKey, currentKey);
+        queue.push(neighborKey);
+      }
+    }
+
+    if (!visited.has(targetKey)) {
+      return null;
+    }
+
+    const cells = [];
+    let walkKey = targetKey;
+    while (walkKey) {
+      const cell = parseCellKey(walkKey);
+      cells.push(cell);
+      walkKey = previousByKey.get(walkKey) ?? null;
+    }
+    cells.reverse();
+    return cells;
+  }
+
+  function buildPathCandidates(startCell, maxCandidates, options = {}) {
+    const candidates = [];
+    const firstPathCells = findShortestPathCells(startCell, endCell, options);
+    if (!firstPathCells || firstPathCells.length === 0) {
+      return candidates;
+    }
+
+    const acceptedPaths = [createPathObject(firstPathCells)];
+    const pendingByKey = new Map();
+
+    for (let k = 1; k < maxCandidates; k += 1) {
+      const previous = acceptedPaths[k - 1];
+      const previousCells = previous.cells;
+      if (previousCells.length <= 1) {
+        break;
+      }
+
+      for (let i = 0; i < previousCells.length - 1; i += 1) {
+        const rootPath = previousCells.slice(0, i + 1);
+        const spurNode = rootPath[rootPath.length - 1];
+        const bannedEdges = new Set();
+
+        for (const accepted of acceptedPaths) {
+          if (samePathPrefix(accepted.cells, rootPath, rootPath.length) && accepted.cells.length > i + 1) {
+            const fromKey = cellKey(accepted.cells[i].x, accepted.cells[i].z);
+            const toKey = cellKey(accepted.cells[i + 1].x, accepted.cells[i + 1].z);
+            bannedEdges.add(makeDirectedEdgeKey(fromKey, toKey));
+          }
+        }
+
+        const bannedNodes = new Set(
+          rootPath
+            .slice(0, -1)
+            .map((cell) => cellKey(cell.x, cell.z))
+        );
+
+        const spurPath = findShortestPathCells(spurNode, endCell, {
+          ...options,
+          bannedNodes,
+          bannedEdges,
+          allowStartBlocked: true,
+        });
+
+        if (!spurPath || spurPath.length === 0) {
+          continue;
+        }
+
+        const fullCells = [...rootPath.slice(0, -1), ...spurPath];
+        const pathObj = createPathObject(fullCells);
+        if (!pendingByKey.has(pathObj.key) && !acceptedPaths.some((accepted) => accepted.key === pathObj.key)) {
+          pendingByKey.set(pathObj.key, pathObj);
+        }
+      }
+
+      if (pendingByKey.size === 0) {
+        break;
+      }
+
+      const pending = Array.from(pendingByKey.values()).sort(comparePathObjects);
+      const best = pending[0];
+      pendingByKey.delete(best.key);
+      acceptedPaths.push(best);
+    }
+
+    candidates.push(...acceptedPaths.sort(comparePathObjects));
+    return candidates;
+  }
+
+  function countSharedEdges(pathA, pathB) {
+    if (!pathA || !pathB) {
+      return 0;
+    }
+    let shared = 0;
+    for (const edge of pathA.edgeSet) {
+      if (pathB.edgeSet.has(edge)) {
+        shared += 1;
+      }
+    }
+    return shared;
+  }
+
+  function selectDiverseRoutes(candidates, count, overlapPenalty) {
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+      return [];
+    }
+    if (candidates.length <= count) {
+      return candidates.slice();
+    }
+
+    const selected = [candidates[0]];
+    const remaining = candidates.slice(1);
+
+    while (selected.length < count && remaining.length > 0) {
+      let bestIndex = 0;
+      let bestScore = Number.POSITIVE_INFINITY;
+      let bestTieKey = "";
+
+      for (let i = 0; i < remaining.length; i += 1) {
+        const candidate = remaining[i];
+        let overlap = 0;
+        for (const picked of selected) {
+          overlap += countSharedEdges(candidate, picked);
+        }
+
+        const score = candidate.cost + overlap * overlapPenalty;
+        const tieKey = `${candidate.cost}|${candidate.key}`;
+        if (score < bestScore || (score === bestScore && tieKey < bestTieKey)) {
+          bestScore = score;
+          bestTieKey = tieKey;
+          bestIndex = i;
+        }
+      }
+
+      selected.push(remaining[bestIndex]);
+      remaining.splice(bestIndex, 1);
+    }
+
+    return selected;
+  }
+
+  function buildRoutePoolForStartCell(startCell, options = {}) {
+    const candidates = buildPathCandidates(startCell, ROUTE_CANDIDATE_POOL_SIZE, options);
+    if (candidates.length === 0) {
+      return [];
+    }
+    return selectDiverseRoutes(candidates, ROUTE_VARIANT_COUNT, ROUTE_OVERLAP_PENALTY);
+  }
+
+  function cloneRoutePoolMap(routePoolMap) {
+    const cloned = new Map();
+    for (const [spawnIndex, pool] of routePoolMap.entries()) {
+      cloned.set(spawnIndex, pool.slice());
+    }
+    return cloned;
+  }
+
+  function rebuildSpawnRoutePools() {
+    routePoolsBySpawnIndex.clear();
+    let allReachable = true;
+
+    for (let i = 0; i < spawnCells.length; i += 1) {
+      const spawnCell = spawnCells[i];
+      const pool = buildRoutePoolForStartCell(spawnCell);
+      routePoolsBySpawnIndex.set(i, pool);
+      if (pool.length === 0) {
+        allReachable = false;
+      }
+    }
+
+    return allReachable;
+  }
 
   function pseudoRandom01(seed) {
     const raw = Math.sin((seed * 127.1) + 311.7) * 43758.5453123;
@@ -202,6 +562,21 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     return out;
   }
 
+  function getEnemyContainmentRadius(enemy) {
+    if (!enemy?.mesh) {
+      return 0;
+    }
+    const bodyHalfSize = enemy.mesh.userData?.bodyHalfSize;
+    const baseHalfSize = (typeof bodyHalfSize === "number" && bodyHalfSize > 0)
+      ? bodyHalfSize
+      : Math.max(0, Number(enemy.radius) || 0);
+    const visualScale = enemy.visualRoot?.scale;
+    const scaleX = Math.max(0.001, Math.abs(visualScale?.x ?? 1));
+    const scaleY = Math.max(0.001, Math.abs(visualScale?.y ?? 1));
+    const scaleZ = Math.max(0.001, Math.abs(visualScale?.z ?? 1));
+    return baseHalfSize * Math.max(scaleX, scaleY, scaleZ);
+  }
+
   function pointDistanceSqToEnemyBody(enemy, point) {
     if (!enemy?.mesh || !point) {
       return Number.POSITIVE_INFINITY;
@@ -236,10 +611,24 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     return pointDistanceSqToEnemyBody(enemy, point) <= (radius * radius);
   }
 
-  function updateEnemyTransformFromPath(enemy) {
-    const start = travelWaypoints[enemy.segmentIndex];
-    const end = travelWaypoints[enemy.segmentIndex + 1];
+  function routeCellsToEnemyPoints(routeCells) {
+    const points = [];
+    for (const cell of routeCells) {
+      const point = getEnemyCenterForCell(cell.x, cell.z, new THREE.Vector3());
+      points.push(point);
+    }
+    return points;
+  }
+
+  function updateEnemyTransformFromRoute(enemy) {
+    const start = enemy.travelWaypoints[enemy.segmentIndex];
+    const end = enemy.travelWaypoints[enemy.segmentIndex + 1];
+
     if (!start || !end) {
+      const finalPoint = enemy.travelWaypoints[enemy.travelWaypoints.length - 1];
+      if (finalPoint) {
+        setEnemyWorldPosition(enemy, finalPoint, enemy.pathForward);
+      }
       return;
     }
 
@@ -265,6 +654,226 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       tempLookTarget.y = enemy.mesh.position.y;
       enemy.mesh.lookAt(tempLookTarget);
     }
+  }
+
+  function isEnemyFullyInsideEndCube(enemy) {
+    if (!enemy?.mesh || endHalfSize <= 0) {
+      return false;
+    }
+
+    const containmentRadius = getEnemyContainmentRadius(enemy);
+    const center = getEnemyCollisionCenter(enemy, tempCollisionCenterA);
+
+    const minX = endCellCenter.x - endHalfSize;
+    const maxX = endCellCenter.x + endHalfSize;
+    const minZ = endCellCenter.z - endHalfSize;
+    const maxZ = endCellCenter.z + endHalfSize;
+    const minY = endCellSurfaceY;
+    const maxY = endCellSurfaceY + (Number(grid?.cellSize) || 0);
+
+    return (
+      center.x - containmentRadius >= minX
+      && center.x + containmentRadius <= maxX
+      && center.z - containmentRadius >= minZ
+      && center.z + containmentRadius <= maxZ
+      && center.y - containmentRadius >= minY
+      && center.y + containmentRadius <= maxY
+    );
+  }
+
+  function getEnemyCurrentCell(enemy) {
+    if (!enemy?.pathCenter) {
+      return null;
+    }
+
+    if (typeof grid?.worldToCell === "function") {
+      const cell = grid.worldToCell(enemy.pathCenter.x, enemy.pathCenter.z);
+      if (cell && isCellInsideLevel(cell.x, cell.z)) {
+        return cell;
+      }
+    }
+
+    if (enemy.routeCells && enemy.routeCells.length > 0) {
+      const lastKnown = enemy.routeCells[Math.min(enemy.segmentIndex, enemy.routeCells.length - 1)];
+      if (lastKnown) {
+        return { x: lastKnown.x, z: lastKnown.z };
+      }
+    }
+
+    return null;
+  }
+
+  function applyRouteToEnemy(enemy, routeCells, options = {}) {
+    if (!enemy || !Array.isArray(routeCells) || routeCells.length === 0) {
+      return false;
+    }
+
+    const fromCurrentPosition = !!options.fromCurrentPosition;
+    const currentCell = options.currentCell ?? routeCells[0];
+
+    const routePoints = routeCellsToEnemyPoints(routeCells);
+
+    let travelWaypoints = routePoints;
+    if (fromCurrentPosition) {
+      travelWaypoints = [enemy.pathCenter.clone(), ...routePoints];
+      if (routeCells.length > 0) {
+        const firstRouteCell = routeCells[0];
+        if (firstRouteCell.x === currentCell.x && firstRouteCell.z === currentCell.z) {
+          travelWaypoints.splice(1, 1);
+        }
+      }
+    }
+
+    if (travelWaypoints.length === 0) {
+      return false;
+    }
+
+    if (travelWaypoints.length === 1) {
+      travelWaypoints.push(travelWaypoints[0].clone());
+    }
+
+    enemy.routeCells = routeCells.map((cell) => cloneCell(cell));
+    enemy.travelWaypoints = travelWaypoints;
+    enemy.segmentIndex = 0;
+    enemy.segmentProgress = 0;
+
+    const first = enemy.travelWaypoints[0];
+    const second = enemy.travelWaypoints[1] ?? enemy.travelWaypoints[0];
+    const direction = getDirectionOnPlane(first, second);
+    setEnemyWorldPosition(enemy, first, direction);
+
+    return true;
+  }
+
+  function pickSpawnRoutePool(spawnIndex) {
+    const pool = routePoolsBySpawnIndex.get(spawnIndex) ?? [];
+    if (pool.length === 0) {
+      return null;
+    }
+    const randomIndex = Math.floor(Math.random() * pool.length);
+    return pool[randomIndex] ?? pool[0] ?? null;
+  }
+
+  function rerouteEnemy(enemy) {
+    if (!enemy || !enemy.alive || enemy.dying) {
+      return false;
+    }
+
+    const currentCell = getEnemyCurrentCell(enemy);
+    if (!currentCell) {
+      return false;
+    }
+
+    const reroutePool = buildRoutePoolForStartCell(currentCell, { allowStartBlocked: true });
+    const pathObj = reroutePool.length > 0
+      ? reroutePool[Math.floor(Math.random() * reroutePool.length)]
+      : null;
+
+    if (!pathObj) {
+      return false;
+    }
+
+    return applyRouteToEnemy(enemy, pathObj.cells, {
+      fromCurrentPosition: true,
+      currentCell,
+    });
+  }
+
+  function rerouteActiveEnemies() {
+    for (const enemy of activeEnemies) {
+      rerouteEnemy(enemy);
+    }
+  }
+
+  function canBlockCell(cellX, cellZ) {
+    if (!isCellInsideLevel(cellX, cellZ)) {
+      return false;
+    }
+    if (isReservedEndpoint(cellX, cellZ)) {
+      return false;
+    }
+
+    const candidateKey = cellKey(cellX, cellZ);
+    if (blockedCells.has(candidateKey)) {
+      return false;
+    }
+
+    const simulatedBlocked = new Set(blockedCells);
+    simulatedBlocked.add(candidateKey);
+
+    for (const spawnCell of spawnCells) {
+      const path = findShortestPathCells(spawnCell, endCell, {
+        extraBlockedSet: simulatedBlocked,
+      });
+      if (!path || path.length === 0) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  function sanitizeBlockedCellList(cells) {
+    const sanitized = new Set();
+    if (!Array.isArray(cells)) {
+      return sanitized;
+    }
+
+    for (const cell of cells) {
+      const x = Number.parseInt(cell?.x, 10);
+      const z = Number.parseInt(cell?.z, 10);
+      if (!Number.isInteger(x) || !Number.isInteger(z) || !isCellInsideLevel(x, z)) {
+        continue;
+      }
+      if (isReservedEndpoint(x, z)) {
+        continue;
+      }
+      sanitized.add(cellKey(x, z));
+    }
+
+    return sanitized;
+  }
+
+  function blockedCellSetsEqual(a, b) {
+    if (a.size !== b.size) {
+      return false;
+    }
+    for (const key of a) {
+      if (!b.has(key)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function setBlockedCells(cells) {
+    const nextBlocked = sanitizeBlockedCellList(cells);
+    if (blockedCellSetsEqual(blockedCells, nextBlocked)) {
+      return true;
+    }
+
+    const previousBlocked = new Set(blockedCells);
+    const previousPools = cloneRoutePoolMap(routePoolsBySpawnIndex);
+
+    blockedCells.clear();
+    for (const key of nextBlocked) {
+      blockedCells.add(key);
+    }
+
+    if (!rebuildSpawnRoutePools()) {
+      blockedCells.clear();
+      for (const key of previousBlocked) {
+        blockedCells.add(key);
+      }
+      routePoolsBySpawnIndex.clear();
+      for (const [spawnIndex, pool] of previousPools.entries()) {
+        routePoolsBySpawnIndex.set(spawnIndex, pool);
+      }
+      return false;
+    }
+
+    rerouteActiveEnemies();
+    return true;
   }
 
   function upgradeSlowEnemies(multiplier = ENEMY_CONFIG.slowUpgradeMultiplier) {
@@ -323,6 +932,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       }
       return a.order - b.order;
     });
+
     return events;
   }
 
@@ -360,22 +970,32 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     if (Array.isArray(waveDefinition)) {
       scheduledSpawns = buildSpawnEventsFromSegments(waveDefinition);
     } else {
-      // Legacy adapter for old count-based wave format.
       scheduledSpawns = buildSpawnEventsFromCounts(waveDefinition);
     }
     spawnEventCursor = 0;
     waveElapsedTime = 0;
+    spawnCellCursor = 0;
   }
 
   function isWaveClear() {
     return activeEnemies.length === 0 && spawnEventCursor >= scheduledSpawns.length;
   }
 
-  function createEnemyMesh(type) {
+  function createEnemyMesh(type, spawnIndex = 0) {
     const normalizedType = normalizeEnemyType(type);
     const enemyType = normalizedType ? ENEMY_TYPES[normalizedType] : null;
     if (!enemyType) {
       throw new Error("No enemy types are configured.");
+    }
+
+    const route = pickSpawnRoutePool(spawnIndex);
+    if (!route || !Array.isArray(route.cells) || route.cells.length === 0) {
+      return null;
+    }
+
+    const travelWaypoints = routeCellsToEnemyPoints(route.cells);
+    if (travelWaypoints.length === 0) {
+      return null;
     }
 
     const enemyMesh = new THREE.Group();
@@ -425,6 +1045,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
         depthTest: false,
       })
     );
+
     healthBarBg.renderOrder = ENEMY_CONFIG.healthBarBgRenderOrder;
     healthBarFg.renderOrder = ENEMY_CONFIG.healthBarFgRenderOrder;
     healthBarFg.position.z = ENEMY_CONFIG.healthBarFgOffsetZ;
@@ -439,11 +1060,11 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     );
     enemyMesh.add(healthBarRoot);
 
-    if (spawnPortalPlane) {
-      applyVisualClipping(visualRoot, spawnPortalPlane);
-    }
-
     scene.add(enemyMesh);
+
+    const initialForward = travelWaypoints.length >= 2
+      ? getDirectionOnPlane(travelWaypoints[0], travelWaypoints[1])
+      : new THREE.Vector3(0, 0, 1);
 
     const enemy = {
       mesh: enemyMesh,
@@ -464,8 +1085,6 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       segmentIndex: 0,
       segmentProgress: 0,
       visualRoot,
-      portalPlane: spawnPortalPlane,
-      portalClippingActive: !!spawnPortalPlane,
       alive: true,
       dying: false,
       deathTimer: 0,
@@ -476,16 +1095,15 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       tempSlowMultiplier: 1,
       tempSlowRemaining: 0,
       pathCenter: travelWaypoints[0].clone(),
-      pathForward: getDirectionOnPlane(travelWaypoints[0], travelWaypoints[1]),
+      pathForward: initialForward,
       pathOffsetLateral: getRandomLateralOffset(),
+      routeCells: route.cells.map((cell) => cloneCell(cell)),
+      travelWaypoints,
+      spawnIndex,
     };
 
     setEnemyWorldPosition(enemy, enemy.pathCenter, enemy.pathForward);
 
-    const initiallyBehindPortal = spawnPortalPlane
-      ? spawnPortalPlane.distanceToPoint(enemy.mesh.position) < enemyType.radius * ENEMY_CONFIG.portalRevealRadiusFactor
-      : false;
-    healthBarRoot.visible = !initiallyBehindPortal;
     enemyMesh.userData.bodyCenterOffsetY = bodyMesh.position.y;
     enemyMesh.userData.bodyHalfSize = enemyType.size * 0.5;
     enemyMesh.userData.hitSphereRadius = enemyType.radius;
@@ -684,7 +1302,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
 
   function isEnemyMeshSlowed(enemyMesh) {
     const enemy = findActiveEnemyByMesh(enemyMesh);
-    if (!enemy || !enemy.alive || enemy.dying || enemy.portalClippingActive) {
+    if (!enemy || !enemy.alive || enemy.dying) {
       return false;
     }
     return (enemy.tempSlowRemaining ?? 0) > 0;
@@ -692,7 +1310,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
 
   function applyTemporarySlowToEnemyMesh(enemyMesh, multiplier, duration) {
     const enemy = findActiveEnemyByMesh(enemyMesh);
-    if (!enemy || !enemy.alive || enemy.dying || enemy.portalClippingActive) {
+    if (!enemy || !enemy.alive || enemy.dying) {
       return false;
     }
 
@@ -734,7 +1352,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     let appliedCount = 0;
 
     for (const enemy of activeEnemies) {
-      if (!enemy.alive || enemy.dying || enemy.portalClippingActive) {
+      if (!enemy.alive || enemy.dying) {
         continue;
       }
       if (
@@ -755,22 +1373,76 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     return appliedCount;
   }
 
+  function updateEnemyTravel(enemy, deltaSeconds) {
+    let activeSlowMultiplier = 1;
+    const slowRemaining = Math.max(0, enemy.tempSlowRemaining ?? 0);
+    if (slowRemaining > 0) {
+      enemy.tempSlowRemaining = Math.max(0, slowRemaining - deltaSeconds);
+      activeSlowMultiplier = THREE.MathUtils.clamp(enemy.tempSlowMultiplier ?? 1, 0, 1);
+      if (enemy.tempSlowRemaining <= 0) {
+        enemy.tempSlowMultiplier = 1;
+        activeSlowMultiplier = 1;
+      }
+    } else {
+      enemy.tempSlowMultiplier = 1;
+      enemy.tempSlowRemaining = 0;
+    }
+
+    let remaining = enemy.speed * enemySpeedMultiplier * activeSlowMultiplier * deltaSeconds;
+    while (remaining > 0 && enemy.alive) {
+      const start = enemy.travelWaypoints[enemy.segmentIndex];
+      const end = enemy.travelWaypoints[enemy.segmentIndex + 1];
+      if (!start || !end) {
+        break;
+      }
+
+      const segmentLength = start.distanceTo(end);
+      if (segmentLength <= ENEMY_CONFIG.directionEpsilon) {
+        enemy.segmentIndex += 1;
+        enemy.segmentProgress = 0;
+        if (enemy.segmentIndex >= enemy.travelWaypoints.length - 1) {
+          break;
+        }
+        continue;
+      }
+
+      const segmentRemaining = segmentLength - enemy.segmentProgress;
+      if (remaining < segmentRemaining) {
+        enemy.segmentProgress += remaining;
+        remaining = 0;
+      } else {
+        remaining -= segmentRemaining;
+        enemy.segmentIndex += 1;
+        enemy.segmentProgress = 0;
+        if (enemy.segmentIndex >= enemy.travelWaypoints.length - 1) {
+          break;
+        }
+      }
+    }
+
+    updateEnemyTransformFromRoute(enemy);
+  }
+
   function update(deltaSeconds, camera) {
-    // Spawn new enemies
     if (spawnEventCursor < scheduledSpawns.length) {
       waveElapsedTime += deltaSeconds;
       while (
-        spawnEventCursor < scheduledSpawns.length &&
-        scheduledSpawns[spawnEventCursor].time <= waveElapsedTime
+        spawnEventCursor < scheduledSpawns.length
+        && scheduledSpawns[spawnEventCursor].time <= waveElapsedTime
       ) {
         const spawnEvent = scheduledSpawns[spawnEventCursor];
-        activeEnemies.push(createEnemyMesh(spawnEvent.type));
+        const spawnIndex = spawnCellCursor % spawnCells.length;
+        spawnCellCursor += 1;
+
+        const enemy = createEnemyMesh(spawnEvent.type, spawnIndex);
+        if (enemy) {
+          activeEnemies.push(enemy);
+        }
         spawnEventCursor += 1;
       }
     }
 
-    // Update existing enemies
-    for (let i = activeEnemies.length - 1; i >= 0; i--) {
+    for (let i = activeEnemies.length - 1; i >= 0; i -= 1) {
       const enemy = activeEnemies[i];
 
       if (!enemy.alive && !enemy.dying) {
@@ -799,64 +1471,16 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
         continue;
       }
 
-      // Move along path
-      let activeSlowMultiplier = 1;
-      const slowRemaining = Math.max(0, enemy.tempSlowRemaining ?? 0);
-      if (slowRemaining > 0) {
-        enemy.tempSlowRemaining = Math.max(0, slowRemaining - deltaSeconds);
-        activeSlowMultiplier = THREE.MathUtils.clamp(enemy.tempSlowMultiplier ?? 1, 0, 1);
-        if (enemy.tempSlowRemaining <= 0) {
-          enemy.tempSlowMultiplier = 1;
-          activeSlowMultiplier = 1;
-        }
-      } else {
-        enemy.tempSlowMultiplier = 1;
-        enemy.tempSlowRemaining = 0;
-      }
+      updateEnemyTravel(enemy, deltaSeconds);
 
-      let remaining = enemy.speed * enemySpeedMultiplier * activeSlowMultiplier * deltaSeconds;
-      while (remaining > 0 && enemy.alive) {
-        const start = travelWaypoints[enemy.segmentIndex];
-        const end = travelWaypoints[enemy.segmentIndex + 1];
-        const segmentLength = start.distanceTo(end);
-        const segmentRemaining = segmentLength - enemy.segmentProgress;
-
-        if (remaining < segmentRemaining) {
-          enemy.segmentProgress += remaining;
-          remaining = 0;
-        } else {
-          remaining -= segmentRemaining;
-          enemy.segmentIndex += 1;
-          enemy.segmentProgress = 0;
-
-          if (enemy.segmentIndex >= travelWaypoints.length - 1) {
-            // Reached end, maybe damage core later, for now just kill it
-            enemy.alive = false;
-            scene.remove(enemy.mesh);
-            break;
-          }
-        }
-
-      }
-
-      if (enemy.alive) {
-        updateEnemyTransformFromPath(enemy);
+      if (isEnemyFullyInsideEndCube(enemy)) {
+        enemy.alive = false;
+        scene.remove(enemy.mesh);
+        activeEnemies.splice(i, 1);
+        continue;
       }
 
       updateHitPulse(enemy, deltaSeconds);
-
-      if (enemy.alive && enemy.portalClippingActive && enemy.portalPlane) {
-        const portalDistance = enemy.portalPlane.distanceToPoint(enemy.mesh.position);
-        if (portalDistance > enemy.radius * ENEMY_CONFIG.portalRevealRadiusFactor) {
-          enemy.portalClippingActive = false;
-          applyVisualClipping(enemy.visualRoot, null);
-          if (enemy.healthBarRoot && !enemy.dying) {
-            enemy.healthBarRoot.visible = true;
-          }
-        } else if (enemy.healthBarRoot) {
-          enemy.healthBarRoot.visible = false;
-        }
-      }
 
       if (enemy.alive && camera && enemy.healthBarRoot) {
         enemy.healthBarRoot.lookAt(camera.position);
@@ -868,8 +1492,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     const safeHitRadius = Math.max(0, Number(hitRadius) || 0);
     let hitAny = false;
     for (const enemy of activeEnemies) {
-      if (!enemy.alive) continue;
-      if (enemy.portalClippingActive) continue;
+      if (!enemy.alive || enemy.dying) continue;
       if (isPointNearEnemyBody(enemy, point, safeHitRadius)) {
         applyDamage(enemy, damage);
         hitAny = true;
@@ -880,7 +1503,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
 
   function getDamageableEnemies() {
     return activeEnemies
-      .filter((enemy) => enemy.alive && !enemy.dying && !enemy.portalClippingActive)
+      .filter((enemy) => enemy.alive && !enemy.dying)
       .map((enemy) => enemy.mesh);
   }
 
@@ -893,7 +1516,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
       if (enemy.mesh !== enemyMesh) {
         continue;
       }
-      if (!enemy.alive || enemy.dying || enemy.portalClippingActive) {
+      if (!enemy.alive || enemy.dying) {
         return false;
       }
 
@@ -906,7 +1529,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
 
   function isPointNearEnemyMesh(enemyMesh, point, radius = 0) {
     const enemy = findActiveEnemyByMesh(enemyMesh);
-    if (!enemy || !enemy.alive || enemy.dying || enemy.portalClippingActive) {
+    if (!enemy || !enemy.alive || enemy.dying) {
       return false;
     }
     return isPointNearEnemyBody(enemy, point, radius);
@@ -917,8 +1540,7 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     let closestDistSq = range * range;
 
     for (const enemy of activeEnemies) {
-      if (!enemy.alive) continue;
-      if (enemy.portalClippingActive) continue;
+      if (!enemy.alive || enemy.dying) continue;
       const distSq = origin.distanceToSquared(getEnemyCollisionCenter(enemy, tempCollisionCenterA));
       if (distSq <= closestDistSq) {
         closestDistSq = distSq;
@@ -939,7 +1561,57 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
   }
 
   function getEnemies() {
-    return activeEnemies.map(e => e.mesh);
+    return activeEnemies.map((enemy) => enemy.mesh);
+  }
+
+  function getBlockedCells() {
+    const cells = [];
+    for (const key of blockedCells) {
+      const parsed = parseCellKey(key);
+      if (Number.isInteger(parsed.x) && Number.isInteger(parsed.z)) {
+        cells.push(parsed);
+      }
+    }
+    return cells;
+  }
+
+  function getRoutePreviewPaths() {
+    const previewPaths = [];
+    const sortedEntries = Array.from(routePoolsBySpawnIndex.entries())
+      .sort((a, b) => a[0] - b[0]);
+
+    for (const [spawnIndex, routePool] of sortedEntries) {
+      if (!Array.isArray(routePool)) {
+        continue;
+      }
+      for (let routeIndex = 0; routeIndex < routePool.length; routeIndex += 1) {
+        const route = routePool[routeIndex];
+        if (!route || !Array.isArray(route.cells) || route.cells.length === 0) {
+          continue;
+        }
+        previewPaths.push({
+          spawnIndex,
+          routeIndex,
+          cells: route.cells.map((cell) => cloneCell(cell)),
+        });
+      }
+    }
+
+    return previewPaths;
+  }
+
+  function spawnEnemyByIndex(type, spawnIndex = 0) {
+    const safeIndex = ((Math.floor(spawnIndex) % spawnCells.length) + spawnCells.length) % spawnCells.length;
+    const enemy = createEnemyMesh(normalizeEnemyType(type), safeIndex);
+    if (!enemy) {
+      return false;
+    }
+    activeEnemies.push(enemy);
+    return true;
+  }
+
+  if (!rebuildSpawnRoutePools()) {
+    throw new Error("Enemy system could not find a valid route from every spawn to the destination.");
   }
 
   return {
@@ -956,12 +1628,10 @@ export function createEnemySystem(scene, pathWaypoints, options = {}) {
     startWave,
     isWaveClear,
     upgradeSlowEnemies,
-    forceSpawnEnemy: (type, spawnPos) => {
-      const enemy = createEnemyMesh(normalizeEnemyType(type));
-      if (spawnPos) {
-        setEnemyWorldPosition(enemy, spawnPos, enemy.pathForward);
-      }
-      activeEnemies.push(enemy);
-    }
+    canBlockCell,
+    setBlockedCells,
+    getBlockedCells,
+    getRoutePreviewPaths,
+    forceSpawnEnemy: (type, spawnIndex = 0) => spawnEnemyByIndex(type, spawnIndex),
   };
 }

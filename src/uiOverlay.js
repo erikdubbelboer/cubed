@@ -576,8 +576,12 @@ export function createUiOverlay({
     showTouchControls: false,
     showPauseButton: false,
     showSpeedButton: false,
+    buildPhaseActive: false,
+    buildPhaseRemainingSeconds: 0,
+    showNextWaveButton: false,
     paused: false,
     speedMultiplier: 1,
+    fps: 0,
     touchPortrait: false,
     moveStickX: 0,
     moveStickY: 0,
@@ -678,11 +682,23 @@ export function createUiOverlay({
     if (typeof partialState.showSpeedButton === "boolean") {
       state.showSpeedButton = partialState.showSpeedButton;
     }
+    if (typeof partialState.buildPhaseActive === "boolean") {
+      state.buildPhaseActive = partialState.buildPhaseActive;
+    }
+    if (typeof partialState.buildPhaseRemainingSeconds === "number" && Number.isFinite(partialState.buildPhaseRemainingSeconds)) {
+      state.buildPhaseRemainingSeconds = Math.max(0, partialState.buildPhaseRemainingSeconds);
+    }
+    if (typeof partialState.showNextWaveButton === "boolean") {
+      state.showNextWaveButton = partialState.showNextWaveButton;
+    }
     if (typeof partialState.paused === "boolean") {
       state.paused = partialState.paused;
     }
     if (typeof partialState.speedMultiplier === "number" && Number.isFinite(partialState.speedMultiplier)) {
       state.speedMultiplier = Math.max(0.1, partialState.speedMultiplier);
+    }
+    if (typeof partialState.fps === "number" && Number.isFinite(partialState.fps)) {
+      state.fps = Math.max(0, partialState.fps);
     }
     if (typeof partialState.touchPortrait === "boolean") {
       state.touchPortrait = partialState.touchPortrait;
@@ -879,6 +895,138 @@ export function createUiOverlay({
     pushTouchBlockedRect(panelX, panelY, panelWidth, panelHeight);
   }
 
+  function formatTimerSeconds(totalSeconds) {
+    const clamped = Math.max(0, Math.ceil(Number(totalSeconds) || 0));
+    const minutes = Math.floor(clamped / 60);
+    const seconds = clamped % 60;
+    const minuteText = String(minutes).padStart(2, "0");
+    const secondText = String(seconds).padStart(2, "0");
+    return `${minuteText}:${secondText}`;
+  }
+
+  function getBuildPhaseTimerRect() {
+    if (!state.buildPhaseActive || state.menuOpen) {
+      return null;
+    }
+    const panelHeight = state.showTouchControls
+      ? clamp(viewportHeight * 0.056, 34, 52)
+      : clamp(viewportHeight * 0.052, 32, 48);
+    const panelWidth = state.showTouchControls
+      ? clamp(viewportWidth * 0.24, 126, 228)
+      : clamp(viewportWidth * 0.2, 130, 246);
+    const panelX = clamp(viewportWidth * 0.02, 12, 20);
+    const panelY = clamp(viewportHeight * 0.02, 12, 20);
+    return {
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+    };
+  }
+
+  function drawBuildPhaseTimer() {
+    const timerRect = getBuildPhaseTimerRect();
+    if (!timerRect) {
+      return;
+    }
+    const {
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+    } = timerRect;
+
+    const label = `Build: ${formatTimerSeconds(state.buildPhaseRemainingSeconds)}`;
+
+    drawPanel(
+      drawCtx,
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+      10,
+      "rgba(18, 28, 42, 0.78)",
+      "rgba(162, 210, 255, 0.55)",
+      1.2
+    );
+
+    drawCtx.fillStyle = "rgba(224, 241, 255, 0.98)";
+    drawCtx.textAlign = "center";
+    drawCtx.textBaseline = "middle";
+    const fittedText = fitLabelText(
+      drawCtx,
+      label,
+      Math.max(24, panelWidth - 12),
+      clamp(panelHeight * 0.56, 13, 24),
+      11,
+      700
+    );
+    drawCtx.font = `700 ${fittedText.fontSize}px ${FONT_STACK}`;
+    drawCtx.fillText(
+      fittedText.text,
+      panelX + panelWidth * 0.5,
+      panelY + panelHeight * 0.55
+    );
+
+    pushTouchBlockedRect(panelX, panelY, panelWidth, panelHeight);
+  }
+
+  function drawFpsHud() {
+    if (state.menuOpen) {
+      return;
+    }
+
+    const fpsValue = Number.isFinite(state.fps) ? state.fps : 0;
+    const fpsText = fpsValue > 0 ? String(Math.round(fpsValue)) : "--";
+    const label = `FPS ${fpsText}`;
+    const panelHeight = state.showTouchControls
+      ? clamp(viewportHeight * 0.048, 26, 38)
+      : clamp(viewportHeight * 0.045, 24, 34);
+    const fontSize = clamp(panelHeight * 0.44, 11, 16);
+    const panelX = clamp(viewportWidth * 0.02, 12, 20);
+    let panelY = clamp(viewportHeight * 0.02, 12, 20);
+    const topGap = clamp(viewportHeight * 0.008, 6, 10);
+
+    const timerRect = getBuildPhaseTimerRect();
+    if (timerRect) {
+      panelY = timerRect.panelY + timerRect.panelHeight + topGap;
+    } else {
+      const fuelRatio = clamp(state.jetpackFuelRatio, 0, 1);
+      const isTouchPortrait = state.showTouchControls && state.touchPortrait;
+      if (!isTouchPortrait && fuelRatio < 0.999) {
+        const jetpackTrackHeight = clamp(viewportHeight * 0.015, 8, 12);
+        const jetpackTrackY = clamp(viewportHeight * 0.02, 12, 20);
+        panelY = jetpackTrackY + jetpackTrackHeight + topGap;
+      }
+    }
+
+    drawCtx.font = `700 ${fontSize}px ${FONT_STACK}`;
+    const measuredWidth = drawCtx.measureText(label).width;
+    const panelWidth = clamp(measuredWidth + (panelHeight * 0.8), 64, 128);
+
+    drawPanel(
+      drawCtx,
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+      clamp(panelHeight * 0.32, 7, 11),
+      "rgba(11, 21, 35, 0.76)",
+      "rgba(148, 212, 255, 0.52)",
+      1.1
+    );
+
+    drawCtx.fillStyle = "rgba(223, 241, 255, 0.97)";
+    drawCtx.textAlign = "center";
+    drawCtx.textBaseline = "middle";
+    drawCtx.font = `700 ${fontSize}px ${FONT_STACK}`;
+    drawCtx.fillText(label, panelX + panelWidth * 0.5, panelY + panelHeight * 0.54);
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "alphabetic";
+
+    pushTouchBlockedRect(panelX, panelY, panelWidth, panelHeight);
+  }
+
   function drawHudUtilityButtons() {
     hudButtonRects = [];
     if (state.menuOpen) {
@@ -887,7 +1035,8 @@ export function createUiOverlay({
 
     const showPause = !!state.showPauseButton;
     const showSpeed = !!state.showSpeedButton;
-    if (!showPause && !showSpeed) {
+    const showNextWave = !!state.showNextWaveButton;
+    if (!showPause && !showSpeed && !showNextWave) {
       return;
     }
 
@@ -915,6 +1064,13 @@ export function createUiOverlay({
         id: "speed",
         label: fastMode ? "1x" : "2x",
         active: fastMode,
+      });
+    }
+    if (showNextWave) {
+      buttons.push({
+        id: "next_wave",
+        label: "Start Wave",
+        active: false,
       });
     }
     if (buttons.length === 0) {
@@ -1560,6 +1716,8 @@ export function createUiOverlay({
 
     drawJetpackHud();
     drawMoneyHud();
+    drawBuildPhaseTimer();
+    drawFpsHud();
     drawHudUtilityButtons();
     drawTowerTray();
     drawBuildModeHint();
