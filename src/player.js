@@ -288,12 +288,22 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
   camera.add(gunGroup);
   scene.add(camera);
 
-  const lookNoiseThreshold = PLAYER_CONFIG.look.lookNoiseThresholdPx;
+  const baseLookNoiseThreshold = Math.max(0, Number(PLAYER_CONFIG.look.lookNoiseThresholdPx) || 0);
+  const isFirefoxDesktop = !isTouchDevice && /firefox/i.test(navigator.userAgent);
+  const firefoxLookNoiseThreshold = Number(PLAYER_CONFIG.look.firefoxLookNoiseThresholdPx);
+  const lookNoiseThreshold = isFirefoxDesktop && Number.isFinite(firefoxLookNoiseThreshold)
+    ? Math.max(baseLookNoiseThreshold, Math.max(0, firefoxLookNoiseThreshold))
+    : baseLookNoiseThreshold;
+  const pointerLockSettleDurationMs = Math.max(
+    0,
+    Number(PLAYER_CONFIG.look.pointerLockSettleDurationMs) || (isFirefoxDesktop ? 120 : 0)
+  );
   const touchLookSensitivity = PLAYER_CONFIG.look.touchSensitivity;
   let yaw = camera.rotation.y;
   let pitch = camera.rotation.x;
   let lookDeltaX = 0;
   let lookDeltaY = 0;
+  let suppressLookInputUntil = 0;
 
   const moveState = {
     forward: false,
@@ -486,6 +496,7 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     pitch = camera.rotation.x;
     lookDeltaX = 0;
     lookDeltaY = 0;
+    suppressLookInputUntil = performance.now() + pointerLockSettleDurationMs;
   });
 
   controls.addEventListener("unlock", () => {
@@ -494,6 +505,7 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
     lastUnlockTime = performance.now();
     yaw = camera.rotation.y;
     pitch = camera.rotation.x;
+    suppressLookInputUntil = 0;
     setJumpHeld(false);
   });
 
@@ -578,9 +590,15 @@ export function createPlayer({ scene, camera, domElement, eyeHeight, getMovement
         event.stopImmediatePropagation();
         return;
       }
+      if (performance.now() < suppressLookInputUntil) {
+        event.stopImmediatePropagation();
+        return;
+      }
+      const movementX = Number(event.movementX) || 0;
+      const movementY = Number(event.movementY) || 0;
       if (
-        Math.abs(event.movementX) < lookNoiseThreshold &&
-        Math.abs(event.movementY) < lookNoiseThreshold
+        Math.abs(movementX) <= lookNoiseThreshold &&
+        Math.abs(movementY) <= lookNoiseThreshold
       ) {
         event.stopImmediatePropagation();
       }

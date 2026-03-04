@@ -210,6 +210,95 @@ let isPaused = false;
 let manualPauseRequested = false;
 let gameSpeedMultiplier = GAME_SPEED_NORMAL;
 let suppressNextDesktopCanvasClick = false;
+let pokiIntegrationDisabled = false;
+let pokiLoadingFinishedReported = false;
+let pokiGameplayStateInitialized = false;
+let pokiGameplayWasActive = false;
+let pokiGameplayReportedActive = false;
+let pokiHasUserInteraction = false;
+let pokiInitAttempted = false;
+
+function callPokiSdkMethod(methodName) {
+  if (pokiIntegrationDisabled) {
+    return false;
+  }
+  const sdk = window.PokiSDK;
+  if (!sdk || typeof sdk[methodName] !== "function") {
+    return false;
+  }
+  try {
+    sdk[methodName]();
+    return true;
+  } catch (error) {
+    pokiIntegrationDisabled = true;
+    console.warn(`[PokiSDK] ${methodName} failed; disabling Poki integration.`, error);
+    return false;
+  }
+}
+
+function reportPokiGameLoadingFinished() {
+  if (pokiLoadingFinishedReported) {
+    return;
+  }
+  pokiLoadingFinishedReported = true;
+  callPokiSdkMethod("gameLoadingFinished");
+}
+
+function initPokiSdkEarly() {
+  if (pokiInitAttempted || pokiIntegrationDisabled) {
+    return;
+  }
+  pokiInitAttempted = true;
+  const sdk = window.PokiSDK;
+  if (!sdk || typeof sdk.init !== "function") {
+    return;
+  }
+  try {
+    const initResult = sdk.init();
+    if (initResult && typeof initResult.catch === "function") {
+      initResult.catch((error) => {
+        pokiIntegrationDisabled = true;
+        console.warn("[PokiSDK] init failed; disabling Poki integration.", error);
+      });
+    }
+  } catch (error) {
+    pokiIntegrationDisabled = true;
+    console.warn("[PokiSDK] init failed; disabling Poki integration.", error);
+  }
+}
+
+function getIsGameplayActiveForPoki() {
+  return !isPaused && (waveState === "PLAYING" || waveState === "DELAY");
+}
+
+function markPokiUserInteraction() {
+  if (pokiHasUserInteraction) {
+    return;
+  }
+  pokiHasUserInteraction = true;
+  syncPokiGameplayState();
+}
+
+function syncPokiGameplayState() {
+  const gameplayActive = getIsGameplayActiveForPoki();
+  if (!pokiGameplayStateInitialized) {
+    pokiGameplayStateInitialized = true;
+    pokiGameplayWasActive = gameplayActive;
+  }
+  if (gameplayActive !== pokiGameplayWasActive) {
+    pokiGameplayWasActive = gameplayActive;
+  }
+  const shouldReportActive = gameplayActive && pokiHasUserInteraction;
+  if (shouldReportActive === pokiGameplayReportedActive) {
+    return;
+  }
+  pokiGameplayReportedActive = shouldReportActive;
+  callPokiSdkMethod(shouldReportActive ? "gameplayStart" : "gameplayStop");
+}
+
+window.addEventListener("pointerdown", markPokiUserInteraction, { capture: true, passive: true });
+window.addEventListener("click", markPokiUserInteraction, { capture: true, passive: true });
+initPokiSdkEarly();
 
 function getPathDirection(from, to) {
   const direction = to.clone().sub(from);
@@ -1147,6 +1236,7 @@ function animate() {
       towerSystem.update(simulationDeltaSeconds, enemySystem);
     }
   }
+  syncPokiGameplayState();
 
   const towerInventory = towerSystem
     ? towerSystem.getTowerInventory().map((entry, index) => ({
@@ -1283,6 +1373,7 @@ function initGame() {
   };
 
   startWave(WAVE_CONFIG.initialWave);
+  reportPokiGameLoadingFinished();
   animate();
 }
 

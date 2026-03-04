@@ -166,3 +166,8 @@
 - If edge feel tuning is needed later:
   - Reduce `terrainEdgeSideCollisionGrace` for stronger edge blocking.
   - Increase it for smoother step-off with less side-pop.
+
+### AGENTS.md
+
+Make sure to update AGENTS.md to reflect any important changes that you need to remember for later.
+Not only where things are located and how they work, but also design decissions taken during conversations that aren't directly clear from the code and comments.
