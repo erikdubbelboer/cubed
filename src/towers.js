@@ -78,6 +78,8 @@ export function createTowerSystem({
   const terrainObstacles = Array.isArray(grid.heightObstacles) ? grid.heightObstacles : [];
   const spawnCells = Array.isArray(grid.spawnCells) ? grid.spawnCells : [];
   const endCell = grid.endCell ?? null;
+  const gridCellSize = Math.max(0.01, Number(grid.cellSize) || 0);
+  const gridCubeHalfSize = gridCellSize * 0.5;
 
   const beamGeometry = new THREE.CylinderGeometry(
     LASER_TOWER_CONFIG.beamRadius,
@@ -411,6 +413,43 @@ export function createTowerSystem({
     });
   }
 
+  function createFootprintOutlineMesh({
+    halfSize,
+    height,
+    inset = 0.08,
+    color,
+    opacity = 0.42,
+  }) {
+    const footprintHalfSize = Math.max(0.01, Number(halfSize) || 0);
+    const footprintHeight = Math.max(0.01, Number(height) || 0);
+    const insetAmount = Math.max(0, Number(inset) || 0);
+    const outlineHalfSize = Math.max(0.01, footprintHalfSize - insetAmount);
+    const outlineHeight = Math.max(0.01, footprintHeight - (insetAmount * 2));
+    const outlineColor = Number.isFinite(Number(color))
+      ? Number(color)
+      : 0xffffff;
+    const outlineOpacity = THREE.MathUtils.clamp(Number(opacity) || 0, 0, 1);
+    const outlineSizeXz = outlineHalfSize * 2;
+
+    const outlineMaterial = new THREE.LineBasicMaterial({
+      color: outlineColor,
+      transparent: true,
+      opacity: outlineOpacity,
+      depthWrite: false,
+    });
+    outlineMaterial.toneMapped = false;
+
+    const outlineMesh = new THREE.LineSegments(
+      new THREE.EdgesGeometry(
+        new THREE.BoxGeometry(outlineSizeXz, outlineHeight, outlineSizeXz)
+      ),
+      outlineMaterial
+    );
+    outlineMesh.position.y = footprintHeight * 0.5;
+    outlineMesh.userData.footprintOutlineMaterial = outlineMaterial;
+    return outlineMesh;
+  }
+
   function createLaserTowerMesh({
     bodyColor,
     ringColor,
@@ -517,6 +556,9 @@ export function createTowerSystem({
     auraColor = emissiveColor,
     opacity = 1,
     transparent = false,
+    footprintOutlineColor = emissiveColor,
+    footprintOutlineInset = AOE_TOWER_CONFIG.footprintOutlineInset,
+    footprintOutlineOpacity = AOE_TOWER_CONFIG.footprintOutlineOpacity,
   }) {
     const root = new THREE.Group();
     const hoverNode = new THREE.Object3D();
@@ -574,11 +616,21 @@ export function createTowerSystem({
     const glowLight = new THREE.PointLight(emissiveColor, 0.35, AOE_TOWER_CONFIG.lightDistance);
     hoverNode.add(glowLight);
 
+    const footprintOutline = createFootprintOutlineMesh({
+      halfSize: gridCubeHalfSize,
+      height: gridCellSize,
+      inset: footprintOutlineInset,
+      color: footprintOutlineColor,
+      opacity: footprintOutlineOpacity,
+    });
+    root.add(footprintOutline);
+
     root.userData.materials = [coreMaterial, spikeMaterial, auraMaterial];
     root.userData.aoeCoreMaterial = coreMaterial;
     root.userData.aoeSpikeMaterial = spikeMaterial;
     root.userData.aoeAuraMaterial = auraMaterial;
     root.userData.aoeLight = glowLight;
+    root.userData.footprintOutlineMaterial = footprintOutline.userData.footprintOutlineMaterial;
     root.userData.hoverNode = hoverNode;
 
     applyShadowSettings(root);
@@ -592,6 +644,9 @@ export function createTowerSystem({
     emissiveColor = SLOW_TOWER_CONFIG.bodyEmissive,
     opacity = 1,
     transparent = false,
+    footprintOutlineColor = emissiveColor,
+    footprintOutlineInset = SLOW_TOWER_CONFIG.footprintOutlineInset,
+    footprintOutlineOpacity = SLOW_TOWER_CONFIG.footprintOutlineOpacity,
   }) {
     const root = new THREE.Group();
     const hoverNode = new THREE.Object3D();
@@ -637,10 +692,20 @@ export function createTowerSystem({
     const glowLight = new THREE.PointLight(emissiveColor, 0.3, SLOW_TOWER_CONFIG.lightDistance);
     hoverNode.add(glowLight);
 
+    const footprintOutline = createFootprintOutlineMesh({
+      halfSize: gridCubeHalfSize,
+      height: gridCellSize,
+      inset: footprintOutlineInset,
+      color: footprintOutlineColor,
+      opacity: footprintOutlineOpacity,
+    });
+    root.add(footprintOutline);
+
     root.userData.materials = [bodyMaterial, bandMaterial];
     root.userData.slowBodyMaterial = bodyMaterial;
     root.userData.slowBandMaterial = bandMaterial;
     root.userData.slowLight = glowLight;
+    root.userData.footprintOutlineMaterial = footprintOutline.userData.footprintOutlineMaterial;
     root.userData.hoverNode = hoverNode;
 
     applyShadowSettings(root);
@@ -656,6 +721,9 @@ export function createTowerSystem({
         emissiveColor: SLOW_TOWER_CONFIG.previewGlow,
         opacity: SLOW_TOWER_CONFIG.previewOpacity,
         transparent: true,
+        footprintOutlineColor: SLOW_TOWER_CONFIG.previewGlow,
+        footprintOutlineInset: SLOW_TOWER_CONFIG.footprintOutlineInset,
+        footprintOutlineOpacity: SLOW_TOWER_CONFIG.footprintOutlineOpacity,
       });
     }
 
@@ -666,6 +734,9 @@ export function createTowerSystem({
         auraColor: AOE_TOWER_CONFIG.previewGlow,
         opacity: AOE_TOWER_CONFIG.previewOpacity,
         transparent: true,
+        footprintOutlineColor: AOE_TOWER_CONFIG.previewGlow,
+        footprintOutlineInset: AOE_TOWER_CONFIG.footprintOutlineInset,
+        footprintOutlineOpacity: AOE_TOWER_CONFIG.footprintOutlineOpacity,
       });
     }
 
@@ -685,6 +756,9 @@ export function createTowerSystem({
         emissiveColor: SLOW_TOWER_CONFIG.placedGlow,
         opacity: 1,
         transparent: false,
+        footprintOutlineColor: SLOW_TOWER_CONFIG.placedGlow,
+        footprintOutlineInset: SLOW_TOWER_CONFIG.footprintOutlineInset,
+        footprintOutlineOpacity: SLOW_TOWER_CONFIG.footprintOutlineOpacity,
       });
     }
 
@@ -695,6 +769,9 @@ export function createTowerSystem({
         auraColor: AOE_TOWER_CONFIG.placedGlow,
         opacity: 1,
         transparent: false,
+        footprintOutlineColor: AOE_TOWER_CONFIG.placedGlow,
+        footprintOutlineInset: AOE_TOWER_CONFIG.footprintOutlineInset,
+        footprintOutlineOpacity: AOE_TOWER_CONFIG.footprintOutlineOpacity,
       });
     }
 
@@ -803,6 +880,7 @@ export function createTowerSystem({
       const bodyMaterial = preview.userData.slowBodyMaterial;
       const bandMaterial = preview.userData.slowBandMaterial;
       const glowLight = preview.userData.slowLight;
+      const footprintOutlineMaterial = preview.userData.footprintOutlineMaterial;
       if (!bodyMaterial || !bandMaterial) {
         return;
       }
@@ -811,6 +889,9 @@ export function createTowerSystem({
         bodyMaterial.color.setHex(SLOW_TOWER_CONFIG.previewColor);
         bodyMaterial.emissive.setHex(SLOW_TOWER_CONFIG.previewGlow);
         bandMaterial.color.setHex(SLOW_TOWER_CONFIG.bandColor);
+        if (footprintOutlineMaterial) {
+          footprintOutlineMaterial.color.setHex(SLOW_TOWER_CONFIG.previewGlow);
+        }
         if (glowLight) {
           glowLight.color.setHex(SLOW_TOWER_CONFIG.previewGlow);
         }
@@ -818,6 +899,9 @@ export function createTowerSystem({
         bodyMaterial.color.setHex(SLOW_TOWER_CONFIG.previewInvalidColor);
         bodyMaterial.emissive.setHex(SLOW_TOWER_CONFIG.previewInvalidGlow);
         bandMaterial.color.setHex(SLOW_TOWER_CONFIG.previewInvalidGlow);
+        if (footprintOutlineMaterial) {
+          footprintOutlineMaterial.color.setHex(SLOW_TOWER_CONFIG.previewInvalidGlow);
+        }
         if (glowLight) {
           glowLight.color.setHex(SLOW_TOWER_CONFIG.previewInvalidGlow);
         }
@@ -830,6 +914,7 @@ export function createTowerSystem({
       const auraMaterial = preview.userData.aoeAuraMaterial;
       const spikeMaterial = preview.userData.aoeSpikeMaterial;
       const glowLight = preview.userData.aoeLight;
+      const footprintOutlineMaterial = preview.userData.footprintOutlineMaterial;
       if (!coreMaterial || !auraMaterial) {
         return;
       }
@@ -838,6 +923,9 @@ export function createTowerSystem({
         coreMaterial.color.setHex(AOE_TOWER_CONFIG.previewColor);
         coreMaterial.emissive.setHex(AOE_TOWER_CONFIG.previewGlow);
         auraMaterial.color.setHex(AOE_TOWER_CONFIG.previewGlow);
+        if (footprintOutlineMaterial) {
+          footprintOutlineMaterial.color.setHex(AOE_TOWER_CONFIG.previewGlow);
+        }
         if (spikeMaterial) {
           spikeMaterial.color.setHex(AOE_TOWER_CONFIG.previewColor);
           spikeMaterial.emissive.setHex(AOE_TOWER_CONFIG.previewGlow);
@@ -849,6 +937,9 @@ export function createTowerSystem({
         coreMaterial.color.setHex(AOE_TOWER_CONFIG.previewInvalidColor);
         coreMaterial.emissive.setHex(AOE_TOWER_CONFIG.previewInvalidGlow);
         auraMaterial.color.setHex(AOE_TOWER_CONFIG.previewInvalidGlow);
+        if (footprintOutlineMaterial) {
+          footprintOutlineMaterial.color.setHex(AOE_TOWER_CONFIG.previewInvalidGlow);
+        }
         if (spikeMaterial) {
           spikeMaterial.color.setHex(AOE_TOWER_CONFIG.previewInvalidColor);
           spikeMaterial.emissive.setHex(AOE_TOWER_CONFIG.previewInvalidGlow);

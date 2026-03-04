@@ -20,6 +20,16 @@
 - `towerSystem.selectTower(type)` returns `false` if the tower is locked or unaffordable.
 - `towerSystem.placeSelectedTower()` spends cash through `spendMoney` and cancels build mode if post-purchase money is insufficient for another of that type.
 
+### Tower Footprint Outline (Latest)
+- AOE and Slow tower meshes now include a cube-edge footprint outline sized to the grid build cube (cell-sized), not the inner orb visuals.
+- For current tuning (`grid.cellSize = 4`), `footprintOutlineInset: 0.04` yields outlines that are 98% of the grid cube per axis.
+- Outline is visual-only; path blocking remains cell-based for enemies and uses existing tower obstacle data for player/tower LOS checks.
+- Outline appears in both preview and placed meshes for AOE/Slow.
+- Preview validity coloring also updates outline color (`previewGlow` when valid, `previewInvalidGlow` when invalid).
+- Tuning keys live in `GAME_CONFIG.towers.types.aoe|slow`:
+  - `footprintOutlineInset`
+  - `footprintOutlineOpacity`
+
 ### Upgrade System Rules
 - Upgrades are config-driven (`GAME_CONFIG.upgrades[]`), not hardcoded lists.
 - Upgrade availability is gated by:

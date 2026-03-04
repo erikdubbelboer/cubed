@@ -697,6 +697,9 @@ export const GAME_CONFIG = {
         coreRadius: 0.82,
         auraRadius: 1.02,
         auraOpacity: 0.38,
+        // Inset and alpha for the cube-edge footprint outline (visual only).
+        footprintOutlineInset: 0.04,
+        footprintOutlineOpacity: 0.42,
         hoverBaseY: 1.05,
         bobAmplitude: 0.14,
         bobFrequency: 3.4,
@@ -740,6 +743,9 @@ export const GAME_CONFIG = {
         // Slow visuals.
         bodyRadius: 0.62,
         bodyHeight: 1.45,
+        // Inset and alpha for the cube-edge footprint outline (visual only).
+        footprintOutlineInset: 0.04,
+        footprintOutlineOpacity: 0.42,
         hoverBaseY: 1.05,
         bobAmplitude: 0.14,
         bobFrequency: 3.4,
