@@ -343,12 +343,15 @@
 - Editor controls:
   - `1` eraser, `2` wall, `3` spawn, `4` end, `5` ramp, `6` playerSpawn.
   - `Enter` and desktop LMB (while pointer lock is active) apply the current tool.
-  - Mouse wheel rotates ramp tool in 90-degree steps.
+  - Mouse wheel rotates the selected rotatable tool in 90-degree steps (`ramp` and `playerSpawn`).
   - Editor tool selection is mirrored in the bottom tray (same slot UI as towers) with dedicated editor icon IDs and hotkeys `1..6`.
 - Editor mutation model lives in `src/levelEditor.js` and is rebuilt back into grid objects after each change.
   - Wall editing is sparse voxel based (exact `(x,y,z)` add/remove), not column-trim based.
+  - Editor apply action now re-samples the placement candidate at click/Enter time (not only previous-frame cache) so wheel-rotations/tool/aim changes never apply one-frame stale placement data.
   - Eraser removes the directly hit object (inside target), not an adjacent placement cell.
   - `end` and `playerSpawn` are unique markers (new placement replaces old); `spawn` is multi-place.
+  - `playerSpawn` keeps/exports cardinal `rotation` (0/90/180/270) and supports in-place rotation edits on the same cell.
+  - Player-spawn preview facing arrow uses pre-rotated cone geometry + yaw-only mesh rotation; do not combine X+Y Euler rotation on the mesh for facing because it can make wheel yaw look unchanged.
   - Ramps are anchored at their low cell with 0/90/180/270 rotations and cannot overlap ramp-occupied cells or walls.
   - Voxel preview center uses `y + 0.5` cell height so editor preview aligns exactly with placed cube centers (fixes half-block vertical offset).
   - Ramp preview uses a wedge mesh positioned at the ramp low-base world `y` (not cube-center averaging), matching runtime ramp placement transform.
@@ -356,7 +359,7 @@
   - `createGrid(scene, options)` supports `levelObjects`, `allowIncompleteMarkers`, and `editorMode`.
   - Grid now tracks explicit sparse wall voxels and marker `y` values (`spawn/end/playerSpawn`) in runtime/export state.
   - `grid.getEditorRaycastTargets()` exposes editor-hit meshes; `grid.getLevelObjects()` returns normalized export objects; `grid.dispose()` tears down all grid-owned scene resources.
-  - In editor mode only, `playerSpawn` is rendered as a green transparent marker cube.
+  - In editor mode only, `playerSpawn` is rendered as a green transparent marker cube with a forward arrow indicator that reflects marker rotation.
 - Marker `y` semantics are authoritative:
   - Marker positions keep explicit `y` in level objects and runtime grid state.
   - Enemy system validates spawn/end markers at init: marker `y` must equal traversable surface level (`grid.getCellHeight(x,z)`), otherwise enemy init fails with explicit error.

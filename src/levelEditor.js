@@ -160,6 +160,7 @@ export function createLevelEditor({
   let floorPlane = new THREE.Plane(floorPlaneNormal, -(Number(grid?.tileTopY) || 0));
   let selectedTool = "wall";
   let rampRotation = 0;
+  let playerSpawnRotation = 0;
   let lastCandidate = null;
 
   const wallMap = new Map();
@@ -183,10 +184,15 @@ export function createLevelEditor({
 
   const previewCube = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), previewMaterial);
   const previewRamp = new THREE.Mesh(createRampPreviewGeometry(), previewMaterial);
+  const previewFacingArrowGeometry = new THREE.ConeGeometry(0.14, 0.36, 12);
+  previewFacingArrowGeometry.rotateX(Math.PI * 0.5);
+  const previewFacingArrow = new THREE.Mesh(previewFacingArrowGeometry, previewMaterial);
   previewCube.visible = false;
   previewRamp.visible = false;
+  previewFacingArrow.visible = false;
   previewRoot.add(previewCube);
   previewRoot.add(previewRamp);
+  previewRoot.add(previewFacingArrow);
 
   function getGridSize() {
     return Math.max(1, Math.floor(Number(grid?.gridSize) || 1));
@@ -221,6 +227,7 @@ export function createLevelEditor({
     rampMap.clear();
     endMarker = null;
     playerSpawnMarker = null;
+    playerSpawnRotation = 0;
 
     const normalized = Array.isArray(entries) ? entries : [];
     for (const rawEntry of normalized) {
@@ -248,7 +255,14 @@ export function createLevelEditor({
       } else if (type === "end") {
         endMarker = createToolObject("end", entry.position.x, entry.position.y, entry.position.z, 0);
       } else if (type === "playerSpawn") {
-        playerSpawnMarker = createToolObject("playerSpawn", entry.position.x, entry.position.y, entry.position.z, 0);
+        playerSpawnMarker = createToolObject(
+          "playerSpawn",
+          entry.position.x,
+          entry.position.y,
+          entry.position.z,
+          entry.rotation
+        );
+        playerSpawnRotation = playerSpawnMarker.rotation;
       } else if (type.toLowerCase() === "ramp") {
         const rampObject = createToolObject(
           "ramp",
@@ -447,17 +461,22 @@ export function createLevelEditor({
     }
 
     if (selectedTool === "playerSpawn") {
+      const nextRotation = normalizeRotation(playerSpawnRotation);
+      const hasExisting = !!playerSpawnMarker;
+      const samePosition = hasExisting
+        && key3(playerSpawnMarker.position.x, playerSpawnMarker.position.y, playerSpawnMarker.position.z)
+          === key3(placement.x, placement.y, placement.z);
+      const sameRotation = samePosition && normalizeRotation(playerSpawnMarker.rotation) === nextRotation;
       const valid = isInsideBounds(placement.x, placement.z)
         && placement.y >= 0
-        && (
-          !playerSpawnMarker
-          || key3(playerSpawnMarker.position.x, playerSpawnMarker.position.y, playerSpawnMarker.position.z)
-            !== key3(placement.x, placement.y, placement.z)
-        );
+        && (!samePosition || !sameRotation);
       return {
         valid,
         mode: "playerSpawn",
-        target: placement,
+        target: {
+          ...placement,
+          rotation: nextRotation,
+        },
       };
     }
 
@@ -473,6 +492,7 @@ export function createLevelEditor({
     if (!previewRoot.visible) {
       previewCube.visible = false;
       previewRamp.visible = false;
+      previewFacingArrow.visible = false;
       return;
     }
 
@@ -483,6 +503,7 @@ export function createLevelEditor({
     if (candidate.mode === "ramp") {
       previewCube.visible = false;
       previewRamp.visible = true;
+      previewFacingArrow.visible = false;
       const direction = getRampDirectionFromRotation(candidate.target.rotation);
       const low = candidate.target;
       const high = {
@@ -508,11 +529,22 @@ export function createLevelEditor({
 
     previewRamp.visible = false;
     previewCube.visible = true;
+    previewFacingArrow.visible = candidate.mode === "playerSpawn";
     const target = candidate.target;
     toWorldCenterForVoxel(grid, target.x, target.y, target.z, tempPreviewPos);
     previewCube.position.copy(tempPreviewPos);
-    previewCube.rotation.set(0, 0, 0);
-    previewCube.scale.set(getCellSize(), getCellSize(), getCellSize());
+    const cellSize = getCellSize();
+    const rotationY = candidate.mode === "playerSpawn"
+      ? THREE.MathUtils.degToRad(target.rotation)
+      : 0;
+    previewCube.rotation.set(0, rotationY, 0);
+    previewCube.scale.set(cellSize, cellSize, cellSize);
+    if (previewFacingArrow.visible) {
+      previewFacingArrow.position.copy(tempPreviewPos);
+      previewFacingArrow.position.y += cellSize * 0.64;
+      previewFacingArrow.rotation.set(0, rotationY, 0);
+      previewFacingArrow.scale.set(cellSize, cellSize, cellSize);
+    }
   }
 
   function removeTarget(target) {
@@ -589,14 +621,17 @@ export function createLevelEditor({
       return true;
     }
     if (candidate.mode === "playerSpawn") {
-      const next = createToolObject("playerSpawn", x, y, z, 0);
+      const nextRotation = normalizeRotation(candidate.target.rotation);
+      const next = createToolObject("playerSpawn", x, y, z, nextRotation);
       if (
         playerSpawnMarker
         && key3(playerSpawnMarker.position.x, playerSpawnMarker.position.y, playerSpawnMarker.position.z) === key3(x, y, z)
+        && playerSpawnMarker.rotation === nextRotation
       ) {
         return false;
       }
       playerSpawnMarker = next;
+      playerSpawnRotation = nextRotation;
       return true;
     }
     if (candidate.mode === "ramp") {
@@ -646,6 +681,9 @@ export function createLevelEditor({
       return false;
     }
     selectedTool = nextTool;
+    if (selectedTool === "playerSpawn" && playerSpawnMarker) {
+      playerSpawnRotation = normalizeRotation(playerSpawnMarker.rotation);
+    }
     return true;
   }
 
@@ -667,6 +705,25 @@ export function createLevelEditor({
     return rampRotation;
   }
 
+  function rotatePlayerSpawn(step = 1) {
+    const normalizedStep = Math.sign(Number(step) || 0);
+    if (normalizedStep === 0) {
+      return playerSpawnRotation;
+    }
+    playerSpawnRotation = normalizeRotation(playerSpawnRotation + normalizedStep * 90);
+    return playerSpawnRotation;
+  }
+
+  function rotateSelectedTool(step = 1) {
+    if (selectedTool === "ramp") {
+      return rotateRamp(step);
+    }
+    if (selectedTool === "playerSpawn") {
+      return rotatePlayerSpawn(step);
+    }
+    return null;
+  }
+
   function setGrid(nextGrid) {
     grid = nextGrid;
     floorPlane = new THREE.Plane(floorPlaneNormal, -getFloorY());
@@ -678,6 +735,9 @@ export function createLevelEditor({
   }
 
   function applyPrimaryAction() {
+    // Re-sample candidate at action time so recent wheel/tool/camera changes are never one-frame stale.
+    lastCandidate = getPlacementCandidate();
+    updatePreview(lastCandidate);
     if (!lastCandidate || !lastCandidate.valid) {
       return false;
     }
@@ -712,10 +772,13 @@ export function createLevelEditor({
     selectToolByDigit,
     setSelectedTool,
     rotateRamp,
+    rotatePlayerSpawn,
+    rotateSelectedTool,
     setGrid,
     getLevelObjects,
     getExportPayload,
     getSelectedTool: () => selectedTool,
     getRampRotation: () => rampRotation,
+    getPlayerSpawnRotation: () => playerSpawnRotation,
   };
 }

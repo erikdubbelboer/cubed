@@ -58,7 +58,7 @@ const BUILD_PREVIEW_ARROW_LENGTH_FROM_CELL = 0.24;
 const BUILD_PREVIEW_ARROW_RADIUS_FROM_CELL = 0.07;
 const BUILD_PREVIEW_ARROW_VERTICAL_JITTER = 0.06;
 const FPS_SAMPLE_WINDOW_SECONDS = 0.35;
-const EDITOR_RAMP_ROTATE_INTERVAL_MS = 200;
+const EDITOR_TOOL_ROTATE_INTERVAL_MS = 200;
 const EDITOR_TOOL_INVENTORY = [
   {
     type: "eraser",
@@ -240,7 +240,7 @@ let player;
 let enemySystem;
 let towerSystem;
 let levelEditor;
-let lastEditorRampRotateAtMs = -Infinity;
+let lastEditorToolRotateAtMs = -Infinity;
 
 const clock = new THREE.Clock();
 let isPaused = false;
@@ -1108,20 +1108,31 @@ if (!isTouchDevice) {
     if (waveState !== "EDITOR" || !levelEditor) {
       return;
     }
-    if (levelEditor.getSelectedTool?.() !== "ramp") {
+    const selectedTool = levelEditor.getSelectedTool?.();
+    if (selectedTool !== "ramp" && selectedTool !== "playerSpawn") {
       return;
     }
     if (event.deltaY === 0) {
       return;
     }
     const nowMs = typeof performance?.now === "function" ? performance.now() : Date.now();
-    if ((nowMs - lastEditorRampRotateAtMs) < EDITOR_RAMP_ROTATE_INTERVAL_MS) {
+    if ((nowMs - lastEditorToolRotateAtMs) < EDITOR_TOOL_ROTATE_INTERVAL_MS) {
       event.preventDefault();
       return;
     }
-    lastEditorRampRotateAtMs = nowMs;
+    lastEditorToolRotateAtMs = nowMs;
     const direction = event.deltaY > 0 ? 1 : -1;
-    levelEditor.rotateRamp(direction);
+    let didRotate = false;
+    if (typeof levelEditor.rotateSelectedTool === "function") {
+      didRotate = levelEditor.rotateSelectedTool(direction) != null;
+    } else if (selectedTool === "ramp") {
+      didRotate = typeof levelEditor.rotateRamp?.(direction) === "number";
+    } else if (selectedTool === "playerSpawn") {
+      didRotate = typeof levelEditor.rotatePlayerSpawn?.(direction) === "number";
+    }
+    if (didRotate && typeof levelEditor.update === "function") {
+      levelEditor.update();
+    }
     event.preventDefault();
   }, { passive: false });
 
@@ -2017,9 +2028,7 @@ function initGame() {
     if (waveState === "EDITOR" && levelEditor && typeof levelEditor.getExportPayload === "function") {
       return levelEditor.getExportPayload();
     }
-    return {
-      levelObjects: typeof grid?.getLevelObjects === "function" ? grid.getLevelObjects() : [],
-    };
+    return typeof grid?.getLevelObjects === "function" ? grid.getLevelObjects() : [];
   };
 
   startBuildPhase(WAVE_CONFIG.initialWave);

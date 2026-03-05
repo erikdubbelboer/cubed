@@ -197,6 +197,7 @@ function parseLevelLayout(levelObjects, options = {}) {
   const spawnCellKeySet = new Set();
   let endCell = null;
   let playerSpawnCell = null;
+  let playerSpawnRotation = 0;
   const ramps = [];
   const rampCellsByKey = new Map();
 
@@ -246,6 +247,7 @@ function parseLevelLayout(levelObjects, options = {}) {
         throw new Error("grid.levelObjects must contain at most one playerSpawn marker.");
       }
       playerSpawnCell = { x, y, z };
+      playerSpawnRotation = entry.rotation;
       markers[z][x] = "X";
     } else if (entry.type === "path") {
       markers[z][x] = "P";
@@ -354,6 +356,7 @@ function parseLevelLayout(levelObjects, options = {}) {
     spawnCells,
     endCell,
     playerSpawnCell,
+    playerSpawnRotation,
     ramps,
     rampCellsByKey,
     levelObjects: parsedEntries.map((entry) => ({
@@ -819,6 +822,9 @@ export function createGrid(scene, options = {}) {
   const spawnCells = levelLayout.spawnCells.map((cell) => cloneCell(cell));
   const endCell = cloneCell(levelLayout.endCell);
   const playerSpawnCell = cloneCell(levelLayout.playerSpawnCell);
+  const playerSpawnRotation = Number.isFinite(Number(levelLayout.playerSpawnRotation))
+    ? Number(levelLayout.playerSpawnRotation)
+    : 0;
   const spawnCellSet = new Set(spawnCells.map((cell) => cellKey(cell.x, cell.z)));
   const endCellKey = endCell ? cellKey(endCell.x, endCell.z) : null;
   const endpointObstacles = [];
@@ -895,6 +901,8 @@ export function createGrid(scene, options = {}) {
 
   let playerSpawnMarker = null;
   if (playerSpawnCell && editorMode) {
+    const playerSpawnArrowGeometry = new THREE.ConeGeometry(CELL_SIZE * 0.12, CELL_SIZE * 0.34, 12);
+    playerSpawnArrowGeometry.rotateX(Math.PI * 0.5);
     const playerSpawnMat = new THREE.MeshStandardMaterial({
       color: 0x60ff7f,
       emissive: 0x1d6231,
@@ -914,13 +922,29 @@ export function createGrid(scene, options = {}) {
       playerSpawnCenter.y + CELL_SIZE * 0.5,
       playerSpawnCenter.z
     );
+    playerSpawnMarker.rotation.y = THREE.MathUtils.degToRad(playerSpawnRotation);
     playerSpawnMarker.castShadow = true;
     playerSpawnMarker.receiveShadow = true;
+    const playerSpawnArrow = new THREE.Mesh(
+      playerSpawnArrowGeometry,
+      new THREE.MeshStandardMaterial({
+        color: 0xa4ffbb,
+        emissive: 0x2c8744,
+        emissiveIntensity: 0.7,
+        roughness: 0.4,
+        metalness: 0.08,
+      })
+    );
+    playerSpawnArrow.position.set(0, CELL_SIZE * 0.64, 0);
+    playerSpawnArrow.castShadow = false;
+    playerSpawnArrow.receiveShadow = false;
+    playerSpawnMarker.add(playerSpawnArrow);
     playerSpawnMarker.userData.editorObjectType = "playerSpawn";
     playerSpawnMarker.userData.editorMarker = {
       x: playerSpawnCell.x,
       y: playerSpawnCell.y ?? 0,
       z: playerSpawnCell.z,
+      rotation: playerSpawnRotation,
     };
     editorRaycastTargets.push(playerSpawnMarker);
     gridRoot.add(playerSpawnMarker);
@@ -1491,6 +1515,7 @@ export function createGrid(scene, options = {}) {
     spawnCells,
     endCell,
     playerSpawnCell,
+    playerSpawnRotation,
     spawnMarkers,
     endMarker,
     playerSpawnMarker,
