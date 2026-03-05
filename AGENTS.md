@@ -188,15 +188,18 @@
 - Upgrade menu in mobile portrait is top-shifted and compacted (padding/card sizes/gaps) so all options fit without overlap.
 - Jetpack fuel HUD rules:
   - hide fuel HUD at 100%
-  - mobile portrait uses a small vertical side bar (left side) instead of text/percent.
+  - desktop and mobile portrait use a small vertical side bar on the left side (away from the top-left build timer/FPS stack).
+  - touch landscape keeps the compact horizontal top-left bar.
 - Build-phase HUD rules:
   - show `Build: mm:ss` timer while `waveState === "BUILD"`.
   - show a `Start Wave` utility button during build phase to launch queued wave immediately.
+  - mobile/touch build phase hides the `Pause` HUD button (only `Start Wave` is shown in utility controls).
   - build phase replaces the `1x/2x` speed button with `Start Wave`.
   - desktop `F` key starts the queued wave during build phase (outside build it still toggles speed).
 - FPS counter:
-  - HUD renders `FPS <value>` in the top-left during gameplay HUD rendering.
-  - FPS label auto-shifts downward when build timer or desktop jetpack bar occupies the top-left area.
+  - HUD renders tiny plain `FPS <value>` text at the top-left screen edge.
+  - FPS text color is high-contrast black for readability on bright/white levels.
+  - FPS uses no panel/border/background and does not reserve touch-blocked UI space.
 
 ### Debug Hooks Useful for Iteration
 - `window.gameDebug` exposes useful runtime helpers:
@@ -214,7 +217,8 @@
   - Terrain blocks set `topInsetFromRadius: 0` in `grid.js` so adjacent raised cells are continuously walkable with no support seam gap.
 - Ramp movement support now comes through `grid.rampObstacles`:
   - Ramps expose `kind: "ramp"` + `getSurfaceYAtWorld(x, z)` for slope support checks.
-  - Player side-collision push intentionally skips ramp obstacles to avoid fighting slope traversal.
+  - Player uses ramp-specific side-face collision (oriented along/across checks) so ramp vertical sides block movement.
+  - Ramp side collision is entry-sensitive (uses previous-frame lateral position) to prevent side tunneling while preserving smooth on-ramp traversal.
 - Small ledge auto-step support:
   - `player.collision.stepUpHeight` allows stepping up short lips without jumping (terrain-style obstacles only).
   - Used to smooth ramp-to-top transitions where side collision would otherwise snag.
@@ -251,7 +255,11 @@
   - `isCellBuildable(cellX, cellZ)` returns false for ramp cells.
   - `isRampCell(cellX, cellZ)` / `getRampCellData(cellX, cellZ)` expose ramp occupancy + connectivity metadata.
   - `rampObstacles[]` exposes ramp movement/surface helpers for player collision support.
+  - `endpointObstacles[]` exposes spawn/end marker cubes as wall-like collision blocks for player movement/projectile collision only.
   - `worldToCell(...)` / `cellToWorldCenter(...)` still drive build snap + navigation.
+- Collision scope contract for endpoints:
+  - `main.js:getMovementObstacles()` includes `grid.endpointObstacles` so player movement collides with `spawn`/`end` like terrain blocks.
+  - Keep endpoint cubes out of `grid.heightObstacles` so tower LOS/build-surface raycast behavior remains unchanged.
 - Enemy movement is now navigation-graph based in `enemies.js`:
   - Cardinal neighbors only (no diagonals), so no corner cutting.
   - Height rule for normal cells: neighbors are traversable only when `getCellHeight` is exactly equal (no wall climbing).

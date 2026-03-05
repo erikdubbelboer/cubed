@@ -1210,6 +1210,99 @@ export function createPlayer({
       for (let pass = 0; pass < PLAYER_CONFIG.movement.collisionPasses; pass += 1) {
         for (const obstacle of obstacles) {
           if (obstacle?.kind === "ramp") {
+            const obstaclePos = obstacle?.position;
+            const obstacleBaseY = Number(obstacle?.baseY ?? 0);
+            const obstacleHeight = Number(obstacle?.height);
+            const obstacleDirection = obstacle?.direction;
+            const obstacleHalfSizeX = Number(obstacle?.halfSizeX ?? obstacle?.halfSize);
+            const obstacleHalfSizeZ = Number(obstacle?.halfSizeZ ?? obstacle?.halfSize);
+
+            if (
+              !obstaclePos
+              || !Number.isFinite(obstacleHeight)
+              || obstacleHeight <= 0
+              || !Number.isFinite(obstacleHalfSizeX)
+              || !Number.isFinite(obstacleHalfSizeZ)
+              || !obstacleDirection
+            ) {
+              continue;
+            }
+
+            const dirXRaw = Number(obstacleDirection.x);
+            const dirZRaw = Number(obstacleDirection.z);
+            const dirLength = Math.hypot(dirXRaw, dirZRaw);
+            if (dirLength <= PLAYER_CONFIG.collision.minDistanceSq) {
+              continue;
+            }
+            const dirX = dirXRaw / dirLength;
+            const dirZ = dirZRaw / dirLength;
+            const rightX = -dirZ;
+            const rightZ = dirX;
+            const rampRunsMostlyAlongX = Math.abs(dirX) >= Math.abs(dirZ);
+            const rampAlongHalf = rampRunsMostlyAlongX ? obstacleHalfSizeX : obstacleHalfSizeZ;
+            const rampAcrossHalf = rampRunsMostlyAlongX ? obstacleHalfSizeZ : obstacleHalfSizeX;
+            if (
+              !Number.isFinite(rampAlongHalf)
+              || !Number.isFinite(rampAcrossHalf)
+              || rampAlongHalf <= 0
+              || rampAcrossHalf <= 0
+            ) {
+              continue;
+            }
+
+            const lowCenterX = obstaclePos.x - (dirX * rampAlongHalf * 0.5);
+            const lowCenterZ = obstaclePos.z - (dirZ * rampAlongHalf * 0.5);
+            const deltaX = camera.position.x - lowCenterX;
+            const deltaZ = camera.position.z - lowCenterZ;
+            const along = (deltaX * dirX) + (deltaZ * dirZ);
+            const across = (deltaX * rightX) + (deltaZ * rightZ);
+            const alongMin = -rampAcrossHalf;
+            const alongMax = rampAlongHalf + rampAcrossHalf;
+            if (along < alongMin || along > alongMax) {
+              continue;
+            }
+
+            const playerFeetY = camera.position.y - eyeHeight;
+            const playerHeadY = camera.position.y + PLAYER_HEAD_CLEARANCE;
+            const alongT = THREE.MathUtils.clamp(
+              (along - alongMin) / Math.max(1e-6, alongMax - alongMin),
+              0,
+              1
+            );
+            const sideTopY = obstacleBaseY + (obstacleHeight * alongT);
+            const verticalOverlap = playerHeadY > obstacleBaseY
+              && playerFeetY < (sideTopY - SUPPORT_EDGE_EPSILON);
+            if (!verticalOverlap) {
+              continue;
+            }
+
+            const previousDeltaX = movementStartPosition.x - lowCenterX;
+            const previousDeltaZ = movementStartPosition.z - lowCenterZ;
+            const previousAcross = (previousDeltaX * rightX) + (previousDeltaZ * rightZ);
+            let sideSign = across >= 0 ? 1 : -1;
+            let pushDistance = 0;
+
+            if (Math.abs(across) > rampAcrossHalf) {
+              const sideDistance = Math.abs(across) - rampAcrossHalf;
+              if (sideDistance >= PLAYER_COLLISION_RADIUS) {
+                continue;
+              }
+              pushDistance = PLAYER_COLLISION_RADIUS - sideDistance;
+            } else {
+              const crossedFromOutsideThisFrame = Math.abs(previousAcross) > (rampAcrossHalf + 1e-5);
+              if (!crossedFromOutsideThisFrame) {
+                continue;
+              }
+              sideSign = previousAcross >= 0 ? 1 : -1;
+              const targetAcross = sideSign * (rampAcrossHalf + PLAYER_COLLISION_RADIUS);
+              pushDistance = Math.abs(targetAcross - across);
+              if (pushDistance <= 0) {
+                continue;
+              }
+            }
+
+            camera.position.x += rightX * sideSign * pushDistance;
+            camera.position.z += rightZ * sideSign * pushDistance;
             continue;
           }
 

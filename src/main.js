@@ -1556,7 +1556,7 @@ function animate() {
     buildMode: towerSystem ? towerSystem.isBuildMode() : false,
     showKeyboardHints: !showTouchControls,
     showTouchControls,
-    showPauseButton: showTouchControls,
+    showPauseButton: showTouchControls && waveState !== "BUILD",
     showSpeedButton: waveState !== "BUILD",
     buildPhaseActive: waveState === "BUILD",
     buildPhaseRemainingSeconds,
@@ -1589,8 +1589,9 @@ function initGame() {
     getMovementObstacles: () => {
       const terrainObstacles = Array.isArray(grid.heightObstacles) ? grid.heightObstacles : [];
       const rampObstacles = Array.isArray(grid.rampObstacles) ? grid.rampObstacles : [];
+      const endpointObstacles = Array.isArray(grid.endpointObstacles) ? grid.endpointObstacles : [];
       const towerObstacles = towerSystem ? towerSystem.getMovementObstacles() : [];
-      const staticObstacles = [...terrainObstacles, ...rampObstacles];
+      const staticObstacles = [...terrainObstacles, ...rampObstacles, ...endpointObstacles];
       if (staticObstacles.length === 0) {
         return towerObstacles;
       }

@@ -747,14 +747,18 @@ export function createUiOverlay({
     drawCtx.stroke();
   }
 
+  function shouldUseVerticalJetpackHud() {
+    return !state.showTouchControls || state.touchPortrait;
+  }
+
   function drawJetpackHud() {
     const fuelRatio = clamp(state.jetpackFuelRatio, 0, 1);
     if (fuelRatio >= 0.999) {
       return;
     }
 
-    const isTouchPortrait = state.showTouchControls && state.touchPortrait;
-    if (isTouchPortrait) {
+    const useVerticalLayout = shouldUseVerticalJetpackHud();
+    if (useVerticalLayout) {
       const trackWidth = clamp(viewportWidth * 0.03, 10, 16);
       const trackHeight = clamp(viewportHeight * 0.26, 120, 230);
       const trackX = clamp(viewportWidth * 0.02, 10, 18);
@@ -1072,52 +1076,19 @@ export function createUiOverlay({
     const fpsValue = Number.isFinite(state.fps) ? state.fps : 0;
     const fpsText = fpsValue > 0 ? String(Math.round(fpsValue)) : "--";
     const label = `FPS ${fpsText}`;
-    const panelHeight = state.showTouchControls
-      ? clamp(viewportHeight * 0.048, 26, 38)
-      : clamp(viewportHeight * 0.045, 24, 34);
-    const fontSize = clamp(panelHeight * 0.44, 11, 16);
-    const panelX = clamp(viewportWidth * 0.02, 12, 20);
-    let panelY = clamp(viewportHeight * 0.02, 12, 20);
-    const topGap = clamp(viewportHeight * 0.008, 6, 10);
+    const fontSize = state.showTouchControls
+      ? clamp(viewportHeight * 0.012, 6, 8)
+      : clamp(viewportHeight * 0.011, 6, 8);
+    const textX = 2;
+    const textY = 1;
 
-    const timerRect = getBuildPhaseTimerRect();
-    if (timerRect) {
-      panelY = timerRect.panelY + timerRect.panelHeight + topGap;
-    } else {
-      const fuelRatio = clamp(state.jetpackFuelRatio, 0, 1);
-      const isTouchPortrait = state.showTouchControls && state.touchPortrait;
-      if (!isTouchPortrait && fuelRatio < 0.999) {
-        const jetpackTrackHeight = clamp(viewportHeight * 0.015, 8, 12);
-        const jetpackTrackY = clamp(viewportHeight * 0.02, 12, 20);
-        panelY = jetpackTrackY + jetpackTrackHeight + topGap;
-      }
-    }
-
-    drawCtx.font = `700 ${fontSize}px ${FONT_STACK}`;
-    const measuredWidth = drawCtx.measureText(label).width;
-    const panelWidth = clamp(measuredWidth + (panelHeight * 0.8), 64, 128);
-
-    drawPanel(
-      drawCtx,
-      panelX,
-      panelY,
-      panelWidth,
-      panelHeight,
-      clamp(panelHeight * 0.32, 7, 11),
-      "rgba(11, 21, 35, 0.76)",
-      "rgba(148, 212, 255, 0.52)",
-      1.1
-    );
-
-    drawCtx.fillStyle = "rgba(223, 241, 255, 0.97)";
-    drawCtx.textAlign = "center";
-    drawCtx.textBaseline = "middle";
-    drawCtx.font = `700 ${fontSize}px ${FONT_STACK}`;
-    drawCtx.fillText(label, panelX + panelWidth * 0.5, panelY + panelHeight * 0.54);
+    drawCtx.fillStyle = "rgba(0, 0, 0, 0.9)";
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "top";
+    drawCtx.font = `600 ${fontSize}px ${FONT_STACK}`;
+    drawCtx.fillText(label, textX, textY);
     drawCtx.textAlign = "left";
     drawCtx.textBaseline = "alphabetic";
-
-    pushTouchBlockedRect(panelX, panelY, panelWidth, panelHeight);
   }
 
   function drawHudUtilityButtons() {

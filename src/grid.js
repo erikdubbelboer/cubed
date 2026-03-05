@@ -746,11 +746,14 @@ export function createGrid(scene) {
   const playerSpawnCell = cloneCell(LEVEL_LAYOUT.playerSpawnCell);
   const spawnCellSet = new Set(spawnCells.map((cell) => cellKey(cell.x, cell.z)));
   const endCellKey = endCell ? cellKey(endCell.x, endCell.z) : null;
+  const endpointObstacles = [];
+  const endpointHalfSize = CELL_SIZE * 0.5;
 
   const spawnMarkers = [];
   for (const spawnCell of spawnCells) {
     const marker = new THREE.Mesh(endpointGeo, spawnMat);
-    const center = cellToWorld(spawnCell.x, spawnCell.z, getCellSurfaceY(spawnCell.x, spawnCell.z));
+    const spawnSurfaceY = getCellSurfaceY(spawnCell.x, spawnCell.z);
+    const center = cellToWorld(spawnCell.x, spawnCell.z, spawnSurfaceY);
     marker.position.set(center.x, center.y + CELL_SIZE * 0.5, center.z);
     marker.castShadow = true;
     marker.receiveShadow = true;
@@ -760,12 +763,24 @@ export function createGrid(scene) {
     marker.userData.cellZ = spawnCell.z;
     scene.add(marker);
     spawnMarkers.push(marker);
+    endpointObstacles.push({
+      mesh: marker,
+      position: new THREE.Vector3(center.x, spawnSurfaceY, center.z),
+      halfSize: endpointHalfSize,
+      halfSizeX: endpointHalfSize,
+      halfSizeZ: endpointHalfSize,
+      height: CELL_SIZE,
+      baseY: spawnSurfaceY,
+      // Match terrain wall-block top-support behavior for player movement.
+      topInsetFromRadius: 0,
+    });
   }
 
   let endMarker = null;
   if (endCell) {
     endMarker = new THREE.Mesh(endpointGeo, endMat);
-    const center = cellToWorld(endCell.x, endCell.z, getCellSurfaceY(endCell.x, endCell.z));
+    const endSurfaceY = getCellSurfaceY(endCell.x, endCell.z);
+    const center = cellToWorld(endCell.x, endCell.z, endSurfaceY);
     endMarker.position.set(center.x, center.y + CELL_SIZE * 0.5, center.z);
     endMarker.castShadow = true;
     endMarker.receiveShadow = true;
@@ -774,6 +789,17 @@ export function createGrid(scene) {
     endMarker.userData.cellX = endCell.x;
     endMarker.userData.cellZ = endCell.z;
     scene.add(endMarker);
+    endpointObstacles.push({
+      mesh: endMarker,
+      position: new THREE.Vector3(center.x, endSurfaceY, center.z),
+      halfSize: endpointHalfSize,
+      halfSizeX: endpointHalfSize,
+      halfSizeZ: endpointHalfSize,
+      height: CELL_SIZE,
+      baseY: endSurfaceY,
+      // Match terrain wall-block top-support behavior for player movement.
+      topInsetFromRadius: 0,
+    });
   }
 
   const moveInset = CELL_SIZE * GRID_CONFIG.moveInsetCellScale;
@@ -1310,6 +1336,7 @@ export function createGrid(scene) {
     tiles,
     heightObstacles: altitudeObstacles,
     rampObstacles,
+    endpointObstacles,
     worldToCell,
     cellToWorldCenter,
     isPathCell,
