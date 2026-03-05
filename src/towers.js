@@ -55,12 +55,93 @@ const LASER_IMPACT_SURFACE_INSET_SCALE = LASER_TOWER_CONFIG.impactSurfaceInsetSc
 const PATH_RANGE_HIGHLIGHT_VALID_COLOR = LASER_TOWER_CONFIG.rangeHighlightValidColor;
 const PATH_RANGE_HIGHLIGHT_INVALID_COLOR = LASER_TOWER_CONFIG.rangeHighlightInvalidColor;
 const LASER_CORNER_OFFSETS = LASER_TOWER_CONFIG.cornerOffsets;
+const BUILD_FX_CONFIG = TOWER_CONFIG.buildFx ?? {};
 const TOWER_TYPE_ORDER = ["laser", "aoe", "slow"];
 const TOWER_DISPLAY_NAMES = {
   laser: "Laser Tower",
   aoe: "AOE Tower",
   slow: "Slow Tower",
 };
+
+function finiteOr(rawValue, fallback) {
+  const numericValue = Number(rawValue);
+  return Number.isFinite(numericValue) ? numericValue : fallback;
+}
+
+const BUILD_FX_ENABLED = BUILD_FX_CONFIG.enabled !== false;
+const BUILD_FX_DURATION = Math.max(0, finiteOr(BUILD_FX_CONFIG.durationSeconds, 0.75));
+const BUILD_FX_START_SCALE = THREE.MathUtils.clamp(finiteOr(BUILD_FX_CONFIG.startScale, 0.72), 0.05, 1.5);
+const BUILD_FX_START_Y_OFFSET = finiteOr(BUILD_FX_CONFIG.startYOffset, -0.45);
+const BUILD_FX_START_OPACITY = THREE.MathUtils.clamp(finiteOr(BUILD_FX_CONFIG.startOpacity, 0), 0, 1);
+const BUILD_FX_TELEPORT_RADIUS_CELL_SCALE = Math.max(0.05, finiteOr(BUILD_FX_CONFIG.teleportRadiusCellScale, 0.44));
+const BUILD_FX_TELEPORT_HEIGHT_CELL_SCALE = Math.max(0.05, finiteOr(BUILD_FX_CONFIG.teleportHeightCellScale, 1.45));
+const BUILD_FX_TELEPORT_OPACITY = THREE.MathUtils.clamp(finiteOr(BUILD_FX_CONFIG.teleportOpacity, 0.82), 0, 1);
+const BUILD_FX_TELEPORT_COLOR_A = finiteOr(BUILD_FX_CONFIG.teleportColorA, 0x38cfff);
+const BUILD_FX_TELEPORT_COLOR_B = finiteOr(BUILD_FX_CONFIG.teleportColorB, 0x1f46ff);
+const BUILD_FX_TELEPORT_EDGE_COLOR = finiteOr(BUILD_FX_CONFIG.teleportEdgeColor, 0x92faff);
+const BUILD_FX_RING_MAX_SCALE = Math.max(0.1, finiteOr(BUILD_FX_CONFIG.ringMaxScale, 1.85));
+const BUILD_FX_RING_THICKNESS = THREE.MathUtils.clamp(finiteOr(BUILD_FX_CONFIG.ringThickness, 0.16), 0.02, 0.95);
+const BUILD_FX_SPARK_COUNT = 12;
+const BUILD_FX_SPARK_LIFE_MIN = 0.16;
+const BUILD_FX_SPARK_LIFE_MAX = 0.42;
+const BUILD_FX_SPARK_DRAG = 4.8;
+const BUILD_FX_SPARK_GRAVITY = 7.5;
+const BUILD_FX_SPARK_VERTICAL_BOOST = 2.4;
+
+const BUILD_FX_TELEPORT_VERTEX_SHADER = `
+  varying vec3 vLocalPos;
+  varying vec3 vWorldPos;
+  varying vec3 vWorldNormal;
+
+  void main() {
+    vLocalPos = position;
+    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+    vWorldPos = worldPos.xyz;
+    vWorldNormal = normalize(mat3(modelMatrix) * normal);
+    gl_Position = projectionMatrix * viewMatrix * worldPos;
+  }
+`;
+
+const BUILD_FX_TELEPORT_FRAGMENT_SHADER = `
+  uniform vec3 uColorA;
+  uniform vec3 uColorB;
+  uniform vec3 uEdgeColor;
+  uniform float uOpacity;
+  uniform float uTime;
+  uniform float uProgress;
+
+  varying vec3 vLocalPos;
+  varying vec3 vWorldPos;
+  varying vec3 vWorldNormal;
+
+  float hash31(vec3 p) {
+    return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
+  }
+
+  void main() {
+    float heightMask = clamp(vLocalPos.y + 0.5, 0.0, 1.0);
+    float radial = length(vLocalPos.xz);
+    float shellMask = smoothstep(1.0, 0.55, radial);
+    float sweepMask = smoothstep(uProgress - 0.28, uProgress + 0.04, heightMask);
+    float fadeOutMask = 1.0 - smoothstep(0.72, 1.0, uProgress);
+    float flowBand = 0.5 + (0.5 * sin((heightMask * 20.0) - (uTime * 12.0) + (radial * 12.0)));
+    float sparkleNoise = hash31(floor(vWorldPos * 8.0) + vec3(floor(uTime * 10.0)));
+    float sparkle = step(0.92, sparkleNoise);
+    float fresnel = pow(
+      1.0 - max(0.0, dot(normalize(vWorldNormal), normalize(cameraPosition - vWorldPos))),
+      1.8
+    );
+
+    vec3 baseColor = mix(uColorA, uColorB, heightMask);
+    vec3 edgeGlow = uEdgeColor * (fresnel * 0.7 + sparkle * 0.65 + (1.0 - shellMask) * 0.25);
+    vec3 finalColor = baseColor * (0.75 + (flowBand * 0.35)) + edgeGlow;
+    float alpha = uOpacity * shellMask * sweepMask * fadeOutMask * (0.68 + (flowBand * 0.32));
+    if (alpha <= 0.001) {
+      discard;
+    }
+    gl_FragColor = vec4(finalColor, alpha);
+  }
+`;
 
 export function createTowerSystem({
   scene,
@@ -198,6 +279,19 @@ export function createTowerSystem({
   });
   slowFieldMaterial.toneMapped = false;
 
+  const buildFxTeleportColumnGeometry = new THREE.CylinderGeometry(1, 1, 1, 22, 1, true);
+  const buildFxRingInnerRadius = Math.max(0.01, 1 - BUILD_FX_RING_THICKNESS);
+  const buildFxRingGeometry = new THREE.RingGeometry(buildFxRingInnerRadius, 1, 42);
+  const buildFxSparkGeometry = new THREE.BoxGeometry(1, 1, 1);
+  const buildFxSparkBaseMaterial = new THREE.MeshBasicMaterial({
+    color: BUILD_FX_TELEPORT_EDGE_COLOR,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  buildFxSparkBaseMaterial.toneMapped = false;
+
   const tempVecA = new THREE.Vector3();
   const tempVecB = new THREE.Vector3();
   const tempVecC = new THREE.Vector3();
@@ -213,6 +307,7 @@ export function createTowerSystem({
   const impactEffects = [];
   const aoePulseEffects = [];
   const slowFieldEffects = [];
+  const activeBuildEffects = [];
 
   const towerSpecs = {
     laser: {
@@ -1147,9 +1242,320 @@ export function createTowerSystem({
       aoeChargeColor: new THREE.Color(AOE_TOWER_CONFIG.chargeColor),
       aoeEmissiveIdle: new THREE.Color(AOE_TOWER_CONFIG.emissiveIdle),
       aoeEmissiveCharge: new THREE.Color(AOE_TOWER_CONFIG.emissiveCharge),
+      isOperational: true,
+      buildFxState: null,
     };
 
     return entry;
+  }
+
+  function easeOutCubic(t) {
+    const clamped = THREE.MathUtils.clamp(t, 0, 1);
+    const inv = 1 - clamped;
+    return 1 - (inv * inv * inv);
+  }
+
+  function collectTowerBuildMaterialStates(towerMesh) {
+    const states = [];
+    if (!towerMesh) {
+      return states;
+    }
+
+    const seen = new Set();
+    towerMesh.traverse((child) => {
+      if (!child || !child.material) {
+        return;
+      }
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (!material || seen.has(material)) {
+          continue;
+        }
+        seen.add(material);
+        states.push({
+          material,
+          transparent: material.transparent,
+          opacity: typeof material.opacity === "number" ? material.opacity : 1,
+          depthWrite: material.depthWrite,
+        });
+
+        material.transparent = true;
+        if ("depthWrite" in material) {
+          material.depthWrite = false;
+        }
+        material.opacity = (typeof material.opacity === "number" ? material.opacity : 1) * BUILD_FX_START_OPACITY;
+        material.needsUpdate = true;
+      }
+    });
+
+    return states;
+  }
+
+  function setTowerBuildMaterialOpacity(materialStates, progress) {
+    const clampedProgress = THREE.MathUtils.clamp(progress, 0, 1);
+    const alphaFactor = THREE.MathUtils.lerp(BUILD_FX_START_OPACITY, 1, clampedProgress);
+    for (const state of materialStates) {
+      if (!state?.material) {
+        continue;
+      }
+      state.material.opacity = state.opacity * alphaFactor;
+    }
+  }
+
+  function restoreTowerBuildMaterialStates(materialStates) {
+    for (const state of materialStates) {
+      if (!state?.material) {
+        continue;
+      }
+      state.material.transparent = state.transparent;
+      state.material.opacity = state.opacity;
+      if ("depthWrite" in state.material) {
+        state.material.depthWrite = state.depthWrite;
+      }
+      state.material.needsUpdate = true;
+    }
+  }
+
+  function disposeTowerBuildFxState(buildFxState) {
+    if (!buildFxState) {
+      return;
+    }
+    if (buildFxState.fxRoot) {
+      scene.remove(buildFxState.fxRoot);
+    }
+    if (buildFxState.teleportColumn?.material) {
+      buildFxState.teleportColumn.material.dispose();
+    }
+    if (buildFxState.ringMesh?.material) {
+      buildFxState.ringMesh.material.dispose();
+    }
+    for (const spark of buildFxState.sparks ?? []) {
+      if (spark?.mesh?.material) {
+        spark.mesh.material.dispose();
+      }
+    }
+  }
+
+  function startTowerBuildFx(towerEntry) {
+    if (!towerEntry?.mesh) {
+      return;
+    }
+
+    if (towerEntry.buildFxState) {
+      restoreTowerBuildMaterialStates(towerEntry.buildFxState.materialStates || []);
+      disposeTowerBuildFxState(towerEntry.buildFxState);
+      towerEntry.buildFxState = null;
+    }
+    const existingBuildFxIndex = activeBuildEffects.indexOf(towerEntry);
+    if (existingBuildFxIndex >= 0) {
+      activeBuildEffects.splice(existingBuildFxIndex, 1);
+    }
+
+    if (!BUILD_FX_ENABLED || BUILD_FX_DURATION <= TOWER_CONFIG.segmentEpsilon) {
+      towerEntry.isOperational = true;
+      towerEntry.buildFxState = null;
+      return;
+    }
+
+    towerEntry.isOperational = false;
+
+    const initialScale = towerEntry.mesh.scale.clone();
+    const endY = Number.isFinite(towerEntry.baseY) ? towerEntry.baseY : towerEntry.mesh.position.y;
+    const startY = endY + BUILD_FX_START_Y_OFFSET;
+    towerEntry.mesh.position.y = startY;
+    towerEntry.mesh.scale.set(
+      initialScale.x * BUILD_FX_START_SCALE,
+      initialScale.y * BUILD_FX_START_SCALE,
+      initialScale.z * BUILD_FX_START_SCALE
+    );
+
+    const materialStates = collectTowerBuildMaterialStates(towerEntry.mesh);
+
+    const fxRoot = new THREE.Group();
+    fxRoot.position.set(towerEntry.mesh.position.x, endY, towerEntry.mesh.position.z);
+    scene.add(fxRoot);
+
+    const teleportHeight = Math.max(0.1, gridCellSize * BUILD_FX_TELEPORT_HEIGHT_CELL_SCALE);
+    const teleportRadius = Math.max(0.05, gridCellSize * BUILD_FX_TELEPORT_RADIUS_CELL_SCALE);
+    const teleportUniforms = {
+      uColorA: { value: new THREE.Color(BUILD_FX_TELEPORT_COLOR_A) },
+      uColorB: { value: new THREE.Color(BUILD_FX_TELEPORT_COLOR_B) },
+      uEdgeColor: { value: new THREE.Color(BUILD_FX_TELEPORT_EDGE_COLOR) },
+      uOpacity: { value: BUILD_FX_TELEPORT_OPACITY },
+      uTime: { value: 0 },
+      uProgress: { value: 0 },
+    };
+    const teleportMaterial = new THREE.ShaderMaterial({
+      uniforms: teleportUniforms,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      vertexShader: BUILD_FX_TELEPORT_VERTEX_SHADER,
+      fragmentShader: BUILD_FX_TELEPORT_FRAGMENT_SHADER,
+    });
+    teleportMaterial.toneMapped = false;
+    const teleportColumn = new THREE.Mesh(buildFxTeleportColumnGeometry, teleportMaterial);
+    teleportColumn.position.y = teleportHeight * 0.5;
+    teleportColumn.scale.set(teleportRadius, teleportHeight, teleportRadius);
+    fxRoot.add(teleportColumn);
+
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: BUILD_FX_TELEPORT_EDGE_COLOR,
+      transparent: true,
+      opacity: BUILD_FX_TELEPORT_OPACITY,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    ringMaterial.toneMapped = false;
+    const ringMesh = new THREE.Mesh(buildFxRingGeometry, ringMaterial);
+    ringMesh.rotation.x = -Math.PI * 0.5;
+    ringMesh.position.y = 0.03;
+    ringMesh.scale.setScalar(Math.max(0.1, teleportRadius * 0.36));
+    fxRoot.add(ringMesh);
+
+    const sparks = [];
+    const sparkSizeBase = Math.max(0.02, gridCellSize * 0.05);
+    const sparkSpawnRadius = teleportRadius * 0.88;
+    for (let i = 0; i < BUILD_FX_SPARK_COUNT; i += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const radialDistance = Math.sqrt(Math.random()) * sparkSpawnRadius;
+      const sparkMaterial = buildFxSparkBaseMaterial.clone();
+      const sparkMesh = new THREE.Mesh(buildFxSparkGeometry, sparkMaterial);
+      sparkMesh.position.set(
+        Math.cos(angle) * radialDistance,
+        0.04 + (Math.random() * gridCellSize * 0.24),
+        Math.sin(angle) * radialDistance
+      );
+      const sparkScale = sparkSizeBase * THREE.MathUtils.lerp(0.5, 1.2, Math.random());
+      sparkMesh.scale.setScalar(sparkScale);
+      fxRoot.add(sparkMesh);
+
+      const life = THREE.MathUtils.lerp(BUILD_FX_SPARK_LIFE_MIN, BUILD_FX_SPARK_LIFE_MAX, Math.random());
+      const velocity = new THREE.Vector3(
+        Math.cos(angle) * THREE.MathUtils.lerp(0.3, 1.65, Math.random()),
+        THREE.MathUtils.lerp(1.1, BUILD_FX_SPARK_VERTICAL_BOOST, Math.random()),
+        Math.sin(angle) * THREE.MathUtils.lerp(0.3, 1.65, Math.random())
+      );
+
+      sparks.push({
+        mesh: sparkMesh,
+        velocity,
+        life,
+        maxLife: life,
+        baseOpacity: sparkMaterial.opacity,
+        spin: new THREE.Vector3(
+          THREE.MathUtils.lerp(-11, 11, Math.random()),
+          THREE.MathUtils.lerp(-11, 11, Math.random()),
+          THREE.MathUtils.lerp(-11, 11, Math.random())
+        ),
+      });
+    }
+
+    towerEntry.buildFxState = {
+      elapsed: 0,
+      duration: BUILD_FX_DURATION,
+      startY,
+      endY,
+      initialScale,
+      materialStates,
+      fxRoot,
+      teleportColumn,
+      teleportUniforms,
+      ringMesh,
+      ringScaleMax: Math.max(0.1, teleportRadius * BUILD_FX_RING_MAX_SCALE),
+      sparks,
+    };
+
+    activeBuildEffects.push(towerEntry);
+  }
+
+  function updateTowerBuildEffects(deltaSeconds) {
+    if (activeBuildEffects.length === 0) {
+      return;
+    }
+
+    for (let i = activeBuildEffects.length - 1; i >= 0; i -= 1) {
+      const tower = activeBuildEffects[i];
+      const buildFxState = tower?.buildFxState;
+      if (!tower?.mesh || !buildFxState) {
+        if (tower) {
+          tower.isOperational = true;
+          tower.buildFxState = null;
+        }
+        activeBuildEffects.splice(i, 1);
+        continue;
+      }
+
+      buildFxState.elapsed = Math.min(
+        buildFxState.duration,
+        buildFxState.elapsed + Math.max(0, deltaSeconds)
+      );
+      const progress = buildFxState.duration <= TOWER_CONFIG.segmentEpsilon
+        ? 1
+        : (buildFxState.elapsed / buildFxState.duration);
+      const easedProgress = easeOutCubic(progress);
+
+      tower.mesh.position.y = THREE.MathUtils.lerp(buildFxState.startY, buildFxState.endY, easedProgress);
+      const scaleFactor = THREE.MathUtils.lerp(BUILD_FX_START_SCALE, 1, easedProgress);
+      tower.mesh.scale.set(
+        buildFxState.initialScale.x * scaleFactor,
+        buildFxState.initialScale.y * scaleFactor,
+        buildFxState.initialScale.z * scaleFactor
+      );
+      setTowerBuildMaterialOpacity(buildFxState.materialStates, easedProgress);
+
+      if (buildFxState.teleportUniforms) {
+        buildFxState.teleportUniforms.uTime.value = buildFxState.elapsed;
+        buildFxState.teleportUniforms.uProgress.value = progress;
+        buildFxState.teleportUniforms.uOpacity.value = BUILD_FX_TELEPORT_OPACITY * (1 - (0.18 * progress));
+      }
+
+      if (buildFxState.ringMesh?.material) {
+        const ringScale = THREE.MathUtils.lerp(
+          buildFxState.ringScaleMax * 0.24,
+          buildFxState.ringScaleMax,
+          progress
+        );
+        buildFxState.ringMesh.scale.setScalar(ringScale);
+        buildFxState.ringMesh.material.opacity = BUILD_FX_TELEPORT_OPACITY * (1 - progress);
+      }
+
+      for (let sparkIndex = buildFxState.sparks.length - 1; sparkIndex >= 0; sparkIndex -= 1) {
+        const spark = buildFxState.sparks[sparkIndex];
+        spark.life -= deltaSeconds;
+        if (spark.life <= 0) {
+          if (spark.mesh?.parent) {
+            spark.mesh.parent.remove(spark.mesh);
+          }
+          spark.mesh?.material?.dispose?.();
+          buildFxState.sparks.splice(sparkIndex, 1);
+          continue;
+        }
+
+        const sparkT = Math.max(0, spark.life / spark.maxLife);
+        spark.mesh.position.addScaledVector(spark.velocity, deltaSeconds);
+        spark.velocity.multiplyScalar(Math.max(0, 1 - (BUILD_FX_SPARK_DRAG * deltaSeconds)));
+        spark.velocity.y -= BUILD_FX_SPARK_GRAVITY * deltaSeconds;
+        spark.mesh.material.opacity = spark.baseOpacity * sparkT * (1 - (0.35 * progress));
+        spark.mesh.rotation.x += spark.spin.x * deltaSeconds;
+        spark.mesh.rotation.y += spark.spin.y * deltaSeconds;
+        spark.mesh.rotation.z += spark.spin.z * deltaSeconds;
+      }
+
+      if (progress < 1) {
+        continue;
+      }
+
+      tower.mesh.position.y = buildFxState.endY;
+      tower.mesh.scale.copy(buildFxState.initialScale);
+      restoreTowerBuildMaterialStates(buildFxState.materialStates);
+      disposeTowerBuildFxState(buildFxState);
+      tower.buildFxState = null;
+      tower.isOperational = true;
+      activeBuildEffects.splice(i, 1);
+    }
   }
 
   function placeSelectedTower() {
@@ -1188,6 +1594,7 @@ export function createTowerSystem({
       return false;
     }
     towers.push(towerEntry);
+    startTowerBuildFx(towerEntry);
     notifyBlockedCellsChanged();
     if (!canAffordTower(normalizedType)) {
       cancelPlacement();
@@ -2131,6 +2538,10 @@ export function createTowerSystem({
 
   function updateTowerCombat(deltaSeconds, enemySystem) {
     for (const tower of towers) {
+      if (!tower.isOperational) {
+        clearLaserBeamVisual(tower);
+        continue;
+      }
       if (tower.towerType === "aoe") {
         updateAoeTowerCombat(tower, deltaSeconds, enemySystem);
       } else if (tower.towerType === "slow") {
@@ -2144,6 +2555,7 @@ export function createTowerSystem({
   function update(deltaSeconds, enemySystem) {
     updatePreviewFromCamera();
     updateImpactEffects(deltaSeconds);
+    updateTowerBuildEffects(deltaSeconds);
     updateTowerCombat(deltaSeconds, enemySystem);
     updateAoePulseEffects(deltaSeconds, enemySystem);
     updateSlowFieldEffects(deltaSeconds);
@@ -2257,6 +2669,7 @@ export function createTowerSystem({
         return false;
       }
       towers.push(towerEntry);
+      startTowerBuildFx(towerEntry);
       notifyBlockedCellsChanged();
       return true;
     }

@@ -20,6 +20,32 @@
 - `towerSystem.selectTower(type)` returns `false` if the tower is locked or unaffordable.
 - `towerSystem.placeSelectedTower()` spends cash through `spendMoney` and cancels build mode if post-purchase money is insufficient for another of that type.
 
+### Tower Build Teleport FX (Latest)
+- Newly placed towers now run a teleport/materialization build effect before becoming combat-active.
+- Activation timing contract:
+  - Placement spending is immediate.
+  - Cell blocking/path reroute (`notifyBlockedCellsChanged` -> enemy reroute) is immediate.
+  - Tower attacking is delayed until build FX completes.
+- Build FX runtime lives in `towers.js`:
+  - `activeBuildEffects[]` tracks in-progress tower materialization.
+  - Each tower entry has `isOperational` and `buildFxState`.
+  - `updateTowerBuildEffects(deltaSeconds)` advances tower rise/scale/material fade and teleport visuals.
+- Build FX config lives in `GAME_CONFIG.towers.buildFx`:
+  - `enabled`
+  - `durationSeconds`
+  - `startScale`
+  - `startYOffset`
+  - `startOpacity`
+  - `teleportRadiusCellScale`
+  - `teleportHeightCellScale`
+  - `teleportOpacity`
+  - `teleportColorA`
+  - `teleportColorB`
+  - `teleportEdgeColor`
+  - `ringMaxScale`
+  - `ringThickness`
+- `forcePlaceTower(...)` uses the same build FX/activation timing as normal placement.
+
 ### Tower Footprint Outline (Latest)
 - AOE and Slow tower meshes now include a cube-edge footprint outline sized to the grid build cube (cell-sized), not the inner orb visuals.
 - For current tuning (`grid.cellSize = 4`), `footprintOutlineInset: 0.04` yields outlines that are 98% of the grid cube per axis.

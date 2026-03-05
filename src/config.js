@@ -553,6 +553,23 @@ export const GAME_CONFIG = {
     terrainLosMinHalfSize: 0.2,
     terrainLosVerticalPadding: 0.02,
 
+    // Tower placement teleport/materialization FX.
+    buildFx: {
+      enabled: true,
+      durationSeconds: 0.75,
+      startScale: 0.72,
+      startYOffset: -0.45,
+      startOpacity: 0,
+      teleportRadiusCellScale: 0.44,
+      teleportHeightCellScale: 1.45,
+      teleportOpacity: 0.82,
+      teleportColorA: 0x38cfff,
+      teleportColorB: 0x1f46ff,
+      teleportEdgeColor: 0x92faff,
+      ringMaxScale: 1.85,
+      ringThickness: 0.16,
+    },
+
     types: {
       laser: {
         // Cash required to place one laser tower. Typical range: 150-350.
