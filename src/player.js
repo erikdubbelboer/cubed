@@ -942,9 +942,84 @@ export function createPlayer({
       ? (Array.isArray(getMovementObstacles()) ? getMovementObstacles() : [])
       : [];
 
+    function projectileHitsRampObstacle(position, obstacle, padding) {
+      const obstaclePos = obstacle?.position ?? obstacle?.mesh?.position;
+      const obstacleBaseY = Number(obstacle?.baseY ?? 0);
+      const obstacleHeight = Number(obstacle?.height);
+      const obstacleDirection = obstacle?.direction;
+      const obstacleHalfSizeX = Number(obstacle?.halfSizeX ?? obstacle?.halfSize);
+      const obstacleHalfSizeZ = Number(obstacle?.halfSizeZ ?? obstacle?.halfSize);
+
+      if (
+        !obstaclePos
+        || !Number.isFinite(obstacleBaseY)
+        || !Number.isFinite(obstacleHeight)
+        || obstacleHeight <= 0
+        || !obstacleDirection
+        || !Number.isFinite(obstacleHalfSizeX)
+        || !Number.isFinite(obstacleHalfSizeZ)
+      ) {
+        return false;
+      }
+
+      const dirXRaw = Number(obstacleDirection.x);
+      const dirZRaw = Number(obstacleDirection.z);
+      const dirLength = Math.hypot(dirXRaw, dirZRaw);
+      if (dirLength <= MIN_COLLISION_DISTANCE_SQ) {
+        return false;
+      }
+
+      const dirX = dirXRaw / dirLength;
+      const dirZ = dirZRaw / dirLength;
+      const rightX = -dirZ;
+      const rightZ = dirX;
+      const rampRunsMostlyAlongX = Math.abs(dirX) >= Math.abs(dirZ);
+      const rampAlongHalf = rampRunsMostlyAlongX ? obstacleHalfSizeX : obstacleHalfSizeZ;
+      const rampAcrossHalf = rampRunsMostlyAlongX ? obstacleHalfSizeZ : obstacleHalfSizeX;
+      if (
+        !Number.isFinite(rampAlongHalf)
+        || !Number.isFinite(rampAcrossHalf)
+        || rampAlongHalf <= 0
+        || rampAcrossHalf <= 0
+      ) {
+        return false;
+      }
+
+      const lowCenterX = obstaclePos.x - (dirX * rampAlongHalf * 0.5);
+      const lowCenterZ = obstaclePos.z - (dirZ * rampAlongHalf * 0.5);
+      const deltaX = position.x - lowCenterX;
+      const deltaZ = position.z - lowCenterZ;
+      const along = (deltaX * dirX) + (deltaZ * dirZ);
+      const across = (deltaX * rightX) + (deltaZ * rightZ);
+      const alongMin = -rampAcrossHalf;
+      const alongMax = rampAlongHalf + rampAcrossHalf;
+
+      if (along < (alongMin - padding) || along > (alongMax + padding)) {
+        return false;
+      }
+      if (Math.abs(across) > (rampAcrossHalf + padding)) {
+        return false;
+      }
+
+      const alongT = THREE.MathUtils.clamp(
+        (along - alongMin) / Math.max(1e-6, alongMax - alongMin),
+        0,
+        1
+      );
+      const rampSurfaceY = obstacleBaseY + (obstacleHeight * alongT);
+      return position.y >= (obstacleBaseY - padding) && position.y <= (rampSurfaceY + padding);
+    }
+
     function projectileHitsTower(position) {
       const towerHitPadding = PLAYER_CONFIG.weapon.towerHitPadding;
       for (const obstacle of obstacles) {
+        if (obstacle?.kind === "ramp") {
+          if (projectileHitsRampObstacle(position, obstacle, towerHitPadding)) {
+            return true;
+          }
+          continue;
+        }
+
         const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
         const halfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
           ? Number(obstacle.halfSizeX)

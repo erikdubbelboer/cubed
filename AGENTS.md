@@ -111,6 +111,9 @@
   - Each enemy contact consumes one pierce allowance.
   - When allowance is exhausted, projectile despawns on next enemy hit.
 - Tower/environment collision still immediately despawns the projectile.
+- Ramp environment collision (latest):
+  - Player projectiles must use ramp wedge volume checks (along/across + slope height), not full ramp AABB prism checks.
+  - A projectile on a ramp cell should only collide at/under the local ramp surface (plus padding), so empty space above the low ramp side stays shoot-through.
 - New upgrade: `player_weapon_pierce` adds `+1` pierce via `grants.weaponPierceAdd`.
 
 ### Enemy Offset + Hitbox Alignment (Latest)
