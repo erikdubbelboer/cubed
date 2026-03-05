@@ -114,6 +114,37 @@ const app = document.getElementById("app");
 
 const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
 
+function getViewportMetrics() {
+  const visualViewport = window.visualViewport;
+  const rawWidth = Number.isFinite(Number(visualViewport?.width))
+    ? Number(visualViewport.width)
+    : Number(window.innerWidth);
+  const rawHeight = Number.isFinite(Number(visualViewport?.height))
+    ? Number(visualViewport.height)
+    : Number(window.innerHeight);
+  const width = Math.max(1, Math.floor(rawWidth));
+  const height = Math.max(1, Math.floor(rawHeight));
+  const rawPixelRatio = Number(window.devicePixelRatio);
+  const pixelRatio = clamp(
+    Number.isFinite(rawPixelRatio) ? rawPixelRatio : 1,
+    1,
+    SCENE_CONFIG.maxPixelRatio
+  );
+  return {
+    width,
+    height,
+    pixelRatio,
+    isPortrait: height >= width,
+  };
+}
+
+const initialViewportMetrics = getViewportMetrics();
+let viewportWidth = initialViewportMetrics.width;
+let viewportHeight = initialViewportMetrics.height;
+let viewportPixelRatio = initialViewportMetrics.pixelRatio;
+let viewportIsPortrait = initialViewportMetrics.isPortrait;
+let viewportSyncFrameId = null;
+
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SCENE_CONFIG.backgroundColor);
 scene.fog = new THREE.Fog(
@@ -124,14 +155,14 @@ scene.fog = new THREE.Fog(
 
 const camera = new THREE.PerspectiveCamera(
   SCENE_CONFIG.cameraFov,
-  window.innerWidth / window.innerHeight,
+  viewportWidth / viewportHeight,
   SCENE_CONFIG.cameraNear,
   SCENE_CONFIG.cameraFar
 );
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, SCENE_CONFIG.maxPixelRatio));
+renderer.setSize(viewportWidth, viewportHeight);
+renderer.setPixelRatio(viewportPixelRatio);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.localClippingEnabled = true;
@@ -140,8 +171,8 @@ renderer.autoClear = false;
 app.appendChild(renderer.domElement);
 
 const uiOverlay = createUiOverlay({
-  width: window.innerWidth,
-  height: window.innerHeight,
+  width: viewportWidth,
+  height: viewportHeight,
   maxPixelRatio: SCENE_CONFIG.maxPixelRatio,
   mobileConfig: {
     movePadRadiusPx: UI_CONFIG.movePadRadiusPx,
@@ -424,8 +455,8 @@ document.addEventListener("contextmenu", (event) => {
 });
 
 let isPrimaryDown = false;
-let vCursorX = window.innerWidth / 2;
-let vCursorY = window.innerHeight / 2;
+let vCursorX = viewportWidth / 2;
+let vCursorY = viewportHeight / 2;
 let hoveredUpgradeIndex = -1;
 let currentUpgradeOptions = [];
 let menuAdvancesWaveOnChoice = true;
@@ -993,8 +1024,8 @@ if (!isTouchDevice) {
     if (waveState === "MENU" && player.controls.isLocked) {
       vCursorX += event.movementX;
       vCursorY += event.movementY;
-      vCursorX = Math.max(0, Math.min(window.innerWidth, vCursorX));
-      vCursorY = Math.max(0, Math.min(window.innerHeight, vCursorY));
+      vCursorX = Math.max(0, Math.min(viewportWidth, vCursorX));
+      vCursorY = Math.max(0, Math.min(viewportHeight, vCursorY));
       updateMenuHoverFromVirtualCursor();
     }
   }, true);
@@ -1400,8 +1431,8 @@ function showUpgradeMenu(options = {}) {
 
   player.setMenuMode(true);
   resetMobileInputState();
-  vCursorX = window.innerWidth * 0.5;
-  vCursorY = window.innerHeight * 0.5;
+  vCursorX = viewportWidth * 0.5;
+  vCursorY = viewportHeight * 0.5;
 
   const optionCount = Math.max(1, Math.floor(Number(UI_CONFIG.upgradesShown) || 1));
   const upgradePool = getUpgradePool();
@@ -1509,7 +1540,7 @@ function animate() {
     )
   );
   const showTouchControls = isTouchDevice || forceTouchControls;
-  const touchPortrait = window.innerHeight >= window.innerWidth;
+  const touchPortrait = viewportIsPortrait;
 
   uiOverlay.setState({
     showCrosshair: waveState !== "MENU",
@@ -1657,14 +1688,40 @@ function initGame() {
 
 initGame();
 
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
+function applyViewportMetrics(nextViewportMetrics = getViewportMetrics()) {
+  const previousOrientation = viewportIsPortrait;
+  viewportWidth = Math.max(1, Math.floor(nextViewportMetrics.width));
+  viewportHeight = Math.max(1, Math.floor(nextViewportMetrics.height));
+  viewportPixelRatio = clamp(nextViewportMetrics.pixelRatio, 1, SCENE_CONFIG.maxPixelRatio);
+  viewportIsPortrait = !!nextViewportMetrics.isPortrait;
+
+  camera.aspect = viewportWidth / viewportHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  uiOverlay.resize(window.innerWidth, window.innerHeight);
-  vCursorX = clamp(vCursorX, 0, window.innerWidth);
-  vCursorY = clamp(vCursorY, 0, window.innerHeight);
-  if (isTouchDevice) {
+  renderer.setPixelRatio(viewportPixelRatio);
+  renderer.setSize(viewportWidth, viewportHeight);
+  uiOverlay.resize(viewportWidth, viewportHeight);
+  vCursorX = clamp(vCursorX, 0, viewportWidth);
+  vCursorY = clamp(vCursorY, 0, viewportHeight);
+
+  const didOrientationBucketChange = previousOrientation !== viewportIsPortrait;
+  const touchControlsActive = isTouchDevice || forceTouchControls;
+  if (didOrientationBucketChange && touchControlsActive) {
     resetMobileInputState();
   }
-});
+}
+
+function scheduleViewportSync() {
+  if (viewportSyncFrameId != null) {
+    return;
+  }
+  viewportSyncFrameId = window.requestAnimationFrame(() => {
+    viewportSyncFrameId = null;
+    applyViewportMetrics(getViewportMetrics());
+  });
+}
+
+window.addEventListener("resize", scheduleViewportSync);
+window.addEventListener("orientationchange", scheduleViewportSync);
+if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
+  window.visualViewport.addEventListener("resize", scheduleViewportSync);
+}

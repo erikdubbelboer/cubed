@@ -163,6 +163,16 @@
 - `resetMobileInputState()` must clear move/look pointer ids, pressed buttons, and jump hold on pause/blur/focus transitions.
 - `player.setJumpHeld(bool)` is the mobile-safe jump/jetpack input path; rising edge triggers one jump, hold powers jetpack.
 
+### Viewport Resize Handling (Latest)
+- Viewport sync is centralized in `main.js` via `getViewportMetrics()` + `applyViewportMetrics()` + `scheduleViewportSync()`.
+- Metrics prefer `window.visualViewport.width/height` when available, with fallback to `window.innerWidth/innerHeight`.
+- Resize events are coalesced to one update per animation frame:
+  - `window.resize`
+  - `window.orientationchange`
+  - `window.visualViewport.resize` (when supported)
+- `applyViewportMetrics()` updates camera aspect/projection, renderer size, renderer pixel ratio, UI overlay size, and virtual cursor clamps.
+- Mobile/touch input reset on resize is orientation-bucket based (portrait vs landscape) and only runs when touch controls are active (`isTouchDevice || forceTouchControls`), avoiding resets on minor viewport shifts (e.g. browser chrome show/hide).
+
 ### HUD + Menu Layout Contracts (Latest, Override)
 - Money HUD (top-right) shows only `$amount` now; the `"Cash"` label was removed and the panel is sized tighter.
 - Wave counter HUD now renders as a compact `Wave N` panel directly below the top-right money panel.
