@@ -344,6 +344,7 @@ export function createTowerSystem({
   let previewPosition = null;
   let previewCell = null;
   let previewPathBlockCache = null;
+  let suppressPreviewUntilCellChange = null;
 
   const reservedCellKeys = new Set(
     spawnCells.map((cell) => `${cell.x},${cell.z}`)
@@ -458,6 +459,14 @@ export function createTowerSystem({
 
   function clearPreviewPathBlockCache() {
     previewPathBlockCache = null;
+  }
+
+  function setPreviewSuppressedCell(cellX, cellZ) {
+    if (!Number.isInteger(cellX) || !Number.isInteger(cellZ)) {
+      suppressPreviewUntilCellChange = null;
+      return;
+    }
+    suppressPreviewUntilCellChange = { x: cellX, z: cellZ };
   }
 
   function getCurrentBlockedRevision() {
@@ -1187,6 +1196,7 @@ export function createTowerSystem({
     setPathRangeHighlightValidityVisual(false);
     hidePathRangeHighlights();
     clearPreviewPathBlockCache();
+    setPreviewSuppressedCell(null, null);
     previewValid = false;
     previewPosition = null;
     previewCell = null;
@@ -1199,6 +1209,7 @@ export function createTowerSystem({
     preview.visible = false;
     hidePathRangeHighlights();
     clearPreviewPathBlockCache();
+    setPreviewSuppressedCell(null, null);
     previewValid = false;
     previewPosition = null;
     previewCell = null;
@@ -1242,6 +1253,20 @@ export function createTowerSystem({
       previewPosition = null;
       previewCell = null;
       return;
+    }
+    if (suppressPreviewUntilCellChange) {
+      if (
+        suppressPreviewUntilCellChange.x === targetCell.x
+        && suppressPreviewUntilCellChange.z === targetCell.z
+      ) {
+        preview.visible = false;
+        hidePathRangeHighlights();
+        previewValid = false;
+        previewPosition = null;
+        previewCell = null;
+        return;
+      }
+      setPreviewSuppressedCell(null, null);
     }
 
     const center = typeof grid.cellToWorldCenter === "function"
@@ -1642,6 +1667,13 @@ export function createTowerSystem({
     notifyBlockedCellsChanged();
     if (!canAffordTower(normalizedType)) {
       cancelPlacement();
+    } else if (previewCell) {
+      setPreviewSuppressedCell(previewCell.x, previewCell.z);
+      preview.visible = false;
+      hidePathRangeHighlights();
+      previewValid = false;
+      previewPosition = null;
+      previewCell = null;
     }
     return true;
   }

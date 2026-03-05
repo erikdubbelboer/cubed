@@ -44,6 +44,9 @@
   - `teleportEdgeColor`
   - `ringMaxScale`
   - `ringThickness`
+- Build-mode ghost suppression after placement:
+  - After a successful tower placement (when build mode remains active), the preview ghost is hidden while aiming at that same placed cell.
+  - The ghost reappears only after the aim snaps to a different grid cell.
 - `forcePlaceTower(...)` uses the same build FX/activation timing as normal placement.
 
 ### Tower Footprint Outline (Latest)
