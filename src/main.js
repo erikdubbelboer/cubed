@@ -49,66 +49,13 @@ const BUILD_PREVIEW_TRAIL_COLORS = [
   0x96f1b0,
   0xff98a4,
 ];
-const BUILD_PREVIEW_TRAIL_OPACITY = 0.7;
-const BUILD_PREVIEW_TRAIL_SPEED_MIN = 2.2;
-const BUILD_PREVIEW_TRAIL_SPEED_MAX = 4.6;
-const BUILD_PREVIEW_VOXEL_COUNT_MIN = 24;
-const BUILD_PREVIEW_VOXEL_COUNT_MAX = 64;
-const BUILD_PREVIEW_VOXEL_SIZE_MIN = 0.1;
-const BUILD_PREVIEW_VOXEL_SIZE_MAX = 0.24;
-const BUILD_PREVIEW_VOXEL_LATERAL_JITTER = 0.46;
-const BUILD_PREVIEW_VOXEL_VERTICAL_JITTER = 0.2;
-const BUILD_PREVIEW_VOXEL_FADE_DISTANCE = 1.45;
-const BUILD_PREVIEW_BURST_DURATION_MIN = 0.35;
-const BUILD_PREVIEW_BURST_DURATION_MAX = 0.85;
-const BUILD_PREVIEW_BURST_GAP_MIN = 1.6;
-const BUILD_PREVIEW_BURST_GAP_MAX = 3.3;
-const BUILD_PREVIEW_BURST_SPAWN_STAGGER_MAX = 0.75;
-const BUILD_PREVIEW_BURST_SPAWN_FRACTION = 0.58;
+const BUILD_PREVIEW_ARROW_OPACITY = 0.78;
+const BUILD_PREVIEW_ARROW_SPACING_BLOCKS = 2;
+const BUILD_PREVIEW_ARROW_SPEED_BLOCKS_PER_SECOND = 1.275;
+const BUILD_PREVIEW_ARROW_LENGTH_FROM_CELL = 0.24;
+const BUILD_PREVIEW_ARROW_RADIUS_FROM_CELL = 0.07;
+const BUILD_PREVIEW_ARROW_VERTICAL_JITTER = 0.06;
 const FPS_SAMPLE_WINDOW_SECONDS = 0.35;
-const BUILD_PREVIEW_VOXEL_VERTEX_SHADER = `
-varying vec3 vLocalPos;
-varying vec3 vWorldPos;
-varying vec3 vWorldNormal;
-
-void main() {
-  vLocalPos = position;
-  vec4 worldPos = modelMatrix * vec4(position, 1.0);
-  vWorldPos = worldPos.xyz;
-  vWorldNormal = normalize(mat3(modelMatrix) * normal);
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}
-`;
-const BUILD_PREVIEW_VOXEL_FRAGMENT_SHADER = `
-uniform vec3 uColor;
-uniform float uOpacity;
-uniform float uTime;
-varying vec3 vLocalPos;
-varying vec3 vWorldPos;
-varying vec3 vWorldNormal;
-
-float hash31(vec3 p) {
-  return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
-}
-
-void main() {
-  float edgeDist = max(max(abs(vLocalPos.x), abs(vLocalPos.y)), abs(vLocalPos.z));
-  float edge = smoothstep(0.3, 0.49, edgeDist);
-
-  float timeCell = floor(uTime * 12.0);
-  float sparkleNoise = hash31(floor(vWorldPos * 11.0) + vec3(timeCell));
-  float sparkle = step(0.965, sparkleNoise);
-
-  float flowBand = 0.82 + (0.18 * sin((vWorldPos.x + vWorldPos.z) * 6.2 + uTime * 8.8));
-  float viewFresnel = pow(1.0 - max(0.0, dot(normalize(vWorldNormal), normalize(cameraPosition - vWorldPos))), 2.0);
-
-  vec3 baseColor = uColor * (0.7 + flowBand * 0.45);
-  vec3 edgeColor = vec3(0.8, 0.95, 1.0) * (edge * 0.45 + viewFresnel * 0.4 + sparkle * 0.7);
-  vec3 finalColor = baseColor + edgeColor;
-  float alpha = uOpacity * clamp(0.62 + edge * 0.38 + sparkle * 0.16, 0.0, 1.0);
-  gl_FragColor = vec4(finalColor, alpha);
-}
-`;
 
 const app = document.getElementById("app");
 
@@ -237,7 +184,9 @@ const buildPhasePathPreviewGroup = new THREE.Group();
 buildPhasePathPreviewGroup.visible = false;
 buildPhasePathPreviewGroup.name = "BuildPathPreviewGroup";
 scene.add(buildPhasePathPreviewGroup);
-const buildPhasePathPreviewParticleGeometry = new THREE.BoxGeometry(1, 1, 1);
+const buildPhasePathPreviewArrowGeometry = new THREE.ConeGeometry(1, 1, 4);
+buildPhasePathPreviewArrowGeometry.rotateX(Math.PI * 0.5);
+const buildPhasePathPreviewArrowForwardAxis = new THREE.Vector3(0, 0, 1);
 const buildPhasePathPreviewTrails = [];
 
 let player;
@@ -780,21 +729,11 @@ function sampleBuildPhasePreviewRoutePoint(route, distanceAlongRoute, out) {
 const buildPreviewTempHead = new THREE.Vector3();
 const buildPreviewTempTail = new THREE.Vector3();
 const buildPreviewTempDir = new THREE.Vector3();
-const buildPreviewTempRight = new THREE.Vector3();
-const buildPreviewTempCenter = new THREE.Vector3();
+const buildPreviewTempQuaternion = new THREE.Quaternion();
 
 function updateBuildPhasePreviewTrail(trail, deltaSeconds) {
-  if (!trail || !trail.route || !trail.material || !Array.isArray(trail.particles)) {
+  if (!trail || !trail.route || !Array.isArray(trail.arrows)) {
     return;
-  }
-
-  trail.time += deltaSeconds;
-  const shaderUniforms = trail.material.uniforms;
-  if (shaderUniforms?.uTime) {
-    shaderUniforms.uTime.value = trail.time;
-  }
-  if (shaderUniforms?.uOpacity) {
-    shaderUniforms.uOpacity.value = BUILD_PREVIEW_TRAIL_OPACITY;
   }
 
   const routeLength = Number(trail.route.totalLength) || 0;
@@ -802,55 +741,24 @@ function updateBuildPhasePreviewTrail(trail, deltaSeconds) {
     return;
   }
 
-  trail.burstTimer -= deltaSeconds;
-  if (trail.burstActive) {
-    if (trail.burstTimer <= 0) {
-      trail.burstActive = false;
-      trail.burstTimer = randomBetween(BUILD_PREVIEW_BURST_GAP_MIN, BUILD_PREVIEW_BURST_GAP_MAX);
-    }
-  } else if (trail.burstTimer <= 0) {
-    trail.burstActive = true;
-    trail.burstTimer = randomBetween(BUILD_PREVIEW_BURST_DURATION_MIN, BUILD_PREVIEW_BURST_DURATION_MAX);
-    trail.burstId += 1;
-    for (const particle of trail.particles) {
-      particle.spawnDelay = randomBetween(0, BUILD_PREVIEW_BURST_SPAWN_STAGGER_MAX);
-      particle.spawnThisBurst = Math.random() < BUILD_PREVIEW_BURST_SPAWN_FRACTION;
-      particle.lastBurstSpawnId = -1;
-    }
-  }
-
-  for (const particle of trail.particles) {
-    if (!particle?.mesh) {
+  const maxDistance = routeLength + trail.spacing;
+  for (const arrow of trail.arrows) {
+    if (!arrow?.mesh) {
       continue;
     }
 
-    if (!particle.active) {
-      particle.mesh.visible = false;
-      if (!trail.burstActive || !particle.spawnThisBurst) {
-        continue;
-      }
-      if (particle.lastBurstSpawnId === trail.burstId) {
-        continue;
-      }
-      particle.spawnDelay -= deltaSeconds;
-      if (particle.spawnDelay > 0) {
-        continue;
-      }
-      particle.active = true;
-      particle.lastBurstSpawnId = trail.burstId;
-      particle.progressDistance = randomBetween(-BUILD_PREVIEW_VOXEL_FADE_DISTANCE, 0);
-      particle.speed = randomBetween(BUILD_PREVIEW_TRAIL_SPEED_MIN, BUILD_PREVIEW_TRAIL_SPEED_MAX);
+    arrow.distance += trail.speed * deltaSeconds;
+    while (arrow.distance > maxDistance) {
+      arrow.distance -= maxDistance;
     }
 
-    particle.progressDistance += particle.speed * deltaSeconds;
-    if (particle.progressDistance > routeLength + BUILD_PREVIEW_VOXEL_FADE_DISTANCE) {
-      particle.active = false;
-      particle.mesh.visible = false;
+    if (arrow.distance < 0 || arrow.distance > routeLength) {
+      arrow.mesh.visible = false;
       continue;
     }
 
-    sampleBuildPhasePreviewRoutePoint(trail.route, particle.progressDistance, buildPreviewTempHead);
-    sampleBuildPhasePreviewRoutePoint(trail.route, particle.progressDistance + 0.2, buildPreviewTempTail);
+    sampleBuildPhasePreviewRoutePoint(trail.route, arrow.distance, buildPreviewTempHead);
+    sampleBuildPhasePreviewRoutePoint(trail.route, arrow.distance + trail.lookAheadDistance, buildPreviewTempTail);
 
     buildPreviewTempDir.copy(buildPreviewTempTail).sub(buildPreviewTempHead);
     buildPreviewTempDir.y = 0;
@@ -858,28 +766,13 @@ function updateBuildPhasePreviewTrail(trail, deltaSeconds) {
       buildPreviewTempDir.set(0, 0, 1);
     }
     buildPreviewTempDir.normalize();
+    buildPreviewTempQuaternion.setFromUnitVectors(buildPhasePathPreviewArrowForwardAxis, buildPreviewTempDir);
 
-    buildPreviewTempRight.set(-buildPreviewTempDir.z, 0, buildPreviewTempDir.x);
-    buildPreviewTempCenter.copy(buildPreviewTempHead)
-      .addScaledVector(buildPreviewTempRight, particle.lateralOffset);
-    buildPreviewTempCenter.y += particle.verticalOffset;
-
-    const fadeIn = clamp(particle.progressDistance / BUILD_PREVIEW_VOXEL_FADE_DISTANCE, 0, 1);
-    const fadeOut = clamp((routeLength - particle.progressDistance) / BUILD_PREVIEW_VOXEL_FADE_DISTANCE, 0, 1);
-    const life = Math.min(fadeIn, fadeOut);
-    if (life <= 0.01) {
-      particle.active = false;
-      particle.mesh.visible = false;
-      continue;
-    }
-
-    particle.mesh.visible = true;
-    particle.mesh.position.copy(buildPreviewTempCenter);
-    const pulse = 0.9 + (Math.sin((trail.time * 7.8) + particle.phase) * 0.1);
-    const voxelScale = particle.baseSize * pulse * life;
-    particle.mesh.scale.set(voxelScale, voxelScale, voxelScale);
+    arrow.mesh.visible = true;
+    arrow.mesh.position.copy(buildPreviewTempHead);
+    arrow.mesh.position.y += arrow.verticalOffset;
+    arrow.mesh.quaternion.copy(buildPreviewTempQuaternion);
   }
-
 }
 
 function syncBuildPhasePathPreviewVisibility() {
@@ -888,12 +781,114 @@ function syncBuildPhasePathPreviewVisibility() {
 
 function rebuildBuildPhasePathPreview() {
   clearBuildPhasePathPreview();
-  // Route preview visuals intentionally disabled.
+  if (!enemySystem || typeof enemySystem.getRoutePreviewPaths !== "function") {
+    syncBuildPhasePathPreviewVisibility();
+    return;
+  }
+
+  const previewRoutes = enemySystem.getRoutePreviewPaths();
+  if (!Array.isArray(previewRoutes) || previewRoutes.length === 0) {
+    syncBuildPhasePathPreviewVisibility();
+    return;
+  }
+
+  const bestRouteBySpawn = new Map();
+  for (const route of previewRoutes) {
+    const spawnIndex = Number.isFinite(Number(route?.spawnIndex))
+      ? Number(route.spawnIndex)
+      : 0;
+    const routeIndex = Number.isFinite(Number(route?.routeIndex))
+      ? Number(route.routeIndex)
+      : Number.POSITIVE_INFINITY;
+    const existing = bestRouteBySpawn.get(spawnIndex);
+    if (!existing || routeIndex < existing.routeIndex) {
+      bestRouteBySpawn.set(spawnIndex, { route, routeIndex });
+    }
+  }
+
+  const sortedBestRoutes = Array.from(bestRouteBySpawn.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map((entry) => entry[1].route);
+
+  const cellSize = Math.max(0.1, Number(grid.cellSize) || 1);
+  const arrowSpacing = Math.max(0.4, cellSize * BUILD_PREVIEW_ARROW_SPACING_BLOCKS);
+  const arrowLength = Math.max(0.18, cellSize * BUILD_PREVIEW_ARROW_LENGTH_FROM_CELL);
+  const arrowRadius = Math.max(0.04, cellSize * BUILD_PREVIEW_ARROW_RADIUS_FROM_CELL);
+  const arrowSpeed = Math.max(0.2, cellSize * BUILD_PREVIEW_ARROW_SPEED_BLOCKS_PER_SECOND);
+  const lookAheadDistance = Math.max(0.12, arrowLength * 0.8);
+
+  for (const route of sortedBestRoutes) {
+    const routeCells = Array.isArray(route?.cells) ? route.cells : [];
+    if (routeCells.length < 2) {
+      continue;
+    }
+    const routeData = createBuildPhasePreviewRoute(routeCells);
+    if (!routeData) {
+      continue;
+    }
+
+    const spawnIndex = Number.isFinite(Number(route?.spawnIndex))
+      ? Number(route.spawnIndex)
+      : 0;
+    const colorHex = BUILD_PREVIEW_TRAIL_COLORS[
+      ((Math.floor(spawnIndex) % BUILD_PREVIEW_TRAIL_COLORS.length) + BUILD_PREVIEW_TRAIL_COLORS.length)
+      % BUILD_PREVIEW_TRAIL_COLORS.length
+    ];
+
+    const material = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      transparent: true,
+      opacity: BUILD_PREVIEW_ARROW_OPACITY,
+      depthWrite: false,
+    });
+    material.toneMapped = false;
+
+    const routeRoot = new THREE.Group();
+    const arrowCount = Math.max(1, Math.floor(routeData.totalLength / arrowSpacing) + 1);
+    const arrows = [];
+    for (let i = 0; i < arrowCount; i += 1) {
+      const arrowMesh = new THREE.Mesh(buildPhasePathPreviewArrowGeometry, material);
+      arrowMesh.castShadow = false;
+      arrowMesh.receiveShadow = false;
+      arrowMesh.frustumCulled = false;
+      arrowMesh.visible = false;
+      arrowMesh.scale.set(arrowRadius, arrowRadius, arrowLength);
+      routeRoot.add(arrowMesh);
+
+      arrows.push({
+        mesh: arrowMesh,
+        distance: i * arrowSpacing,
+        verticalOffset: randomBetween(
+          -cellSize * BUILD_PREVIEW_ARROW_VERTICAL_JITTER,
+          cellSize * BUILD_PREVIEW_ARROW_VERTICAL_JITTER
+        ),
+      });
+    }
+
+    const trail = {
+      root: routeRoot,
+      material,
+      route: routeData,
+      arrows,
+      spacing: arrowSpacing,
+      speed: arrowSpeed,
+      lookAheadDistance,
+    };
+    updateBuildPhasePreviewTrail(trail, 0);
+    buildPhasePathPreviewGroup.add(routeRoot);
+    buildPhasePathPreviewTrails.push(trail);
+  }
+
   syncBuildPhasePathPreviewVisibility();
 }
 
-function updateBuildPhasePathPreview() {
-  // Route preview visuals intentionally disabled.
+function updateBuildPhasePathPreview(deltaSeconds) {
+  if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0 || buildPhasePathPreviewTrails.length === 0) {
+    return;
+  }
+  for (const trail of buildPhasePathPreviewTrails) {
+    updateBuildPhasePreviewTrail(trail, deltaSeconds);
+  }
 }
 
 function resetMobileInputState() {

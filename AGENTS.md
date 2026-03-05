@@ -281,8 +281,12 @@
 - Reroute mode decision:
   - Active enemies reroute immediately after each blocker change (mid-run, no waiting for next cell).
 - Build-phase path preview contract:
-  - Route preview visuals are currently disabled by request (no lines/cubes/ghosts rendered during build phase).
-  - `rebuildBuildPhasePathPreview()` and `updateBuildPhasePathPreview()` are intentionally no-op style hooks for future re-enabling.
+  - Route preview visuals render only during `BUILD` as small moving arrow meshes.
+  - Preview uses only the single most optimal route per spawn (`routeIndex === 0` from `enemySystem.getRoutePreviewPaths()`).
+  - Arrows are spaced by roughly two grid blocks and move start->end at higher speed (1.5x faster than previous arrow tune).
+  - Arrows are pre-distributed across each route when build phase starts (no warmup from spawn point only).
+  - Arrow height is around enemy cube center height (`enemyPathYOffset + bodyYOffset + size/2`) with slight per-arrow vertical jitter.
+  - Preview refreshes when entering build phase and after tower blocker changes during build.
 - Level containment:
   - Player movement is clamped to level bounds in `player.js` via `movementBounds`.
   - This acts as an infinite-height invisible wall in X/Z (jetpack cannot bypass map bounds).
