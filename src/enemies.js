@@ -29,6 +29,9 @@ const ROUTE_CANDIDATE_POOL_SIZE = Math.max(
   Math.floor(Number(ENEMY_CONFIG.pathCandidatePoolSize) || 24)
 );
 const ROUTE_OVERLAP_PENALTY = Math.max(0, Number(ENEMY_CONFIG.pathOverlapPenalty) || 0.45);
+const RAMP_ROLE_LOW = "low";
+const RAMP_ROLE_HIGH = "high";
+const ENEMY_SURFACE_HOVER_HEIGHT = Math.max(0, Number(ENEMY_CONFIG.hoverHeight) || 0);
 
 function getDirectionOnPlane(from, to) {
   const direction = to.clone().sub(from);
@@ -176,6 +179,10 @@ export function createEnemySystem(scene, grid, options = {}) {
   const tempCollisionCenterA = new THREE.Vector3();
   const tempLocalPointA = new THREE.Vector3();
   const tempQuatA = new THREE.Quaternion();
+  const tempSegmentStart = new THREE.Vector3();
+  const tempSegmentEnd = new THREE.Vector3();
+  const tempFrontRampContact = new THREE.Vector3();
+  const tempBackRampContact = new THREE.Vector3();
 
   const endCellSurfaceY = typeof grid?.getCellSurfaceY === "function"
     ? grid.getCellSurfaceY(endCell.x, endCell.z)
@@ -210,6 +217,51 @@ export function createEnemySystem(scene, grid, options = {}) {
     return 0;
   }
 
+  function getSurfaceYAtWorld(worldX, worldZ) {
+    if (typeof grid?.getBuildSurfaceYAtWorld === "function") {
+      const surfaceY = Number(grid.getBuildSurfaceYAtWorld(worldX, worldZ));
+      if (Number.isFinite(surfaceY)) {
+        return surfaceY;
+      }
+    }
+    if (typeof grid?.worldToCell === "function") {
+      const cell = grid.worldToCell(worldX, worldZ);
+      if (cell && isCellInsideLevel(cell.x, cell.z)) {
+        return getCellSurfaceY(cell.x, cell.z);
+      }
+    }
+    return 0;
+  }
+
+  function isRampAtWorld(worldX, worldZ) {
+    if (typeof grid?.worldToCell !== "function") {
+      return false;
+    }
+    const cell = grid.worldToCell(worldX, worldZ);
+    if (!cell || !isCellInsideLevel(cell.x, cell.z)) {
+      return false;
+    }
+    if (typeof grid?.isRampCell === "function") {
+      return !!grid.isRampCell(cell.x, cell.z);
+    }
+    return !!getRampCellData(cell.x, cell.z);
+  }
+
+  function getRampCellData(cellX, cellZ) {
+    if (typeof grid?.getRampCellData !== "function") {
+      return null;
+    }
+    const rampCellData = grid.getRampCellData(cellX, cellZ);
+    if (!rampCellData || typeof rampCellData !== "object") {
+      return null;
+    }
+    return rampCellData;
+  }
+
+  function areCellsEqual(a, b) {
+    return !!a && !!b && a.x === b.x && a.z === b.z;
+  }
+
   function getEnemyCenterForCell(cellX, cellZ, out = new THREE.Vector3()) {
     const surfaceY = getCellSurfaceY(cellX, cellZ);
     if (typeof grid?.cellToWorldCenter === "function") {
@@ -236,6 +288,8 @@ export function createEnemySystem(scene, grid, options = {}) {
       return neighbors;
     }
 
+    const currentCell = { x: cellX, z: cellZ };
+    const currentRampCell = getRampCellData(cellX, cellZ);
     const offsets = [
       [1, 0],
       [-1, 0],
@@ -259,9 +313,48 @@ export function createEnemySystem(scene, grid, options = {}) {
       }
 
       const neighborHeight = getCellHeight(nx, nz);
-      if (!Number.isFinite(neighborHeight) || neighborHeight !== currentHeight) {
+      if (!Number.isFinite(neighborHeight)) {
         continue;
       }
+
+      const nextCell = { x: nx, z: nz };
+      const nextRampCell = getRampCellData(nx, nz);
+      let isValidNeighbor = false;
+
+      if (currentRampCell) {
+        if (currentRampCell.role === RAMP_ROLE_LOW) {
+          const toHighRampCell = areCellsEqual(nextCell, currentRampCell.highCell)
+            && neighborHeight === currentRampCell.highLevel;
+          const toLowOuterCell = areCellsEqual(nextCell, currentRampCell.lowOuterCell)
+            && neighborHeight === currentRampCell.lowLevel;
+          isValidNeighbor = toHighRampCell || toLowOuterCell;
+        } else if (currentRampCell.role === RAMP_ROLE_HIGH) {
+          const toLowRampCell = areCellsEqual(nextCell, currentRampCell.lowCell)
+            && neighborHeight === currentRampCell.lowLevel;
+          const toHighOuterCell = areCellsEqual(nextCell, currentRampCell.highOuterCell)
+            && neighborHeight === currentRampCell.highLevel;
+          isValidNeighbor = toLowRampCell || toHighOuterCell;
+        }
+      } else if (nextRampCell) {
+        if (nextRampCell.role === RAMP_ROLE_LOW) {
+          const fromLowEntry = areCellsEqual(currentCell, nextRampCell.lowOuterCell)
+            && currentHeight === nextRampCell.lowLevel
+            && neighborHeight === nextRampCell.lowLevel;
+          isValidNeighbor = fromLowEntry;
+        } else if (nextRampCell.role === RAMP_ROLE_HIGH) {
+          const fromHighEntry = areCellsEqual(currentCell, nextRampCell.highOuterCell)
+            && currentHeight === nextRampCell.highLevel
+            && neighborHeight === nextRampCell.highLevel;
+          isValidNeighbor = fromHighEntry;
+        }
+      } else {
+        isValidNeighbor = neighborHeight === currentHeight;
+      }
+
+      if (!isValidNeighbor) {
+        continue;
+      }
+
       if (isBlocked(nx, nz, extraBlockedSet) && nextKey !== endCellKey) {
         continue;
       }
@@ -550,6 +643,75 @@ export function createEnemySystem(scene, grid, options = {}) {
     }
   }
 
+  function applyEnemyOrientation(enemy) {
+    if (!enemy?.mesh) {
+      return;
+    }
+
+    if (enemy.pathForward.lengthSq() >= ENEMY_CONFIG.directionEpsilon) {
+      tempLookTarget.copy(enemy.mesh.position).add(enemy.pathForward);
+      tempLookTarget.y = enemy.mesh.position.y;
+      enemy.mesh.lookAt(tempLookTarget);
+    }
+
+    if (!enemy.visualRoot) {
+      return;
+    }
+
+    const bodyHalfSize = Number(enemy.mesh.userData?.bodyHalfSize);
+    const pathForwardLengthSq = enemy.pathForward?.lengthSq?.() ?? 0;
+    if (!Number.isFinite(bodyHalfSize) || bodyHalfSize <= 0 || pathForwardLengthSq < ENEMY_CONFIG.directionEpsilon) {
+      enemy.pathSlopePitch = 0;
+      enemy.visualRoot.rotation.x = 0;
+      enemy.visualRoot.position.y = ENEMY_SURFACE_HOVER_HEIGHT;
+      return;
+    }
+
+    const scaleY = Math.max(0.001, Math.abs(enemy.visualRoot.scale?.y ?? 1));
+    const scaleZ = Math.max(0.001, Math.abs(enemy.visualRoot.scale?.z ?? 1));
+    const halfHeight = bodyHalfSize * scaleY;
+    const halfDepth = bodyHalfSize * scaleZ;
+    if (halfDepth <= ENEMY_CONFIG.directionEpsilon) {
+      enemy.pathSlopePitch = 0;
+      enemy.visualRoot.rotation.x = 0;
+      enemy.visualRoot.position.y = ENEMY_SURFACE_HOVER_HEIGHT;
+      return;
+    }
+
+    tempFrontRampContact.copy(enemy.pathCenter).addScaledVector(enemy.pathForward, halfDepth);
+    tempBackRampContact.copy(enemy.pathCenter).addScaledVector(enemy.pathForward, -halfDepth);
+
+    const centerSurfaceY = getSurfaceYAtWorld(enemy.pathCenter.x, enemy.pathCenter.z);
+    const frontSurfaceY = getSurfaceYAtWorld(tempFrontRampContact.x, tempFrontRampContact.z);
+    const backSurfaceY = getSurfaceYAtWorld(tempBackRampContact.x, tempBackRampContact.z);
+    const frontOnRamp = isRampAtWorld(tempFrontRampContact.x, tempFrontRampContact.z);
+    const backOnRamp = isRampAtWorld(tempBackRampContact.x, tempBackRampContact.z);
+    const hasRampContact = frontOnRamp || backOnRamp;
+
+    let visualPitch = 0;
+    if (hasRampContact) {
+      const desiredSurfaceDelta = frontSurfaceY - backSurfaceY;
+      const clampedSinPitch = THREE.MathUtils.clamp(
+        desiredSurfaceDelta / (halfDepth * 2),
+        -1,
+        1
+      );
+      visualPitch = -Math.asin(clampedSinPitch);
+    }
+
+    enemy.pathSlopePitch = -visualPitch;
+    enemy.visualRoot.rotation.x = visualPitch;
+
+    const bodyCenterOffsetY = Number(enemy.mesh.userData?.bodyCenterOffsetY) || 0;
+    const localBottomY = bodyCenterOffsetY - halfHeight;
+    const cosPitch = Math.cos(visualPitch);
+    const targetAverageY = hasRampContact
+      ? ((frontSurfaceY + backSurfaceY) * 0.5)
+      : centerSurfaceY;
+    const predictedAverageY = enemy.mesh.position.y + (localBottomY * cosPitch);
+    enemy.visualRoot.position.y = (targetAverageY - predictedAverageY) + ENEMY_SURFACE_HOVER_HEIGHT;
+  }
+
   function getEnemyCollisionCenter(enemy, out) {
     if (!enemy?.mesh) {
       return out.set(0, 0, 0);
@@ -627,7 +789,10 @@ export function createEnemySystem(scene, grid, options = {}) {
     if (!start || !end) {
       const finalPoint = enemy.travelWaypoints[enemy.travelWaypoints.length - 1];
       if (finalPoint) {
-        setEnemyWorldPosition(enemy, finalPoint, enemy.pathForward);
+        tempCenterPosition.copy(finalPoint);
+        tempCenterPosition.y = getSurfaceYAtWorld(finalPoint.x, finalPoint.z) + ENEMY_PATH_Y_OFFSET;
+        setEnemyWorldPosition(enemy, tempCenterPosition, enemy.pathForward);
+        applyEnemyOrientation(enemy);
       }
       return;
     }
@@ -636,11 +801,21 @@ export function createEnemySystem(scene, grid, options = {}) {
     const t = segmentLength <= ENEMY_CONFIG.directionEpsilon
       ? 0
       : (enemy.segmentProgress / segmentLength);
-    tempCenterPosition.lerpVectors(start, end, t);
 
-    tempForwardDirection.copy(end).sub(start);
+    tempSegmentStart.copy(start);
+    tempSegmentEnd.copy(end);
+    tempSegmentStart.y = getSurfaceYAtWorld(start.x, start.z) + ENEMY_PATH_Y_OFFSET;
+    tempSegmentEnd.y = getSurfaceYAtWorld(end.x, end.z) + ENEMY_PATH_Y_OFFSET;
+
+    tempCenterPosition.lerpVectors(tempSegmentStart, tempSegmentEnd, t);
+    tempCenterPosition.y = getSurfaceYAtWorld(tempCenterPosition.x, tempCenterPosition.z) + ENEMY_PATH_Y_OFFSET;
+
+    tempForwardDirection.copy(tempSegmentEnd).sub(tempSegmentStart);
+    const horizontalLengthSq = (tempForwardDirection.x * tempForwardDirection.x)
+      + (tempForwardDirection.z * tempForwardDirection.z);
+
     tempForwardDirection.y = 0;
-    if (tempForwardDirection.lengthSq() >= ENEMY_CONFIG.directionEpsilon) {
+    if (horizontalLengthSq >= ENEMY_CONFIG.directionEpsilon) {
       tempForwardDirection.normalize();
       enemy.pathForward.copy(tempForwardDirection);
     } else if (enemy.pathForward.lengthSq() < ENEMY_CONFIG.directionEpsilon) {
@@ -648,12 +823,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     }
 
     setEnemyWorldPosition(enemy, tempCenterPosition, enemy.pathForward);
-
-    if (enemy.pathForward.lengthSq() >= ENEMY_CONFIG.directionEpsilon) {
-      tempLookTarget.copy(enemy.mesh.position).add(enemy.pathForward);
-      tempLookTarget.y = enemy.mesh.position.y;
-      enemy.mesh.lookAt(tempLookTarget);
-    }
+    applyEnemyOrientation(enemy);
   }
 
   function isEnemyFullyInsideEndCube(enemy) {
@@ -741,6 +911,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     const second = enemy.travelWaypoints[1] ?? enemy.travelWaypoints[0];
     const direction = getDirectionOnPlane(first, second);
     setEnemyWorldPosition(enemy, first, direction);
+    applyEnemyOrientation(enemy);
 
     return true;
   }
@@ -1096,6 +1267,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       tempSlowRemaining: 0,
       pathCenter: travelWaypoints[0].clone(),
       pathForward: initialForward,
+      pathSlopePitch: 0,
       pathOffsetLateral: getRandomLateralOffset(),
       routeCells: route.cells.map((cell) => cloneCell(cell)),
       travelWaypoints,
@@ -1103,6 +1275,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     };
 
     setEnemyWorldPosition(enemy, enemy.pathCenter, enemy.pathForward);
+    applyEnemyOrientation(enemy);
 
     enemyMesh.userData.bodyCenterOffsetY = bodyMesh.position.y;
     enemyMesh.userData.bodyHalfSize = enemyType.size * 0.5;

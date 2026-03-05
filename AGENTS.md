@@ -171,6 +171,12 @@
 - Raised terrain (`grid.heightObstacles`) now carries optional per-obstacle support metadata:
   - `topInsetFromRadius` is supported by player movement checks.
   - Terrain blocks set `topInsetFromRadius: 0` in `grid.js` so adjacent raised cells are continuously walkable with no support seam gap.
+- Ramp movement support now comes through `grid.rampObstacles`:
+  - Ramps expose `kind: "ramp"` + `getSurfaceYAtWorld(x, z)` for slope support checks.
+  - Player side-collision push intentionally skips ramp obstacles to avoid fighting slope traversal.
+- Small ledge auto-step support:
+  - `player.collision.stepUpHeight` allows stepping up short lips without jumping (terrain-style obstacles only).
+  - Used to smooth ramp-to-top transitions where side collision would otherwise snag.
 - Player top-support resolution is now obstacle-aware:
   - In `player.js:getSupportCameraYAtPosition(...)`, support inset uses:
     - obstacle override when `obstacle.topInsetFromRadius` is finite.
@@ -186,32 +192,43 @@
 - Current collision tuning values in config:
   - `supportEdgeEpsilon: 1e-4`
   - `terrainEdgeSideCollisionGrace: 0.12`
+  - `stepUpHeight: 0.35`
 - If edge feel tuning is needed later:
   - Reduce `terrainEdgeSideCollisionGrace` for stronger edge blocking.
   - Increase it for smoother step-off with less side-pop.
 
 ### Dynamic Enemy Pathfinding + Grid Build Blocking (Latest, Override)
 - Path-following via `grid.pathWaypoints` was removed.
-- `grid.levelLayoutAscii` marker contract now supports:
-  - `S`: enemy spawn (multiple allowed)
-  - `E`: destination/end (exactly one)
-  - `X`: player spawn (optional, max one)
-  - `P`: legacy path marker (visual only; no longer used for enemy routing)
+- Level data is now sparse object JSON in config (`GAME_CONFIG.grid.levelObjects`), not ASCII rows.
+  - Entry schema: `{ type, position: { x, y, z }, rotation }`
+  - Supported `type`: `wall`, `spawn`, `end`, `playerSpawn`, `ramp` (`path` still allowed as visual-only legacy marker).
+  - Ramp rotation contract (low->high): `0 => +Z`, `90 => +X`, `180 => -Z`, `270 => -X`.
+  - Ramp anchor position is the **low-end** cell.
 - `createGrid(scene)` now exposes marker-centric data:
   - `spawnCells[]`, `endCell`, `playerSpawnCell`
   - `getCellHeight(cellX, cellZ)`, `getCellSurfaceY(cellX, cellZ)`, `isCellInsideLevel(cellX, cellZ)`
+  - `isCellBuildable(cellX, cellZ)` returns false for ramp cells.
+  - `isRampCell(cellX, cellZ)` / `getRampCellData(cellX, cellZ)` expose ramp occupancy + connectivity metadata.
+  - `rampObstacles[]` exposes ramp movement/surface helpers for player collision support.
   - `worldToCell(...)` / `cellToWorldCenter(...)` still drive build snap + navigation.
 - Enemy movement is now navigation-graph based in `enemies.js`:
   - Cardinal neighbors only (no diagonals), so no corner cutting.
-  - Height rule: neighbors are traversable only when `getCellHeight` is exactly equal (no wall climbing).
+  - Height rule for normal cells: neighbors are traversable only when `getCellHeight` is exactly equal (no wall climbing).
+  - Ramp rule: enemies can only enter/exit ramps from valid forward/backward ends, never from ramp sides; they must traverse full ramp cells.
   - Route variety: up to 6 spawn->end variants chosen from a larger shortest-path candidate pool with overlap penalty.
   - Spawn alternation is round-robin across `spawnCells` per wave (`0,1,0,1...`), reset on `startWave`.
   - Endpoint behavior: enemies despawn only once their full body is inside the end cube volume.
   - Enemies still do **not** collide with each other.
+  - Enemy visuals now pitch from front/back bottom contact sampling while preserving yaw facing.
+  - Ramp tilt is contact-gated (`frontOnRamp || backOnRamp`) so cubes stay flat until a body end is actually on the ramp.
+  - Pitch angle uses `asin(surfaceDelta / bodyLength)` + vertical offset correction so bottoms scrape ramps cleanly through entry/exit transitions.
+  - `GAME_CONFIG.enemies.hoverHeight` adds a uniform visual hover gap above both flat and ramp surfaces.
+  - Enemy world Y now samples `grid.getBuildSurfaceYAtWorld(x, z)` during movement so body offset above surface stays consistent on ramps/crests and at ramp exits.
 - Tower placement is grid-snapped in `towers.js`:
   - Preview and placement snap to the hovered cell center.
   - One tower per cell (`cellX/cellZ` stored on tower entries).
   - `S`/`E` cells are reserved and cannot be built on.
+  - Ramp cells are non-buildable via `grid.isCellBuildable(...)`.
   - Towers can still be built on raised terrain/wall blocks.
 - Path blocking contract between towers and enemies:
   - `enemySystem.canBlockCell(cellX, cellZ)` validates that **every** spawn still has a route to `E`.

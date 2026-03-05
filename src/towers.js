@@ -997,6 +997,9 @@ export function createTowerSystem({
     if (typeof grid.isCellInsideLevel === "function" && !grid.isCellInsideLevel(cellX, cellZ)) {
       return false;
     }
+    if (typeof grid.isCellBuildable === "function" && !grid.isCellBuildable(cellX, cellZ)) {
+      return false;
+    }
     if (isReservedCell(cellX, cellZ)) {
       return false;
     }

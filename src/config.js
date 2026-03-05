@@ -496,25 +496,36 @@ export const GAME_CONFIG = {
     pathHeightEpsilon: 1e-5,
     rayParallelEpsilon: 1e-6,
 
-    // Level layout uses 2 chars per cell: [height][marker], optionally space-separated per cell.
-    // Height uses base36 digits: 0-9, A-Z. A space in the height slot is treated as 0.
-    // Marker: . empty, P legacy path, S spawn, E destination, X player spawn.
-    // A space in the marker slot is treated as '.'.
-    // Rows are z=0..size-1 (top-to-bottom), columns x=0..size-1 (left-to-right).
-    levelLayoutAscii: [
-      " .  .  .  . 1. 1.  .  .  .  .  .  .",
-      " .  . 0X  E 1. 1.  .  .  .  .  .  .",
-      " .  .  .  . 1. 1.  .  .  .  .  .  .",
-      " .  . 1. 1. 1. 1.  .  .  .  S  .  .",
-      " .  .  .  .  .  .  .  .  .  .  .  .",
-      " .  .  .  .  .  .  .  .  .  .  .  .",
-      " .  .  .  . 1. 1.  .  .  .  .  .  .",
-      " .  .  .  . 1. 1.  .  .  .  .  .  .",
-      " .  .  .  .  .  .  .  .  .  .  .  .",
-      " .  .  .  .  .  .  .  .  .  S  .  .",
-      " .  .  .  . 1. 1.  .  .  .  .  .  .",
-      " .  .  .  . 1. 1.  .  .  .  .  .  .",
-    ].join("\n"),
+    // Sparse level layout entries.
+    // Schema: { type, position: { x, y, z }, rotation }
+    // type: wall | spawn | end | playerSpawn | ramp
+    // rotation for ramps is low->high direction:
+    // 0 => +Z, 90 => +X, 180 => -Z, 270 => -X.
+    levelObjects: [
+      // Wall blocks.
+      { type: "wall", position: { x: 4, y: 0, z: 0 }, rotation: 0 },
+      { type: "wall", position: { x: 5, y: 0, z: 0 }, rotation: 0 },
+      { type: "wall", position: { x: 4, y: 0, z: 1 }, rotation: 0 },
+      { type: "wall", position: { x: 5, y: 0, z: 1 }, rotation: 0 },
+      { type: "wall", position: { x: 4, y: 0, z: 2 }, rotation: 0 },
+      { type: "wall", position: { x: 5, y: 0, z: 2 }, rotation: 0 },
+      { type: "wall", position: { x: 2, y: 0, z: 3 }, rotation: 0 },
+      { type: "wall", position: { x: 3, y: 0, z: 3 }, rotation: 0 },
+      { type: "wall", position: { x: 4, y: 0, z: 3 }, rotation: 0 },
+      { type: "wall", position: { x: 5, y: 0, z: 3 }, rotation: 0 },
+      { type: "wall", position: { x: 5, y: 0, z: 6 }, rotation: 0 },
+      { type: "wall", position: { x: 5, y: 0, z: 7 }, rotation: 0 },
+      { type: "wall", position: { x: 4, y: 0, z: 10 }, rotation: 0 },
+      { type: "wall", position: { x: 5, y: 0, z: 10 }, rotation: 0 },
+      { type: "wall", position: { x: 4, y: 0, z: 11 }, rotation: 0 },
+      { type: "wall", position: { x: 5, y: 0, z: 11 }, rotation: 0 },
+      { type: "playerSpawn", position: { x: 2, y: 0, z: 1 }, rotation: 0 },
+      { type: "end", position: { x: 3, y: 0, z: 1 }, rotation: 0 },
+      { type: "spawn", position: { x: 9, y: 0, z: 3 }, rotation: 0 },
+      { type: "spawn", position: { x: 9, y: 0, z: 9 }, rotation: 0 },
+      { type: "ramp", position: { x: 3, y: 0, z: 6 }, rotation: 90 },
+      { type: "ramp", position: { x: 7, y: 0, z: 6 }, rotation: 270 },
+    ],
   },
 
   towers: {
@@ -549,7 +560,7 @@ export const GAME_CONFIG = {
 
         // Laser combat tuning.
         // Max beam reach in world units. Typical range: 4-20.
-        range: 9,
+        range: 1,
         // Time between shots in seconds. Typical range: 0.1-2.0.
         fireInterval: 0.95,
         // AoE damage per hit. Typical range: 5-120.
@@ -795,6 +806,8 @@ export const GAME_CONFIG = {
     bodyRoughness: 0.65,
     bodyMetalness: 0.15,
     bodyYOffset: -0.65,
+    // Visual hover gap above terrain/ramp surfaces.
+    hoverHeight: 0.4,
 
     // Brief pulse response when taking damage.
     hitPulseDuration: 0.2,
@@ -1005,6 +1018,8 @@ export const GAME_CONFIG = {
       // Tolerance to snap onto tower tops while moving vertically (units).
       towerTopSnapDown: 0.9,
       towerTopSnapUp: 0.22,
+      // Max ledge height (units) that can be stepped up without jumping.
+      stepUpHeight: 0.35,
       // Shrink top landing area by radius * ratio to avoid edge snagging. Typical range: 0-0.4.
       towerTopInsetFromRadius: 0.1,
     },

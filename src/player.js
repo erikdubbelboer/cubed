@@ -9,6 +9,7 @@ const MIN_COLLISION_DISTANCE_SQ = PLAYER_CONFIG.collision.minDistanceSq;
 const PLAYER_HEAD_CLEARANCE = PLAYER_CONFIG.collision.headClearance;
 const TOWER_TOP_SNAP_DOWN = PLAYER_CONFIG.collision.towerTopSnapDown;
 const TOWER_TOP_SNAP_UP = PLAYER_CONFIG.collision.towerTopSnapUp;
+const STEP_UP_HEIGHT = PLAYER_CONFIG.collision.stepUpHeight ?? 0;
 const SUPPORT_EDGE_EPSILON = PLAYER_CONFIG.collision.supportEdgeEpsilon ?? 0;
 const TERRAIN_EDGE_SIDE_COLLISION_GRACE = PLAYER_CONFIG.collision.terrainEdgeSideCollisionGrace ?? 0;
 
@@ -945,19 +946,29 @@ export function createPlayer({
       const towerHitPadding = PLAYER_CONFIG.weapon.towerHitPadding;
       for (const obstacle of obstacles) {
         const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
-        const halfSize = obstacle?.halfSize;
+        const halfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
+          ? Number(obstacle.halfSizeX)
+          : Number(obstacle?.halfSize);
+        const halfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
+          ? Number(obstacle.halfSizeZ)
+          : Number(obstacle?.halfSize);
         const height = obstacle?.height;
         const baseY = obstacle?.baseY ?? 0;
-        if (!obstaclePos || typeof halfSize !== "number" || typeof height !== "number") {
+        if (
+          !obstaclePos
+          || !Number.isFinite(halfSizeX)
+          || !Number.isFinite(halfSizeZ)
+          || typeof height !== "number"
+        ) {
           continue;
         }
 
-        const minX = obstaclePos.x - halfSize - towerHitPadding;
-        const maxX = obstaclePos.x + halfSize + towerHitPadding;
+        const minX = obstaclePos.x - halfSizeX - towerHitPadding;
+        const maxX = obstaclePos.x + halfSizeX + towerHitPadding;
         const minY = baseY - towerHitPadding;
         const maxY = baseY + height + towerHitPadding;
-        const minZ = obstaclePos.z - halfSize - towerHitPadding;
-        const maxZ = obstaclePos.z + halfSize + towerHitPadding;
+        const minZ = obstaclePos.z - halfSizeZ - towerHitPadding;
+        const maxZ = obstaclePos.z + halfSizeZ + towerHitPadding;
 
         if (
           position.x >= minX &&
@@ -1099,6 +1110,19 @@ export function createPlayer({
       const feetY = currentCameraY - eyeHeight;
 
       for (const obstacle of obstacles) {
+        if (obstacle?.kind === "ramp" && typeof obstacle.getSurfaceYAtWorld === "function") {
+          const rampSurfaceY = obstacle.getSurfaceYAtWorld(x, z);
+          if (!Number.isFinite(rampSurfaceY)) {
+            continue;
+          }
+          const nearRampSurface = feetY >= (rampSurfaceY - TOWER_TOP_SNAP_DOWN)
+            && feetY <= (rampSurfaceY + TOWER_TOP_SNAP_UP);
+          if (nearRampSurface) {
+            supportY = Math.max(supportY, rampSurfaceY + eyeHeight);
+          }
+          continue;
+        }
+
         const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
         const obstacleHalfSize = obstacle?.halfSize;
         const obstacleHeight = obstacle?.height;
@@ -1185,6 +1209,10 @@ export function createPlayer({
     if (obstacles.length > 0) {
       for (let pass = 0; pass < PLAYER_CONFIG.movement.collisionPasses; pass += 1) {
         for (const obstacle of obstacles) {
+          if (obstacle?.kind === "ramp") {
+            continue;
+          }
+
           const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
           const obstacleHalfSize = obstacle?.halfSize;
           const obstacleHeight = obstacle?.height;
@@ -1211,6 +1239,18 @@ export function createPlayer({
             const localX = camera.position.x - obstaclePos.x;
             const localZ = camera.position.z - obstaclePos.z;
             if (Math.abs(localX) >= expandedHalf || Math.abs(localZ) >= expandedHalf) {
+              continue;
+            }
+
+            const stepUpDelta = obstacleTopY - playerFeetY;
+            const canStepUp = isTerrainTopObstacle
+              && stepUpDelta > 0
+              && stepUpDelta <= STEP_UP_HEIGHT;
+            if (canStepUp) {
+              camera.position.y = obstacleTopY + eyeHeight;
+              if (verticalVelocity < 0) {
+                verticalVelocity = 0;
+              }
               continue;
             }
 

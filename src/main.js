@@ -1549,14 +1549,16 @@ function initGame() {
     movementBounds: grid.levelBounds ?? grid.moveBounds,
     getMovementObstacles: () => {
       const terrainObstacles = Array.isArray(grid.heightObstacles) ? grid.heightObstacles : [];
+      const rampObstacles = Array.isArray(grid.rampObstacles) ? grid.rampObstacles : [];
       const towerObstacles = towerSystem ? towerSystem.getMovementObstacles() : [];
-      if (terrainObstacles.length === 0) {
+      const staticObstacles = [...terrainObstacles, ...rampObstacles];
+      if (staticObstacles.length === 0) {
         return towerObstacles;
       }
       if (towerObstacles.length === 0) {
-        return terrainObstacles;
+        return staticObstacles;
       }
-      return [...terrainObstacles, ...towerObstacles];
+      return [...staticObstacles, ...towerObstacles];
     },
   });
 

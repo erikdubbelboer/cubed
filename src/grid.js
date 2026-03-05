@@ -15,9 +15,17 @@ const OUTER_EMPTY_SPACE_RINGS = Math.max(
   0,
   Math.floor(Number(GRID_CONFIG.outerEmptySpaceRings ?? GRID_CONFIG.outerEmptyTerrainRings) || 0)
 );
-const LEVEL_MARKERS = new Set([".", "P", "S", "E", "X"]);
 const LEGACY_PATH_MARKERS = new Set(["P"]);
-const CELL_TOKEN_WIDTH = 2;
+const LEVEL_OBJECT_TYPES = new Set(["wall", "spawn", "end", "playerspawn", "ramp", "path"]);
+const LEVEL_MARKER_TYPES = new Set(["spawn", "end", "playerspawn", "path"]);
+const RAMP_ROTATION_TO_DIRECTION = new Map([
+  [0, { x: 0, z: 1 }],
+  [90, { x: 1, z: 0 }],
+  [180, { x: 0, z: -1 }],
+  [270, { x: -1, z: 0 }],
+]);
+const RAMP_ROLE_LOW = "low";
+const RAMP_ROLE_HIGH = "high";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -48,128 +56,267 @@ function cloneCell(cell) {
   return { x: cell.x, z: cell.z };
 }
 
-function parseCellHeight(char) {
-  const height = Number.parseInt(char, 36);
-  if (!Number.isInteger(height) || height < 0) {
-    throw new Error(`Invalid cell height '${char}' in grid.levelLayoutAscii.`);
-  }
-  return height;
+function isIntegerCell(value) {
+  return Number.isInteger(value) && Number.isFinite(value);
 }
 
-function parseRowTokens(rawLine, cellZ) {
-  const compactWidth = GRID_SIZE * CELL_TOKEN_WIDTH;
-  const spacedWidth = compactWidth + (GRID_SIZE - 1);
-  let mode = null;
+function parseGridPosition(rawPosition, entryIndex) {
+  const position = rawPosition ?? {};
+  const x = Number(position.x);
+  const y = Number(position.y);
+  const z = Number(position.z);
+  if (!isIntegerCell(x) || !isIntegerCell(y) || !isIntegerCell(z)) {
+    throw new Error(`grid.levelObjects[${entryIndex}] position must use integer x/y/z.`);
+  }
+  if (x < 0 || x >= GRID_SIZE || z < 0 || z >= GRID_SIZE) {
+    throw new Error(`grid.levelObjects[${entryIndex}] position (${x},${z}) is outside the grid.`);
+  }
+  if (y < 0) {
+    throw new Error(`grid.levelObjects[${entryIndex}] y must be >= 0.`);
+  }
+  return { x, y, z };
+}
 
-  if (rawLine.length === compactWidth) {
-    mode = "compact";
-  } else if (rawLine.length === spacedWidth) {
-    mode = "spaced";
-  } else {
-    throw new Error(
-      `Invalid row width at z=${cellZ}; expected ${compactWidth} (compact) or ${spacedWidth} (space-separated) characters.`
-    );
+function parseRotation(rawRotation, entryIndex) {
+  const numericRotation = Number(rawRotation ?? 0);
+  if (!Number.isFinite(numericRotation)) {
+    throw new Error(`grid.levelObjects[${entryIndex}] rotation must be numeric.`);
+  }
+  const quantized = Math.round(numericRotation / 90) * 90;
+  if (Math.abs(numericRotation - quantized) > 1e-6) {
+    throw new Error(`grid.levelObjects[${entryIndex}] rotation must be a multiple of 90.`);
+  }
+  const normalized = ((quantized % 360) + 360) % 360;
+  if (!RAMP_ROTATION_TO_DIRECTION.has(normalized)) {
+    throw new Error(`grid.levelObjects[${entryIndex}] rotation must be one of 0, 90, 180, 270.`);
+  }
+  return normalized;
+}
+
+function createHeightMatrix() {
+  return Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(0));
+}
+
+function createMarkerMatrix() {
+  return Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill("."));
+}
+
+function cloneDirection(direction) {
+  return { x: direction.x, z: direction.z };
+}
+
+function createRampCellData({
+  rampId,
+  role,
+  rotation,
+  direction,
+  lowCell,
+  highCell,
+  lowOuterCell,
+  highOuterCell,
+  lowLevel,
+  highLevel,
+}) {
+  const sideDir = { x: -direction.z, z: direction.x };
+  const lowSideA = { x: lowCell.x + sideDir.x, z: lowCell.z + sideDir.z };
+  const lowSideB = { x: lowCell.x - sideDir.x, z: lowCell.z - sideDir.z };
+  const highSideA = { x: highCell.x + sideDir.x, z: highCell.z + sideDir.z };
+  const highSideB = { x: highCell.x - sideDir.x, z: highCell.z - sideDir.z };
+  return {
+    rampId,
+    role,
+    rotation,
+    direction: cloneDirection(direction),
+    lowCell: cloneCell(lowCell),
+    highCell: cloneCell(highCell),
+    lowOuterCell: cloneCell(lowOuterCell),
+    highOuterCell: cloneCell(highOuterCell),
+    lowLevel,
+    highLevel,
+    sideCells: {
+      low: [lowSideA, lowSideB],
+      high: [highSideA, highSideB],
+    },
+  };
+}
+
+function parseLevelLayout(levelObjects) {
+  if (!Array.isArray(levelObjects) || levelObjects.length === 0) {
+    throw new Error("grid.levelObjects must be a non-empty array.");
   }
 
-  const tokens = [];
-  for (let cellX = 0; cellX < GRID_SIZE; cellX += 1) {
-    const tokenOffset = mode === "spaced" ? cellX * 3 : cellX * CELL_TOKEN_WIDTH;
-    const heightChar = rawLine[tokenOffset];
-    const markerChar = rawLine[tokenOffset + 1];
-
-    if (mode === "spaced" && cellX < GRID_SIZE - 1 && rawLine[tokenOffset + 2] !== " ") {
-      throw new Error(`Invalid token separator at (${cellX}, ${cellZ}); expected a single space.`);
+  const parsedEntries = levelObjects.map((entry, index) => {
+    if (!entry || typeof entry !== "object") {
+      throw new Error(`grid.levelObjects[${index}] must be an object.`);
     }
 
-    const normalizedHeightChar = heightChar === " "
-      ? "0"
-      : heightChar.toUpperCase();
-    const normalizedMarkerChar = markerChar === " "
-      ? "."
-      : markerChar.toUpperCase();
+    const normalizedType = String(entry.type ?? "").trim().toLowerCase();
+    if (!LEVEL_OBJECT_TYPES.has(normalizedType)) {
+      throw new Error(`Invalid grid.levelObjects[${index}].type '${entry.type}'.`);
+    }
 
-    tokens.push({
-      heightChar: normalizedHeightChar,
-      markerChar: normalizedMarkerChar,
+    return {
+      type: normalizedType,
+      position: parseGridPosition(entry.position, index),
+      rotation: parseRotation(entry.rotation ?? 0, index),
+      index,
+    };
+  });
+
+  const wallHeights = createHeightMatrix();
+  const markers = createMarkerMatrix();
+  const spawnCells = [];
+  const spawnCellKeySet = new Set();
+  let endCell = null;
+  let playerSpawnCell = null;
+  const ramps = [];
+  const rampCellsByKey = new Map();
+
+  for (const entry of parsedEntries) {
+    if (entry.type !== "wall") {
+      continue;
+    }
+    const { x, y, z } = entry.position;
+    wallHeights[z][x] = Math.max(wallHeights[z][x], y + 1);
+  }
+
+  for (const entry of parsedEntries) {
+    if (!LEVEL_MARKER_TYPES.has(entry.type)) {
+      continue;
+    }
+    const { x, z } = entry.position;
+    const key = cellKey(x, z);
+
+    if (entry.type === "spawn") {
+      if (!spawnCellKeySet.has(key)) {
+        spawnCellKeySet.add(key);
+        spawnCells.push({ x, z });
+      }
+      markers[z][x] = "S";
+    } else if (entry.type === "end") {
+      if (endCell && !isSameCell(endCell, entry.position)) {
+        throw new Error("grid.levelObjects must contain exactly one unique end marker.");
+      }
+      endCell = { x, z };
+      markers[z][x] = "E";
+    } else if (entry.type === "playerspawn") {
+      if (playerSpawnCell && !isSameCell(playerSpawnCell, entry.position)) {
+        throw new Error("grid.levelObjects must contain at most one unique playerSpawn marker.");
+      }
+      playerSpawnCell = { x, z };
+      markers[z][x] = "X";
+    } else if (entry.type === "path") {
+      markers[z][x] = "P";
+    }
+  }
+
+  for (const entry of parsedEntries) {
+    if (entry.type !== "ramp") {
+      continue;
+    }
+
+    const lowCell = { x: entry.position.x, z: entry.position.z };
+    const direction = RAMP_ROTATION_TO_DIRECTION.get(entry.rotation);
+    const highCell = { x: lowCell.x + direction.x, z: lowCell.z + direction.z };
+    const lowOuterCell = { x: lowCell.x - direction.x, z: lowCell.z - direction.z };
+    const highOuterCell = { x: highCell.x + direction.x, z: highCell.z + direction.z };
+
+    if (!isMainGridCell(highCell.x, highCell.z)) {
+      throw new Error(
+        `grid.levelObjects[${entry.index}] ramp exits the grid at (${highCell.x},${highCell.z}).`
+      );
+    }
+
+    const lowCellKey = cellKey(lowCell.x, lowCell.z);
+    const highCellKey = cellKey(highCell.x, highCell.z);
+    if (rampCellsByKey.has(lowCellKey) || rampCellsByKey.has(highCellKey)) {
+      throw new Error(`grid.levelObjects[${entry.index}] ramp overlaps another ramp.`);
+    }
+    if (wallHeights[lowCell.z][lowCell.x] > 0 || wallHeights[highCell.z][highCell.x] > 0) {
+      throw new Error(`grid.levelObjects[${entry.index}] ramp overlaps a wall block.`);
+    }
+
+    const lowLevel = entry.position.y;
+    const highLevel = lowLevel + 1;
+    const rampId = ramps.length;
+
+    const lowCellData = createRampCellData({
+      rampId,
+      role: RAMP_ROLE_LOW,
+      rotation: entry.rotation,
+      direction,
+      lowCell,
+      highCell,
+      lowOuterCell,
+      highOuterCell,
+      lowLevel,
+      highLevel,
+    });
+    const highCellData = createRampCellData({
+      rampId,
+      role: RAMP_ROLE_HIGH,
+      rotation: entry.rotation,
+      direction,
+      lowCell,
+      highCell,
+      lowOuterCell,
+      highOuterCell,
+      lowLevel,
+      highLevel,
+    });
+
+    rampCellsByKey.set(lowCellKey, lowCellData);
+    rampCellsByKey.set(highCellKey, highCellData);
+    ramps.push({
+      id: rampId,
+      rotation: entry.rotation,
+      direction: cloneDirection(direction),
+      lowCell: cloneCell(lowCell),
+      highCell: cloneCell(highCell),
+      lowOuterCell: cloneCell(lowOuterCell),
+      highOuterCell: cloneCell(highOuterCell),
+      lowLevel,
+      highLevel,
     });
   }
 
-  return tokens;
-}
-
-function parseLevelLayout(layoutAscii) {
-  if (typeof layoutAscii !== "string" || layoutAscii.trim().length === 0) {
-    throw new Error("grid.levelLayoutAscii must be a non-empty string.");
-  }
-
-  const lines = layoutAscii.replace(/\r/g, "").split("\n");
-  if (lines.length > 0 && lines[lines.length - 1] === "") {
-    lines.pop();
-  }
-  if (lines.length !== GRID_SIZE) {
-    throw new Error(`grid.levelLayoutAscii must contain exactly ${GRID_SIZE} rows.`);
-  }
-
-  const heights = [];
-  const markers = [];
-  const spawnCells = [];
-  let endCell = null;
-  let playerSpawnCell = null;
-
-  for (let cellZ = 0; cellZ < GRID_SIZE; cellZ += 1) {
-    const rowTokens = parseRowTokens(lines[cellZ], cellZ);
-    const rowHeights = [];
-    const rowMarkers = [];
-
-    for (let cellX = 0; cellX < GRID_SIZE; cellX += 1) {
-      const { heightChar, markerChar } = rowTokens[cellX];
-      if (!LEVEL_MARKERS.has(markerChar)) {
-        throw new Error(`Invalid cell marker '${markerChar}' at (${cellX}, ${cellZ}).`);
-      }
-
-      rowHeights.push(parseCellHeight(heightChar));
-      rowMarkers.push(markerChar);
-
-      if (markerChar === "S") {
-        spawnCells.push({ x: cellX, z: cellZ });
-      }
-
-      if (markerChar === "E") {
-        if (endCell) {
-          throw new Error("grid.levelLayoutAscii must contain exactly one end marker 'E'.");
-        }
-        endCell = { x: cellX, z: cellZ };
-      }
-
-      if (markerChar === "X") {
-        if (playerSpawnCell) {
-          throw new Error("grid.levelLayoutAscii must contain at most one player marker 'X'.");
-        }
-        playerSpawnCell = { x: cellX, z: cellZ };
-      }
-    }
-
-    heights.push(rowHeights);
-    markers.push(rowMarkers);
-  }
-
   if (spawnCells.length === 0) {
-    throw new Error("grid.levelLayoutAscii must contain at least one spawn marker 'S'.");
+    throw new Error("grid.levelObjects must contain at least one spawn marker.");
   }
   if (!endCell) {
-    throw new Error("grid.levelLayoutAscii must contain exactly one end marker 'E'.");
+    throw new Error("grid.levelObjects must contain exactly one end marker.");
+  }
+
+  const heights = createHeightMatrix();
+  for (let cellZ = 0; cellZ < GRID_SIZE; cellZ += 1) {
+    for (let cellX = 0; cellX < GRID_SIZE; cellX += 1) {
+      heights[cellZ][cellX] = wallHeights[cellZ][cellX];
+    }
+  }
+  for (const ramp of ramps) {
+    heights[ramp.lowCell.z][ramp.lowCell.x] = Math.max(
+      heights[ramp.lowCell.z][ramp.lowCell.x],
+      ramp.lowLevel
+    );
+    heights[ramp.highCell.z][ramp.highCell.x] = Math.max(
+      heights[ramp.highCell.z][ramp.highCell.x],
+      ramp.highLevel
+    );
   }
 
   return {
     heights,
+    wallHeights,
     markers,
     spawnCells,
     endCell,
     playerSpawnCell,
+    ramps,
+    rampCellsByKey,
   };
 }
 
-const LEVEL_LAYOUT = parseLevelLayout(GRID_CONFIG.levelLayoutAscii);
+const LEVEL_LAYOUT = parseLevelLayout(GRID_CONFIG.levelObjects);
 
 function isMainGridCell(cellX, cellZ) {
   return cellX >= 0 && cellX < GRID_SIZE && cellZ >= 0 && cellZ < GRID_SIZE;
@@ -197,12 +344,22 @@ function getCellMarker(cellX, cellZ) {
   return row[cellX] ?? ".";
 }
 
-function getCellSupportHeight(cellX, cellZ) {
-  return getCellHeightLevels(cellX, cellZ) * ALTITUDE_CUBE_SIZE;
+function getRampCellData(cellX, cellZ) {
+  return LEVEL_LAYOUT.rampCellsByKey.get(cellKey(cellX, cellZ)) ?? null;
+}
+
+function isRampCell(cellX, cellZ) {
+  return !!getRampCellData(cellX, cellZ);
 }
 
 function getCellSurfaceY(cellX, cellZ) {
-  return FLOOR_Y + getCellSupportHeight(cellX, cellZ);
+  const rampCellData = getRampCellData(cellX, cellZ);
+  if (rampCellData) {
+    const lowSurfaceY = FLOOR_Y + (rampCellData.lowLevel * ALTITUDE_CUBE_SIZE);
+    const centerRatio = rampCellData.role === RAMP_ROLE_LOW ? 0.25 : 0.75;
+    return lowSurfaceY + (centerRatio * ALTITUDE_CUBE_SIZE);
+  }
+  return FLOOR_Y + (getCellHeightLevels(cellX, cellZ) * ALTITUDE_CUBE_SIZE);
 }
 
 function cellToWorld(cellX, cellZ, y = FLOOR_Y) {
@@ -216,6 +373,73 @@ function cellToWorld(cellX, cellZ, y = FLOOR_Y) {
 
 function isSameCell(a, b) {
   return !!a && !!b && a.x === b.x && a.z === b.z;
+}
+
+function createRampWedgeGeometry(length, height, width, options = {}) {
+  const includeBottom = options.includeBottom !== false;
+  const includeHighFace = options.includeHighFace !== false;
+  const halfLength = length * 0.5;
+  const halfWidth = width * 0.5;
+  const vertices = new Float32Array([
+    // 0 A: low-left-bottom
+    -halfWidth, 0, -halfLength,
+    // 1 B: low-right-bottom
+    halfWidth, 0, -halfLength,
+    // 2 C: high-left-bottom
+    -halfWidth, 0, halfLength,
+    // 3 D: high-right-bottom
+    halfWidth, 0, halfLength,
+    // 4 E: high-left-top
+    -halfWidth, height, halfLength,
+    // 5 F: high-right-top
+    halfWidth, height, halfLength,
+  ]);
+
+  const indices = [];
+  if (includeBottom) {
+    // Bottom (outward normal = -Y).
+    indices.push(
+      0, 1, 3,
+      0, 3, 2
+    );
+  }
+  // Top slope (outward normal = +Y/-along).
+  indices.push(
+    0, 5, 1,
+    0, 4, 5
+  );
+  // Side triangles.
+  indices.push(
+    0, 2, 4,
+    1, 5, 3
+  );
+  // Optional high-end cap.
+  if (includeHighFace) {
+    indices.push(
+      2, 3, 5,
+      2, 5, 4
+    );
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+  geometry.setIndex(indices);
+  const flatGeometry = geometry.toNonIndexed();
+  geometry.dispose();
+  flatGeometry.computeVertexNormals();
+  return flatGeometry;
+}
+
+function getRampHighEdgeKey(ramp) {
+  const highLevel = Number(ramp?.highLevel) || 0;
+  const highCellX = Number(ramp?.highCell?.x) || 0;
+  const highCellZ = Number(ramp?.highCell?.z) || 0;
+  const dirX = Number(ramp?.direction?.x) || 0;
+  const dirZ = Number(ramp?.direction?.z) || 0;
+  if (Math.abs(dirX) > 0) {
+    return `x|${(highCellX * 2) + dirX}|${highCellZ}|${highLevel}`;
+  }
+  return `z|${(highCellZ * 2) + dirZ}|${highCellX}|${highLevel}`;
 }
 
 export function createGrid(scene) {
@@ -257,9 +481,15 @@ export function createGrid(scene) {
 
   const half = (GRID_SIZE * CELL_SIZE) / 2;
   const altitudeObstacles = [];
+  const rampObstacles = [];
+  const rampTopSurfaces = [];
   const buildRaycastObstacleBox = new THREE.Box3();
   const buildRaycastHitPoint = new THREE.Vector3();
   const buildRaycastBestPoint = new THREE.Vector3();
+  const buildRaycastRampHitPoint = new THREE.Vector3();
+
+  const wallHeights = LEVEL_LAYOUT.wallHeights;
+  const ramps = Array.isArray(LEVEL_LAYOUT.ramps) ? LEVEL_LAYOUT.ramps : [];
 
   const altitudeCubeGeo = new THREE.BoxGeometry(
     ALTITUDE_CUBE_SIZE,
@@ -269,7 +499,7 @@ export function createGrid(scene) {
 
   for (let cellZ = 0; cellZ < GRID_SIZE; cellZ += 1) {
     for (let cellX = 0; cellX < GRID_SIZE; cellX += 1) {
-      const cellHeightLevels = getCellHeightLevels(cellX, cellZ);
+      const cellHeightLevels = wallHeights[cellZ]?.[cellX] ?? 0;
       if (cellHeightLevels <= 0) {
         continue;
       }
@@ -284,6 +514,8 @@ export function createGrid(scene) {
       altitudeObstacles.push({
         position: new THREE.Vector3(worldX, FLOOR_Y, worldZ),
         halfSize: TERRAIN_OBSTACLE_HALF_SIZE,
+        halfSizeX: TERRAIN_OBSTACLE_HALF_SIZE,
+        halfSizeZ: TERRAIN_OBSTACLE_HALF_SIZE,
         height: supportHeight,
         baseY: FLOOR_Y,
         // Terrain tops should remain continuously walkable across adjacent cells.
@@ -320,6 +552,141 @@ export function createGrid(scene) {
         scene.add(cube);
       }
     }
+  }
+
+  const rampHighEdgeCounts = new Map();
+  for (const ramp of ramps) {
+    const edgeKey = getRampHighEdgeKey(ramp);
+    rampHighEdgeCounts.set(edgeKey, (rampHighEdgeCounts.get(edgeKey) ?? 0) + 1);
+  }
+
+  const rampGeometryWithHighCap = createRampWedgeGeometry(
+    CELL_SIZE * 2,
+    ALTITUDE_CUBE_SIZE,
+    CELL_SIZE,
+    { includeBottom: false, includeHighFace: true }
+  );
+  const rampGeometryWithoutHighCap = createRampWedgeGeometry(
+    CELL_SIZE * 2,
+    ALTITUDE_CUBE_SIZE,
+    CELL_SIZE,
+    { includeBottom: false, includeHighFace: false }
+  );
+  const rampMaterial = new THREE.MeshStandardMaterial({
+    color: 0x6b8ea6,
+    emissive: 0x27465a,
+    emissiveIntensity: 0.2,
+    roughness: GRID_CONFIG.altitudeRoughness,
+    metalness: GRID_CONFIG.altitudeMetalness,
+  });
+
+  for (const ramp of ramps) {
+    const lowCellCenter = cellToWorld(ramp.lowCell.x, ramp.lowCell.z, FLOOR_Y);
+    const highCellCenter = cellToWorld(ramp.highCell.x, ramp.highCell.z, FLOOR_Y);
+    const lowY = FLOOR_Y + (ramp.lowLevel * ALTITUDE_CUBE_SIZE);
+    const highY = FLOOR_Y + (ramp.highLevel * ALTITUDE_CUBE_SIZE);
+    const centerX = (lowCellCenter.x + highCellCenter.x) * 0.5;
+    const centerZ = (lowCellCenter.z + highCellCenter.z) * 0.5;
+
+    const highEdgeKey = getRampHighEdgeKey(ramp);
+    const hasSharedHighEdge = (rampHighEdgeCounts.get(highEdgeKey) ?? 0) > 1;
+    const rampMesh = new THREE.Mesh(
+      hasSharedHighEdge ? rampGeometryWithoutHighCap : rampGeometryWithHighCap,
+      rampMaterial.clone()
+    );
+    rampMesh.position.set(centerX, lowY, centerZ);
+    rampMesh.rotation.y = THREE.MathUtils.degToRad(ramp.rotation);
+    rampMesh.castShadow = true;
+    rampMesh.receiveShadow = true;
+    rampMesh.userData.isRamp = true;
+    rampMesh.userData.rampId = ramp.id;
+    scene.add(rampMesh);
+
+    const rampDirectionWorld = new THREE.Vector2(ramp.direction.x, ramp.direction.z).normalize();
+    const rampRightWorld = new THREE.Vector2(-rampDirectionWorld.y, rampDirectionWorld.x);
+
+    const lowEdgeCenterX = lowCellCenter.x - (rampDirectionWorld.x * CELL_SIZE * 0.5);
+    const lowEdgeCenterZ = lowCellCenter.z - (rampDirectionWorld.y * CELL_SIZE * 0.5);
+    const highEdgeCenterX = highCellCenter.x + (rampDirectionWorld.x * CELL_SIZE * 0.5);
+    const highEdgeCenterZ = highCellCenter.z + (rampDirectionWorld.y * CELL_SIZE * 0.5);
+
+    const topA = new THREE.Vector3(
+      lowEdgeCenterX - (rampRightWorld.x * CELL_SIZE * 0.5),
+      lowY,
+      lowEdgeCenterZ - (rampRightWorld.y * CELL_SIZE * 0.5)
+    );
+    const topB = new THREE.Vector3(
+      lowEdgeCenterX + (rampRightWorld.x * CELL_SIZE * 0.5),
+      lowY,
+      lowEdgeCenterZ + (rampRightWorld.y * CELL_SIZE * 0.5)
+    );
+    const topC = new THREE.Vector3(
+      highEdgeCenterX + (rampRightWorld.x * CELL_SIZE * 0.5),
+      highY,
+      highEdgeCenterZ + (rampRightWorld.y * CELL_SIZE * 0.5)
+    );
+    const topD = new THREE.Vector3(
+      highEdgeCenterX - (rampRightWorld.x * CELL_SIZE * 0.5),
+      highY,
+      highEdgeCenterZ - (rampRightWorld.y * CELL_SIZE * 0.5)
+    );
+
+    const rampHalfSizeX = Math.abs(ramp.direction.x) > 0 ? CELL_SIZE : CELL_SIZE * 0.5;
+    const rampHalfSizeZ = Math.abs(ramp.direction.z) > 0 ? CELL_SIZE : CELL_SIZE * 0.5;
+    const rampAlongMin = -CELL_SIZE * 0.5;
+    const rampAlongMax = CELL_SIZE * 1.5;
+    const rampAcrossMax = CELL_SIZE * 0.5;
+    const rampLengthWorld = CELL_SIZE * 2;
+    const rampSurfaceMinY = lowY;
+    const rampSurfaceMaxY = highY;
+
+    const getRampSurfaceYAtWorld = (worldX, worldZ) => {
+      const deltaX = worldX - lowCellCenter.x;
+      const deltaZ = worldZ - lowCellCenter.z;
+      const along = (deltaX * rampDirectionWorld.x) + (deltaZ * rampDirectionWorld.y);
+      const across = (deltaX * rampRightWorld.x) + (deltaZ * rampRightWorld.y);
+      if (along < rampAlongMin || along > rampAlongMax || Math.abs(across) > rampAcrossMax) {
+        return null;
+      }
+      const alongT = (along - rampAlongMin) / rampLengthWorld;
+      const clampedT = THREE.MathUtils.clamp(alongT, 0, 1);
+      return rampSurfaceMinY + ((rampSurfaceMaxY - rampSurfaceMinY) * clampedT);
+    };
+
+    rampTopSurfaces.push({
+      a: topA,
+      b: topB,
+      c: topC,
+      d: topD,
+    });
+
+    rampObstacles.push({
+      kind: "ramp",
+      mesh: rampMesh,
+      position: new THREE.Vector3(centerX, lowY + (ALTITUDE_CUBE_SIZE * 0.5), centerZ),
+      baseY: lowY,
+      height: ALTITUDE_CUBE_SIZE,
+      halfSize: Math.max(rampHalfSizeX, rampHalfSizeZ),
+      halfSizeX: rampHalfSizeX,
+      halfSizeZ: rampHalfSizeZ,
+      rampId: ramp.id,
+      lowCell: cloneCell(ramp.lowCell),
+      highCell: cloneCell(ramp.highCell),
+      direction: cloneDirection(ramp.direction),
+      lowLevel: ramp.lowLevel,
+      highLevel: ramp.highLevel,
+      getSurfaceYAtWorld: getRampSurfaceYAtWorld,
+    });
+  }
+
+  function getRampSurfaceYAtWorld(worldX, worldZ) {
+    for (const rampObstacle of rampObstacles) {
+      const rampSurfaceY = rampObstacle.getSurfaceYAtWorld(worldX, worldZ);
+      if (Number.isFinite(rampSurfaceY)) {
+        return rampSurfaceY;
+      }
+    }
+    return null;
   }
 
   const tileGeo = new THREE.BoxGeometry(
@@ -601,7 +968,7 @@ export function createGrid(scene) {
     const wallMinZ = levelBounds.minZ + safeInset;
     const wallMaxZ = levelBounds.maxZ - safeInset;
     const wallBaseY = FLOOR_Y + boundaryWallConfig.baseYOffset;
-    const maxTerrainTopY = altitudeObstacles.reduce((maxTopY, obstacle) => {
+    const maxTerrainTopY = [...altitudeObstacles, ...rampObstacles].reduce((maxTopY, obstacle) => {
       const obstacleHeight = Number(obstacle?.height);
       const obstacleBaseY = Number.isFinite(Number(obstacle?.baseY))
         ? Number(obstacle.baseY)
@@ -789,6 +1156,10 @@ export function createGrid(scene) {
     if (!cell) {
       return FLOOR_Y;
     }
+    const rampSurfaceY = getRampSurfaceYAtWorld(worldX, worldZ);
+    if (Number.isFinite(rampSurfaceY)) {
+      return rampSurfaceY;
+    }
     return getCellSurfaceY(cell.x, cell.z);
   }
 
@@ -814,8 +1185,18 @@ export function createGrid(scene) {
 
     for (const obstacle of altitudeObstacles) {
       const obstacleHeight = Number(obstacle?.height);
-      const obstacleHalfSize = Number(obstacle?.halfSize);
-      if (!Number.isFinite(obstacleHeight) || obstacleHeight <= 0 || !Number.isFinite(obstacleHalfSize)) {
+      const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
+        ? Number(obstacle.halfSizeX)
+        : Number(obstacle?.halfSize);
+      const obstacleHalfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
+        ? Number(obstacle.halfSizeZ)
+        : Number(obstacle?.halfSize);
+      if (
+        !Number.isFinite(obstacleHeight)
+        || obstacleHeight <= 0
+        || !Number.isFinite(obstacleHalfSizeX)
+        || !Number.isFinite(obstacleHalfSizeZ)
+      ) {
         continue;
       }
 
@@ -827,14 +1208,14 @@ export function createGrid(scene) {
       }
 
       buildRaycastObstacleBox.min.set(
-        obstaclePos.x - obstacleHalfSize,
+        obstaclePos.x - obstacleHalfSizeX,
         obstacleMinY,
-        obstaclePos.z - obstacleHalfSize
+        obstaclePos.z - obstacleHalfSizeZ
       );
       buildRaycastObstacleBox.max.set(
-        obstaclePos.x + obstacleHalfSize,
+        obstaclePos.x + obstacleHalfSizeX,
         obstacleMinY + obstacleHeight,
-        obstaclePos.z + obstacleHalfSize
+        obstaclePos.z + obstacleHalfSizeZ
       );
 
       const obstacleHit = ray.intersectBox(buildRaycastObstacleBox, buildRaycastHitPoint);
@@ -848,6 +1229,38 @@ export function createGrid(scene) {
       }
       bestDistanceSq = hitDistanceSq;
       buildRaycastBestPoint.copy(obstacleHit);
+    }
+
+    for (const rampSurface of rampTopSurfaces) {
+      const firstHit = ray.intersectTriangle(
+        rampSurface.a,
+        rampSurface.b,
+        rampSurface.c,
+        false,
+        buildRaycastRampHitPoint
+      );
+      if (firstHit) {
+        const hitDistanceSq = firstHit.distanceToSquared(origin);
+        if (hitDistanceSq < bestDistanceSq) {
+          bestDistanceSq = hitDistanceSq;
+          buildRaycastBestPoint.copy(firstHit);
+        }
+      }
+
+      const secondHit = ray.intersectTriangle(
+        rampSurface.a,
+        rampSurface.c,
+        rampSurface.d,
+        false,
+        buildRaycastRampHitPoint
+      );
+      if (secondHit) {
+        const hitDistanceSq = secondHit.distanceToSquared(origin);
+        if (hitDistanceSq < bestDistanceSq) {
+          bestDistanceSq = hitDistanceSq;
+          buildRaycastBestPoint.copy(secondHit);
+        }
+      }
     }
 
     if (!Number.isFinite(bestDistanceSq)) {
@@ -874,6 +1287,13 @@ export function createGrid(scene) {
     return isMainGridCell(cellX, cellZ);
   }
 
+  function isCellBuildable(cellX, cellZ) {
+    if (!isMainGridCell(cellX, cellZ)) {
+      return false;
+    }
+    return !isRampCell(cellX, cellZ);
+  }
+
   return {
     spawnCells,
     endCell,
@@ -889,12 +1309,16 @@ export function createGrid(scene) {
     gridSize: GRID_SIZE,
     tiles,
     heightObstacles: altitudeObstacles,
+    rampObstacles,
     worldToCell,
     cellToWorldCenter,
     isPathCell,
     isSpawnCell,
     isEndCell,
     isCellInsideLevel,
+    isCellBuildable,
+    isRampCell: (cellX, cellZ) => isRampCell(cellX, cellZ),
+    getRampCellData: (cellX, cellZ) => getRampCellData(cellX, cellZ),
     getCellHeight: getCellHeightLevels,
     getCellMarker,
     getCellSurfaceY,
