@@ -165,6 +165,11 @@
 
 ### HUD + Menu Layout Contracts (Latest, Override)
 - Money HUD (top-right) shows only `$amount` now; the `"Cash"` label was removed and the panel is sized tighter.
+- Wave counter HUD now renders as a compact `Wave N` panel directly below the top-right money panel.
+- Wave counter value contract:
+  - during `BUILD`, show the queued/upcoming wave number.
+  - outside `BUILD`, show the active/current wave number.
+- Mobile tower tray top anchor is the stacked top-right HUD bottom (money + wave counter), not money-only bottom.
 - Desktop build hint text is exactly `Q to cancel`, auto-sized to text, and anchored above the build tray.
 - Touch primary action button label/icon swaps by mode:
   - normal gameplay: `Fire`

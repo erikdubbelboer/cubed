@@ -577,7 +577,7 @@ export const GAME_CONFIG = {
 
         // Laser combat tuning.
         // Max beam reach in world units. Typical range: 4-20.
-        range: 1,
+        range: 9,
         // Time between shots in seconds. Typical range: 0.1-2.0.
         fireInterval: 0.95,
         // AoE damage per hit. Typical range: 5-120.

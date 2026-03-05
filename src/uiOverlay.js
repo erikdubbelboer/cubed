@@ -569,6 +569,7 @@ export function createUiOverlay({
     showCrosshair: true,
     jetpackFuelRatio: 1,
     money: 0,
+    waveNumber: 1,
     towerInventory: [],
     selectedTowerType: null,
     buildMode: false,
@@ -660,6 +661,9 @@ export function createUiOverlay({
     }
     if (typeof partialState.money === "number") {
       state.money = Math.max(0, Math.floor(partialState.money));
+    }
+    if (typeof partialState.waveNumber === "number" && Number.isFinite(partialState.waveNumber)) {
+      state.waveNumber = Math.max(1, Math.floor(partialState.waveNumber));
     }
     if (Array.isArray(partialState.towerInventory)) {
       state.towerInventory = normalizeTowerInventory(partialState.towerInventory);
@@ -890,6 +894,95 @@ export function createUiOverlay({
       fittedMoney.text,
       panelX + panelWidth * 0.5,
       panelY + panelHeight * 0.55
+    );
+
+    pushTouchBlockedRect(panelX, panelY, panelWidth, panelHeight);
+  }
+
+  function getWaveCounterRect() {
+    if (state.menuOpen) {
+      return null;
+    }
+    const {
+      panelX: moneyPanelX,
+      panelY: moneyPanelY,
+      panelWidth: moneyPanelWidth,
+      panelHeight: moneyPanelHeight,
+    } = getMoneyPanelRect();
+    const topGap = state.showTouchControls
+      ? clamp(viewportHeight * 0.008, 4, 8)
+      : clamp(viewportHeight * 0.008, 5, 10);
+    const panelWidth = state.showTouchControls
+      ? clamp(moneyPanelWidth * 0.74, 74, 128)
+      : clamp(moneyPanelWidth * 0.72, 80, 134);
+    const panelHeight = state.showTouchControls
+      ? clamp(moneyPanelHeight * 0.62, 24, 38)
+      : clamp(moneyPanelHeight * 0.6, 24, 36);
+    const panelX = moneyPanelX + moneyPanelWidth - panelWidth;
+    const panelY = moneyPanelY + moneyPanelHeight + topGap;
+    return {
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+    };
+  }
+
+  function getTopRightHudStackBottom() {
+    const {
+      panelY: moneyPanelY,
+      panelHeight: moneyPanelHeight,
+    } = getMoneyPanelRect();
+    let stackBottom = moneyPanelY + moneyPanelHeight;
+    const waveRect = getWaveCounterRect();
+    if (waveRect) {
+      stackBottom = Math.max(stackBottom, waveRect.panelY + waveRect.panelHeight);
+    }
+    return stackBottom;
+  }
+
+  function drawWaveHud() {
+    const waveRect = getWaveCounterRect();
+    if (!waveRect) {
+      return;
+    }
+    const {
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+    } = waveRect;
+
+    const label = `Wave ${Math.max(1, Math.floor(state.waveNumber || 1))}`;
+
+    drawPanel(
+      drawCtx,
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+      clamp(panelHeight * 0.32, 7, 11),
+      "rgba(12, 23, 37, 0.78)",
+      "rgba(154, 214, 255, 0.54)",
+      1.1
+    );
+
+    drawCtx.fillStyle = "rgba(228, 244, 255, 0.97)";
+    drawCtx.textAlign = "center";
+    drawCtx.textBaseline = "middle";
+    const fittedText = fitLabelText(
+      drawCtx,
+      label,
+      Math.max(24, panelWidth - 10),
+      clamp(panelHeight * 0.56, 11, 18),
+      10,
+      700
+    );
+    drawCtx.font = `700 ${fittedText.fontSize}px ${FONT_STACK}`;
+    drawCtx.fillText(
+      fittedText.text,
+      panelX + panelWidth * 0.5,
+      panelY + panelHeight * 0.54
     );
 
     pushTouchBlockedRect(panelX, panelY, panelWidth, panelHeight);
@@ -1145,15 +1238,14 @@ export function createUiOverlay({
     if (mobileTowerColumn) {
       const {
         panelX: moneyPanelX,
-        panelY: moneyPanelY,
         panelWidth: moneyPanelWidth,
-        panelHeight: moneyPanelHeight,
       } = getMoneyPanelRect();
       const topGap = clamp(viewportHeight * 0.01, 6, 10);
       const bottomMargin = clamp(viewportHeight * 0.02, 12, 20);
+      const topHudBottom = getTopRightHudStackBottom();
       const availableHeight = Math.max(
         52,
-        viewportHeight - (moneyPanelY + moneyPanelHeight + topGap) - bottomMargin
+        viewportHeight - (topHudBottom + topGap) - bottomMargin
       );
       const neededHeight = (slotSize * visibleInventory.length) + (slotGap * (visibleInventory.length - 1));
       if (neededHeight > availableHeight) {
@@ -1164,7 +1256,7 @@ export function createUiOverlay({
         slotGap = clamp(slotSize * 0.12, 6, 10);
       }
       baseX = moneyPanelX + moneyPanelWidth - slotSize;
-      baseY = moneyPanelY + moneyPanelHeight + topGap;
+      baseY = topHudBottom + topGap;
     } else {
       const trayWidth = (slotSize * visibleInventory.length) + (slotGap * (visibleInventory.length - 1));
       baseX = (viewportWidth - trayWidth) * 0.5;
@@ -1716,6 +1808,7 @@ export function createUiOverlay({
 
     drawJetpackHud();
     drawMoneyHud();
+    drawWaveHud();
     drawBuildPhaseTimer();
     drawFpsHud();
     drawHudUtilityButtons();

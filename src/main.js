@@ -1496,6 +1496,18 @@ function animate() {
       hotkey: String((index + 1) % 10 || 0),
     }))
     : [];
+  const hudWaveNumber = Math.max(
+    1,
+    Math.floor(
+      (
+        waveState === "BUILD"
+          && Number.isInteger(queuedWaveNumber)
+          && queuedWaveNumber > 0
+      )
+        ? queuedWaveNumber
+        : (currentWave || 1)
+    )
+  );
   const showTouchControls = isTouchDevice || forceTouchControls;
   const touchPortrait = window.innerHeight >= window.innerWidth;
 
@@ -1512,6 +1524,7 @@ function animate() {
     menuCursorVisible: waveState === "MENU" && !!player?.controls?.isLocked,
     jetpackFuelRatio: player ? player.getJetpackFuelRatio() : 1,
     money: playerMoney,
+    waveNumber: hudWaveNumber,
     towerInventory,
     selectedTowerType: towerSystem ? towerSystem.getSelectedTowerType() : null,
     buildMode: towerSystem ? towerSystem.isBuildMode() : false,
