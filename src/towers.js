@@ -150,6 +150,7 @@ export function createTowerSystem({
   getCurrentMoney = null,
   spendMoney = null,
   canBlockCell = null,
+  getBlockedRevision = null,
   onBlockedCellsChanged = null,
 } = {}) {
   const raycaster = new THREE.Raycaster();
@@ -342,6 +343,7 @@ export function createTowerSystem({
   let previewValid = false;
   let previewPosition = null;
   let previewCell = null;
+  let previewPathBlockCache = null;
 
   const reservedCellKeys = new Set(
     spawnCells.map((cell) => `${cell.x},${cell.z}`)
@@ -454,7 +456,47 @@ export function createTowerSystem({
       .filter((cell) => Number.isInteger(cell.x) && Number.isInteger(cell.z));
   }
 
+  function clearPreviewPathBlockCache() {
+    previewPathBlockCache = null;
+  }
+
+  function getCurrentBlockedRevision() {
+    if (typeof getBlockedRevision !== "function") {
+      return 0;
+    }
+    const revision = Number(getBlockedRevision());
+    if (!Number.isFinite(revision)) {
+      return 0;
+    }
+    return Math.floor(revision);
+  }
+
+  function canBlockCellCached(cellX, cellZ) {
+    if (typeof canBlockCell !== "function") {
+      return true;
+    }
+    const blockedRevision = getCurrentBlockedRevision();
+    if (
+      previewPathBlockCache
+      && previewPathBlockCache.cellX === cellX
+      && previewPathBlockCache.cellZ === cellZ
+      && previewPathBlockCache.blockedRevision === blockedRevision
+    ) {
+      return previewPathBlockCache.valid;
+    }
+
+    const valid = !!canBlockCell(cellX, cellZ);
+    previewPathBlockCache = {
+      cellX,
+      cellZ,
+      blockedRevision,
+      valid,
+    };
+    return valid;
+  }
+
   function notifyBlockedCellsChanged() {
+    clearPreviewPathBlockCache();
     if (typeof onBlockedCellsChanged !== "function") {
       return;
     }
@@ -1082,7 +1124,7 @@ export function createTowerSystem({
     );
   }
 
-  function isPlacementValid(cellX, cellZ, worldPosition) {
+  function isPlacementLocallyValid(cellX, cellZ, worldPosition) {
     if (!Number.isInteger(cellX) || !Number.isInteger(cellZ)) {
       return false;
     }
@@ -1101,7 +1143,14 @@ export function createTowerSystem({
     if (findTowerAtCell(cellX, cellZ)) {
       return false;
     }
-    if (typeof canBlockCell === "function" && !canBlockCell(cellX, cellZ)) {
+    return true;
+  }
+
+  function isPlacementValid(cellX, cellZ, worldPosition) {
+    if (!isPlacementLocallyValid(cellX, cellZ, worldPosition)) {
+      return false;
+    }
+    if (!canBlockCellCached(cellX, cellZ)) {
       return false;
     }
     return true;
@@ -1137,6 +1186,7 @@ export function createTowerSystem({
     preview.visible = true;
     setPathRangeHighlightValidityVisual(false);
     hidePathRangeHighlights();
+    clearPreviewPathBlockCache();
     previewValid = false;
     previewPosition = null;
     previewCell = null;
@@ -1148,6 +1198,7 @@ export function createTowerSystem({
     selectedTowerType = null;
     preview.visible = false;
     hidePathRangeHighlights();
+    clearPreviewPathBlockCache();
     previewValid = false;
     previewPosition = null;
     previewCell = null;
@@ -1569,13 +1620,6 @@ export function createTowerSystem({
       || !previewPosition
       || !previewCell
     ) {
-      return false;
-    }
-
-    if (!isPlacementValid(previewCell.x, previewCell.z, previewPosition)) {
-      previewValid = false;
-      setPreviewValidityVisual(false);
-      setPathRangeHighlightValidityVisual(false);
       return false;
     }
 

@@ -205,6 +205,7 @@
 - `window.gameDebug` exposes useful runtime helpers:
   - `addMoney(amount)`, `getMoney()`, `unlockTower(type)`
   - `placeBasicTower(x, z)`, `spawnEnemy(type)`
+  - `getPathfindingPerf()` to inspect pathfinding timing/cache counters
   - `setForceTouchControls(bool)` for mobile UI testing on desktop
 
 ### Quick Validation Notes
@@ -264,7 +265,15 @@
   - Cardinal neighbors only (no diagonals), so no corner cutting.
   - Height rule for normal cells: neighbors are traversable only when `getCellHeight` is exactly equal (no wall climbing).
   - Ramp rule: enemies can only enter/exit ramps from valid forward/backward ends, never from ramp sides; they must traverse full ramp cells.
-  - Route variety: up to 6 spawn->end variants chosen from a larger shortest-path candidate pool with overlap penalty.
+  - Pathfinding performance architecture (latest):
+    - A static per-cell navigation graph is prebuilt once (outgoing + incoming adjacency).
+    - Blocker validation uses a single reverse distance-field rebuild from `end` (`canBlockCell` simulates one extra blocked node).
+    - `canBlockCell` results are memoized per candidate cell and invalidated when blocked revision changes.
+    - `setBlockedCells` commits blockers only after one reachability rebuild confirms every spawn is still connected.
+  - Route variety is now two-stage:
+    - Stage A (sync): route index `0` (shortest) is rebuilt immediately for each spawn.
+    - Stage B (async): extra variants are built incrementally each frame under `GAME_CONFIG.enemies.pathVariantBuildBudgetMs`.
+    - `GAME_CONFIG.enemies.pathCandidatePoolSize` now acts as per-spawn adaptive variant attempt budget (not Yen candidate pool size).
   - Spawn alternation is round-robin across `spawnCells` per wave (`0,1,0,1...`), reset on `startWave`.
   - Endpoint behavior: enemies despawn only once their full body is inside the end cube volume.
   - Enemies still do **not** collide with each other.
@@ -282,10 +291,16 @@
 - Path blocking contract between towers and enemies:
   - `enemySystem.canBlockCell(cellX, cellZ)` validates that **every** spawn still has a route to `E`.
   - `enemySystem.setBlockedCells(cells)` applies tower blockers and immediately reroutes active enemies.
+  - `enemySystem.getBlockedRevision()` increments when blocked tower cells change.
   - `enemySystem.getRoutePreviewPaths()` exposes current per-spawn route pools for build-phase route-trail rendering.
+  - `enemySystem.getPathfindingPerfStats()` exposes timing/cache counters for manual perf checks.
   - `createTowerSystem(...)` now accepts callbacks:
     - `canBlockCell`
+    - `getBlockedRevision`
     - `onBlockedCellsChanged`
+- Tower build preview path-checking contract (latest):
+  - `towers.js` caches path-block validity by `(cellX, cellZ, blockedRevision)` to avoid repeated checks while hovering the same cell.
+  - Placement click no longer performs a second redundant `isPlacementValid(...)` pass after `updatePreviewFromCamera()`.
 - Reroute mode decision:
   - Active enemies reroute immediately after each blocker change (mid-run, no waiting for next cell).
 - Build-phase path preview contract:

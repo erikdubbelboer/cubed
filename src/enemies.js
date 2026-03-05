@@ -24,11 +24,12 @@ const ENEMY_STACK_OFFSET_MAX = Math.max(
 );
 const ENEMY_PATH_Y_OFFSET = GRID_CONFIG.enemyPathYOffset;
 const ROUTE_VARIANT_COUNT = Math.max(1, Math.floor(Number(ENEMY_CONFIG.pathVariantCount) || 6));
-const ROUTE_CANDIDATE_POOL_SIZE = Math.max(
+const ROUTE_VARIANT_ATTEMPT_BUDGET = Math.max(
   ROUTE_VARIANT_COUNT,
   Math.floor(Number(ENEMY_CONFIG.pathCandidatePoolSize) || 24)
 );
 const ROUTE_OVERLAP_PENALTY = Math.max(0, Number(ENEMY_CONFIG.pathOverlapPenalty) || 0.45);
+const ROUTE_VARIANT_BUILD_BUDGET_MS = Math.max(0, Number(ENEMY_CONFIG.pathVariantBuildBudgetMs) || 1);
 const RAMP_ROLE_LOW = "low";
 const RAMP_ROLE_HIGH = "high";
 const ENEMY_SURFACE_HOVER_HEIGHT = Math.max(0, Number(ENEMY_CONFIG.hoverHeight) || 0);
@@ -103,25 +104,6 @@ function makeUndirectedEdgeKey(aKey, bKey) {
   return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
 }
 
-function makeDirectedEdgeKey(aKey, bKey) {
-  return `${aKey}>${bKey}`;
-}
-
-function samePathPrefix(pathA, pathB, prefixLength) {
-  if (!pathA || !pathB || prefixLength <= 0) {
-    return false;
-  }
-  if (pathA.length < prefixLength || pathB.length < prefixLength) {
-    return false;
-  }
-  for (let i = 0; i < prefixLength; i += 1) {
-    if (pathA[i].x !== pathB[i].x || pathA[i].z !== pathB[i].z) {
-      return false;
-    }
-  }
-  return true;
-}
-
 function createPathObject(cells) {
   const normalizedCells = cells.map((cell) => ({ x: cell.x, z: cell.z }));
   const keys = normalizedCells.map((cell) => cellKey(cell.x, cell.z));
@@ -167,10 +149,39 @@ export function createEnemySystem(scene, grid, options = {}) {
   let enemySpawnSerial = 0;
   let spawnCellCursor = 0;
 
-  const blockedCells = new Set();
+  const blockedCellKeys = new Set();
   const spawnCellSet = new Set(spawnCells.map((cell) => cellKey(cell.x, cell.z)));
   const endCellKey = cellKey(endCell.x, endCell.z);
   const routePoolsBySpawnIndex = new Map();
+
+  const totalNodeCount = gridSize * gridSize;
+  const blockedByNode = new Uint8Array(totalNodeCount);
+  const distanceToEnd = new Int32Array(totalNodeCount);
+  const scratchDistanceToEnd = new Int32Array(totalNodeCount);
+  const bfsQueue = new Int32Array(totalNodeCount);
+  const nodeExists = new Uint8Array(totalNodeCount);
+  const nodeOutgoing = new Array(totalNodeCount);
+  const nodeIncoming = new Array(totalNodeCount);
+  const spawnNodeIds = [];
+  const canBlockCacheByNode = new Map();
+  let blockedRevision = 0;
+  let variantBuildQueue = [];
+  const pathPerfStats = {
+    canBlockCalls: 0,
+    canBlockCacheHits: 0,
+    canBlockTotalMs: 0,
+    canBlockLastMs: 0,
+    setBlockedCalls: 0,
+    setBlockedTotalMs: 0,
+    setBlockedLastMs: 0,
+    rerouteCalls: 0,
+    rerouteTotalMs: 0,
+    rerouteLastMs: 0,
+    variantBuildFrames: 0,
+    variantBuildTotalMs: 0,
+    variantBuildLastMs: 0,
+    variantRoutesAdded: 0,
+  };
 
   const tempCenterPosition = new THREE.Vector3();
   const tempForwardDirection = new THREE.Vector3();
@@ -183,6 +194,11 @@ export function createEnemySystem(scene, grid, options = {}) {
   const tempSegmentEnd = new THREE.Vector3();
   const tempFrontRampContact = new THREE.Vector3();
   const tempBackRampContact = new THREE.Vector3();
+  const hasPerformanceNow = typeof globalThis.performance?.now === "function";
+
+  function getNowMs() {
+    return hasPerformanceNow ? globalThis.performance.now() : Date.now();
+  }
 
   const endCellSurfaceY = typeof grid?.getCellSurfaceY === "function"
     ? grid.getCellSurfaceY(endCell.x, endCell.z)
@@ -271,9 +287,27 @@ export function createEnemySystem(scene, grid, options = {}) {
     return out.set(0, surfaceY + ENEMY_PATH_Y_OFFSET, 0);
   }
 
-  function isBlocked(cellX, cellZ, extraBlockedSet = null) {
-    const key = cellKey(cellX, cellZ);
-    return blockedCells.has(key) || (!!extraBlockedSet && extraBlockedSet.has(key));
+  function nodeIdFromCell(cellX, cellZ) {
+    if (!Number.isInteger(cellX) || !Number.isInteger(cellZ)) {
+      return -1;
+    }
+    if (cellX < 0 || cellX >= gridSize || cellZ < 0 || cellZ >= gridSize) {
+      return -1;
+    }
+    return (cellZ * gridSize) + cellX;
+  }
+
+  function cellFromNodeId(nodeId) {
+    return {
+      x: nodeId % gridSize,
+      z: Math.floor(nodeId / gridSize),
+    };
+  }
+
+  const endNodeId = nodeIdFromCell(endCell.x, endCell.z);
+
+  function isNodeBlocked(nodeId, extraBlockedNodeId = -1) {
+    return (nodeId === extraBlockedNodeId) || blockedByNode[nodeId] === 1;
   }
 
   function isReservedEndpoint(cellX, cellZ) {
@@ -281,15 +315,43 @@ export function createEnemySystem(scene, grid, options = {}) {
     return key === endCellKey || spawnCellSet.has(key);
   }
 
-  function getNeighborCells(cellX, cellZ, extraBlockedSet = null, bannedNodes = null, bannedEdges = null) {
-    const neighbors = [];
-    const currentHeight = getCellHeight(cellX, cellZ);
-    if (!Number.isFinite(currentHeight)) {
-      return neighbors;
+  function isValidTransition(currentCell, nextCell, currentHeight, neighborHeight, currentRampCell, nextRampCell) {
+    if (currentRampCell) {
+      if (currentRampCell.role === RAMP_ROLE_LOW) {
+        const toHighRampCell = areCellsEqual(nextCell, currentRampCell.highCell)
+          && neighborHeight === currentRampCell.highLevel;
+        const toLowOuterCell = areCellsEqual(nextCell, currentRampCell.lowOuterCell)
+          && neighborHeight === currentRampCell.lowLevel;
+        return toHighRampCell || toLowOuterCell;
+      }
+      if (currentRampCell.role === RAMP_ROLE_HIGH) {
+        const toLowRampCell = areCellsEqual(nextCell, currentRampCell.lowCell)
+          && neighborHeight === currentRampCell.lowLevel;
+        const toHighOuterCell = areCellsEqual(nextCell, currentRampCell.highOuterCell)
+          && neighborHeight === currentRampCell.highLevel;
+        return toLowRampCell || toHighOuterCell;
+      }
+      return false;
     }
 
-    const currentCell = { x: cellX, z: cellZ };
-    const currentRampCell = getRampCellData(cellX, cellZ);
+    if (nextRampCell) {
+      if (nextRampCell.role === RAMP_ROLE_LOW) {
+        return areCellsEqual(currentCell, nextRampCell.lowOuterCell)
+          && currentHeight === nextRampCell.lowLevel
+          && neighborHeight === nextRampCell.lowLevel;
+      }
+      if (nextRampCell.role === RAMP_ROLE_HIGH) {
+        return areCellsEqual(currentCell, nextRampCell.highOuterCell)
+          && currentHeight === nextRampCell.highLevel
+          && neighborHeight === nextRampCell.highLevel;
+      }
+      return false;
+    }
+
+    return neighborHeight === currentHeight;
+  }
+
+  function buildNavigationGraph() {
     const offsets = [
       [1, 0],
       [-1, 0],
@@ -297,280 +359,292 @@ export function createEnemySystem(scene, grid, options = {}) {
       [0, -1],
     ];
 
-    const fromKey = cellKey(cellX, cellZ);
-    for (const [dx, dz] of offsets) {
-      const nx = cellX + dx;
-      const nz = cellZ + dz;
-      const nextKey = cellKey(nx, nz);
-      if (!isCellInsideLevel(nx, nz)) {
-        continue;
-      }
-      if (bannedNodes?.has(nextKey)) {
-        continue;
-      }
-      if (bannedEdges?.has(makeDirectedEdgeKey(fromKey, nextKey))) {
-        continue;
-      }
-
-      const neighborHeight = getCellHeight(nx, nz);
-      if (!Number.isFinite(neighborHeight)) {
-        continue;
-      }
-
-      const nextCell = { x: nx, z: nz };
-      const nextRampCell = getRampCellData(nx, nz);
-      let isValidNeighbor = false;
-
-      if (currentRampCell) {
-        if (currentRampCell.role === RAMP_ROLE_LOW) {
-          const toHighRampCell = areCellsEqual(nextCell, currentRampCell.highCell)
-            && neighborHeight === currentRampCell.highLevel;
-          const toLowOuterCell = areCellsEqual(nextCell, currentRampCell.lowOuterCell)
-            && neighborHeight === currentRampCell.lowLevel;
-          isValidNeighbor = toHighRampCell || toLowOuterCell;
-        } else if (currentRampCell.role === RAMP_ROLE_HIGH) {
-          const toLowRampCell = areCellsEqual(nextCell, currentRampCell.lowCell)
-            && neighborHeight === currentRampCell.lowLevel;
-          const toHighOuterCell = areCellsEqual(nextCell, currentRampCell.highOuterCell)
-            && neighborHeight === currentRampCell.highLevel;
-          isValidNeighbor = toLowRampCell || toHighOuterCell;
-        }
-      } else if (nextRampCell) {
-        if (nextRampCell.role === RAMP_ROLE_LOW) {
-          const fromLowEntry = areCellsEqual(currentCell, nextRampCell.lowOuterCell)
-            && currentHeight === nextRampCell.lowLevel
-            && neighborHeight === nextRampCell.lowLevel;
-          isValidNeighbor = fromLowEntry;
-        } else if (nextRampCell.role === RAMP_ROLE_HIGH) {
-          const fromHighEntry = areCellsEqual(currentCell, nextRampCell.highOuterCell)
-            && currentHeight === nextRampCell.highLevel
-            && neighborHeight === nextRampCell.highLevel;
-          isValidNeighbor = fromHighEntry;
-        }
-      } else {
-        isValidNeighbor = neighborHeight === currentHeight;
-      }
-
-      if (!isValidNeighbor) {
-        continue;
-      }
-
-      if (isBlocked(nx, nz, extraBlockedSet) && nextKey !== endCellKey) {
-        continue;
-      }
-      neighbors.push({ x: nx, z: nz });
+    for (let nodeId = 0; nodeId < totalNodeCount; nodeId += 1) {
+      nodeExists[nodeId] = 0;
+      nodeOutgoing[nodeId] = [];
+      nodeIncoming[nodeId] = [];
     }
 
-    return neighbors;
-  }
-
-  function findShortestPathCells(startCell, targetCell, options = {}) {
-    if (!startCell || !targetCell) {
-      return null;
-    }
-
-    const extraBlockedSet = options.extraBlockedSet ?? null;
-    const bannedNodes = options.bannedNodes ?? null;
-    const bannedEdges = options.bannedEdges ?? null;
-    const allowStartBlocked = !!options.allowStartBlocked;
-
-    if (!isCellInsideLevel(startCell.x, startCell.z) || !isCellInsideLevel(targetCell.x, targetCell.z)) {
-      return null;
-    }
-
-    const startKey = cellKey(startCell.x, startCell.z);
-    const targetKey = cellKey(targetCell.x, targetCell.z);
-
-    const startHeight = getCellHeight(startCell.x, startCell.z);
-    const targetHeight = getCellHeight(targetCell.x, targetCell.z);
-    if (!Number.isFinite(startHeight) || !Number.isFinite(targetHeight)) {
-      return null;
-    }
-
-    if (!allowStartBlocked && isBlocked(startCell.x, startCell.z, extraBlockedSet) && startKey !== targetKey) {
-      return null;
-    }
-    if (isBlocked(targetCell.x, targetCell.z, extraBlockedSet) && targetKey !== startKey) {
-      return null;
-    }
-    if (bannedNodes?.has(startKey) || bannedNodes?.has(targetKey)) {
-      return null;
-    }
-
-    const queue = [startKey];
-    const visited = new Set([startKey]);
-    const previousByKey = new Map();
-
-    let queueCursor = 0;
-    while (queueCursor < queue.length) {
-      const currentKey = queue[queueCursor];
-      queueCursor += 1;
-
-      if (currentKey === targetKey) {
-        break;
-      }
-
-      const currentCell = parseCellKey(currentKey);
-      const neighbors = getNeighborCells(
-        currentCell.x,
-        currentCell.z,
-        extraBlockedSet,
-        bannedNodes,
-        bannedEdges
-      );
-
-      for (const neighbor of neighbors) {
-        const neighborKey = cellKey(neighbor.x, neighbor.z);
-        if (visited.has(neighborKey)) {
+    for (let cellZ = 0; cellZ < gridSize; cellZ += 1) {
+      for (let cellX = 0; cellX < gridSize; cellX += 1) {
+        if (!isCellInsideLevel(cellX, cellZ)) {
           continue;
         }
-        visited.add(neighborKey);
-        previousByKey.set(neighborKey, currentKey);
-        queue.push(neighborKey);
+        const height = getCellHeight(cellX, cellZ);
+        if (!Number.isFinite(height)) {
+          continue;
+        }
+        const nodeId = nodeIdFromCell(cellX, cellZ);
+        if (nodeId >= 0) {
+          nodeExists[nodeId] = 1;
+        }
       }
     }
 
-    if (!visited.has(targetKey)) {
-      return null;
+    for (let cellZ = 0; cellZ < gridSize; cellZ += 1) {
+      for (let cellX = 0; cellX < gridSize; cellX += 1) {
+        const nodeId = nodeIdFromCell(cellX, cellZ);
+        if (nodeId < 0 || nodeExists[nodeId] !== 1) {
+          continue;
+        }
+
+        const currentHeight = getCellHeight(cellX, cellZ);
+        if (!Number.isFinite(currentHeight)) {
+          continue;
+        }
+        const currentCell = { x: cellX, z: cellZ };
+        const currentRampCell = getRampCellData(cellX, cellZ);
+        const neighbors = [];
+
+        for (const [dx, dz] of offsets) {
+          const nextX = cellX + dx;
+          const nextZ = cellZ + dz;
+          const nextNodeId = nodeIdFromCell(nextX, nextZ);
+          if (nextNodeId < 0 || nodeExists[nextNodeId] !== 1) {
+            continue;
+          }
+          if (!isCellInsideLevel(nextX, nextZ)) {
+            continue;
+          }
+
+          const neighborHeight = getCellHeight(nextX, nextZ);
+          if (!Number.isFinite(neighborHeight)) {
+            continue;
+          }
+
+          const nextCell = { x: nextX, z: nextZ };
+          const nextRampCell = getRampCellData(nextX, nextZ);
+          if (!isValidTransition(
+            currentCell,
+            nextCell,
+            currentHeight,
+            neighborHeight,
+            currentRampCell,
+            nextRampCell
+          )) {
+            continue;
+          }
+
+          neighbors.push(nextNodeId);
+        }
+
+        nodeOutgoing[nodeId] = neighbors;
+      }
     }
 
-    const cells = [];
-    let walkKey = targetKey;
-    while (walkKey) {
-      const cell = parseCellKey(walkKey);
-      cells.push(cell);
-      walkKey = previousByKey.get(walkKey) ?? null;
+    for (let nodeId = 0; nodeId < totalNodeCount; nodeId += 1) {
+      if (nodeExists[nodeId] !== 1) {
+        continue;
+      }
+      for (const neighborNodeId of nodeOutgoing[nodeId]) {
+        nodeIncoming[neighborNodeId].push(nodeId);
+      }
     }
-    cells.reverse();
-    return cells;
   }
 
-  function buildPathCandidates(startCell, maxCandidates, options = {}) {
-    const candidates = [];
-    const firstPathCells = findShortestPathCells(startCell, endCell, options);
-    if (!firstPathCells || firstPathCells.length === 0) {
-      return candidates;
+  function rebuildDistanceField(targetDistanceField, extraBlockedNodeId = -1) {
+    targetDistanceField.fill(-1);
+    if (endNodeId < 0 || nodeExists[endNodeId] !== 1 || isNodeBlocked(endNodeId, extraBlockedNodeId)) {
+      return false;
     }
 
-    const acceptedPaths = [createPathObject(firstPathCells)];
-    const pendingByKey = new Map();
+    let queueHead = 0;
+    let queueTail = 0;
+    bfsQueue[queueTail] = endNodeId;
+    queueTail += 1;
+    targetDistanceField[endNodeId] = 0;
 
-    for (let k = 1; k < maxCandidates; k += 1) {
-      const previous = acceptedPaths[k - 1];
-      const previousCells = previous.cells;
-      if (previousCells.length <= 1) {
-        break;
+    while (queueHead < queueTail) {
+      const currentNodeId = bfsQueue[queueHead];
+      queueHead += 1;
+      const nextDistance = targetDistanceField[currentNodeId] + 1;
+      const incoming = nodeIncoming[currentNodeId];
+      for (let i = 0; i < incoming.length; i += 1) {
+        const previousNodeId = incoming[i];
+        if (targetDistanceField[previousNodeId] !== -1) {
+          continue;
+        }
+        if (isNodeBlocked(previousNodeId, extraBlockedNodeId) && previousNodeId !== endNodeId) {
+          continue;
+        }
+        targetDistanceField[previousNodeId] = nextDistance;
+        bfsQueue[queueTail] = previousNodeId;
+        queueTail += 1;
+      }
+    }
+
+    return true;
+  }
+
+  function areAllSpawnsReachable(distanceField) {
+    for (const spawnNodeId of spawnNodeIds) {
+      if (spawnNodeId < 0 || distanceField[spawnNodeId] < 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function makeNodeEdgeKey(nodeA, nodeB) {
+    const a = cellFromNodeId(nodeA);
+    const b = cellFromNodeId(nodeB);
+    return makeUndirectedEdgeKey(cellKey(a.x, a.z), cellKey(b.x, b.z));
+  }
+
+  function pickExitNeighborFromBlockedStart(startNodeId, distanceField, options = {}) {
+    let bestNodeId = -1;
+    let bestScore = Number.POSITIVE_INFINITY;
+    let bestTieBreak = Number.POSITIVE_INFINITY;
+    const candidates = nodeOutgoing[startNodeId] ?? [];
+    const selectedRoutes = options.selectedRoutes ?? [];
+    const spawnIndex = options.spawnIndex ?? 0;
+    const attemptSeed = options.attemptSeed ?? 0;
+
+    for (let i = 0; i < candidates.length; i += 1) {
+      const neighborNodeId = candidates[i];
+      if (isNodeBlocked(neighborNodeId) && neighborNodeId !== endNodeId) {
+        continue;
+      }
+      const neighborDistance = distanceField[neighborNodeId];
+      if (neighborDistance < 0) {
+        continue;
       }
 
-      for (let i = 0; i < previousCells.length - 1; i += 1) {
-        const rootPath = previousCells.slice(0, i + 1);
-        const spurNode = rootPath[rootPath.length - 1];
-        const bannedEdges = new Set();
-
-        for (const accepted of acceptedPaths) {
-          if (samePathPrefix(accepted.cells, rootPath, rootPath.length) && accepted.cells.length > i + 1) {
-            const fromKey = cellKey(accepted.cells[i].x, accepted.cells[i].z);
-            const toKey = cellKey(accepted.cells[i + 1].x, accepted.cells[i + 1].z);
-            bannedEdges.add(makeDirectedEdgeKey(fromKey, toKey));
+      let score = neighborDistance;
+      if (options.preferDiversity) {
+        const edgeKey = makeNodeEdgeKey(startNodeId, neighborNodeId);
+        let overlapCount = 0;
+        for (const route of selectedRoutes) {
+          if (route?.edgeSet?.has(edgeKey)) {
+            overlapCount += 1;
           }
         }
-
-        const bannedNodes = new Set(
-          rootPath
-            .slice(0, -1)
-            .map((cell) => cellKey(cell.x, cell.z))
+        const jitter = pseudoRandom01(
+          ((spawnIndex + 1) * 1579)
+          + ((attemptSeed + 1) * 211)
+          + ((startNodeId + 1) * 61)
+          + ((neighborNodeId + 1) * 103)
         );
-
-        const spurPath = findShortestPathCells(spurNode, endCell, {
-          ...options,
-          bannedNodes,
-          bannedEdges,
-          allowStartBlocked: true,
-        });
-
-        if (!spurPath || spurPath.length === 0) {
-          continue;
-        }
-
-        const fullCells = [...rootPath.slice(0, -1), ...spurPath];
-        const pathObj = createPathObject(fullCells);
-        if (!pendingByKey.has(pathObj.key) && !acceptedPaths.some((accepted) => accepted.key === pathObj.key)) {
-          pendingByKey.set(pathObj.key, pathObj);
-        }
+        score += (overlapCount * ROUTE_OVERLAP_PENALTY) + (jitter * 0.5);
       }
 
-      if (pendingByKey.size === 0) {
-        break;
+      if (score < bestScore || (score === bestScore && neighborNodeId < bestTieBreak)) {
+        bestScore = score;
+        bestTieBreak = neighborNodeId;
+        bestNodeId = neighborNodeId;
       }
-
-      const pending = Array.from(pendingByKey.values()).sort(comparePathObjects);
-      const best = pending[0];
-      pendingByKey.delete(best.key);
-      acceptedPaths.push(best);
     }
 
-    candidates.push(...acceptedPaths.sort(comparePathObjects));
-    return candidates;
+    return bestNodeId;
   }
 
-  function countSharedEdges(pathA, pathB) {
-    if (!pathA || !pathB) {
-      return 0;
-    }
-    let shared = 0;
-    for (const edge of pathA.edgeSet) {
-      if (pathB.edgeSet.has(edge)) {
-        shared += 1;
+  function pickForwardNeighbor(currentNodeId, currentDistance, distanceField, options = {}) {
+    let bestNodeId = -1;
+    let bestScore = Number.POSITIVE_INFINITY;
+    let bestTieBreak = Number.POSITIVE_INFINITY;
+    const candidates = nodeOutgoing[currentNodeId] ?? [];
+    const selectedRoutes = options.selectedRoutes ?? [];
+    const spawnIndex = options.spawnIndex ?? 0;
+    const attemptSeed = options.attemptSeed ?? 0;
+
+    for (let i = 0; i < candidates.length; i += 1) {
+      const neighborNodeId = candidates[i];
+      if (distanceField[neighborNodeId] !== currentDistance - 1) {
+        continue;
       }
-    }
-    return shared;
-  }
-
-  function selectDiverseRoutes(candidates, count, overlapPenalty) {
-    if (!Array.isArray(candidates) || candidates.length === 0) {
-      return [];
-    }
-    if (candidates.length <= count) {
-      return candidates.slice();
-    }
-
-    const selected = [candidates[0]];
-    const remaining = candidates.slice(1);
-
-    while (selected.length < count && remaining.length > 0) {
-      let bestIndex = 0;
-      let bestScore = Number.POSITIVE_INFINITY;
-      let bestTieKey = "";
-
-      for (let i = 0; i < remaining.length; i += 1) {
-        const candidate = remaining[i];
-        let overlap = 0;
-        for (const picked of selected) {
-          overlap += countSharedEdges(candidate, picked);
-        }
-
-        const score = candidate.cost + overlap * overlapPenalty;
-        const tieKey = `${candidate.cost}|${candidate.key}`;
-        if (score < bestScore || (score === bestScore && tieKey < bestTieKey)) {
-          bestScore = score;
-          bestTieKey = tieKey;
-          bestIndex = i;
-        }
+      if (isNodeBlocked(neighborNodeId) && neighborNodeId !== endNodeId) {
+        continue;
       }
 
-      selected.push(remaining[bestIndex]);
-      remaining.splice(bestIndex, 1);
+      let score = neighborNodeId;
+      if (options.preferDiversity) {
+        const edgeKey = makeNodeEdgeKey(currentNodeId, neighborNodeId);
+        let overlapCount = 0;
+        for (const route of selectedRoutes) {
+          if (route?.edgeSet?.has(edgeKey)) {
+            overlapCount += 1;
+          }
+        }
+        const jitter = pseudoRandom01(
+          ((spawnIndex + 1) * 1237)
+          + ((attemptSeed + 1) * 337)
+          + ((currentNodeId + 1) * 71)
+          + ((neighborNodeId + 1) * 89)
+        );
+        score = (overlapCount * ROUTE_OVERLAP_PENALTY) + jitter;
+      }
+
+      if (score < bestScore || (score === bestScore && neighborNodeId < bestTieBreak)) {
+        bestScore = score;
+        bestTieBreak = neighborNodeId;
+        bestNodeId = neighborNodeId;
+      }
     }
 
-    return selected;
+    return bestNodeId;
   }
 
-  function buildRoutePoolForStartCell(startCell, options = {}) {
-    const candidates = buildPathCandidates(startCell, ROUTE_CANDIDATE_POOL_SIZE, options);
-    if (candidates.length === 0) {
-      return [];
+  function buildShortestRouteFromNode(startNodeId, options = {}) {
+    if (!Number.isInteger(startNodeId) || startNodeId < 0 || startNodeId >= totalNodeCount) {
+      return null;
     }
-    return selectDiverseRoutes(candidates, ROUTE_VARIANT_COUNT, ROUTE_OVERLAP_PENALTY);
+    if (nodeExists[startNodeId] !== 1) {
+      return null;
+    }
+
+    const allowStartBlocked = !!options.allowStartBlocked;
+    if (!allowStartBlocked && isNodeBlocked(startNodeId) && startNodeId !== endNodeId) {
+      return null;
+    }
+
+    const distanceField = options.distanceField ?? distanceToEnd;
+    if (!distanceField || distanceField.length !== totalNodeCount) {
+      return null;
+    }
+    if (endNodeId < 0 || distanceField[endNodeId] !== 0) {
+      return null;
+    }
+
+    const nodePath = [startNodeId];
+    let currentNodeId = startNodeId;
+    let currentDistance = distanceField[currentNodeId];
+
+    if (currentNodeId !== endNodeId && currentDistance < 0) {
+      if (!allowStartBlocked) {
+        return null;
+      }
+      const exitNodeId = pickExitNeighborFromBlockedStart(currentNodeId, distanceField, options);
+      if (exitNodeId < 0) {
+        return null;
+      }
+      nodePath.push(exitNodeId);
+      currentNodeId = exitNodeId;
+      currentDistance = distanceField[currentNodeId];
+      if (currentDistance < 0) {
+        return null;
+      }
+    }
+
+    let safety = totalNodeCount + 4;
+    while (currentNodeId !== endNodeId && safety > 0) {
+      safety -= 1;
+      if (currentDistance <= 0) {
+        return null;
+      }
+      const nextNodeId = pickForwardNeighbor(currentNodeId, currentDistance, distanceField, options);
+      if (nextNodeId < 0) {
+        return null;
+      }
+      nodePath.push(nextNodeId);
+      currentNodeId = nextNodeId;
+      currentDistance = distanceField[currentNodeId];
+    }
+
+    if (currentNodeId !== endNodeId) {
+      return null;
+    }
+
+    return createPathObject(nodePath.map((nodeId) => cellFromNodeId(nodeId)));
   }
 
   function cloneRoutePoolMap(routePoolMap) {
@@ -581,20 +655,273 @@ export function createEnemySystem(scene, grid, options = {}) {
     return cloned;
   }
 
+  function initializeVariantBuildQueue() {
+    variantBuildQueue = [];
+    if (ROUTE_VARIANT_COUNT <= 1 || ROUTE_VARIANT_ATTEMPT_BUDGET <= 0) {
+      return;
+    }
+    for (let spawnIndex = 0; spawnIndex < spawnNodeIds.length; spawnIndex += 1) {
+      variantBuildQueue.push({
+        spawnIndex,
+        attempts: 0,
+        seed: 0,
+      });
+    }
+  }
+
   function rebuildSpawnRoutePools() {
     routePoolsBySpawnIndex.clear();
     let allReachable = true;
 
-    for (let i = 0; i < spawnCells.length; i += 1) {
-      const spawnCell = spawnCells[i];
-      const pool = buildRoutePoolForStartCell(spawnCell);
+    for (let i = 0; i < spawnNodeIds.length; i += 1) {
+      const baseRoute = buildShortestRouteFromNode(spawnNodeIds[i], {
+        distanceField: distanceToEnd,
+      });
+      const pool = baseRoute ? [baseRoute] : [];
       routePoolsBySpawnIndex.set(i, pool);
-      if (pool.length === 0) {
+      if (!baseRoute) {
         allReachable = false;
       }
     }
 
+    if (allReachable) {
+      initializeVariantBuildQueue();
+    } else {
+      variantBuildQueue = [];
+    }
     return allReachable;
+  }
+
+  function runVariantBuildStep() {
+    if (
+      ROUTE_VARIANT_COUNT <= 1
+      || ROUTE_VARIANT_ATTEMPT_BUDGET <= 0
+      || ROUTE_VARIANT_BUILD_BUDGET_MS <= 0
+      || variantBuildQueue.length === 0
+    ) {
+      return;
+    }
+
+    const startMs = getNowMs();
+    let routesAdded = 0;
+    let safety = 0;
+
+    while (variantBuildQueue.length > 0) {
+      if ((getNowMs() - startMs) >= ROUTE_VARIANT_BUILD_BUDGET_MS) {
+        break;
+      }
+
+      const task = variantBuildQueue.shift();
+      if (!task) {
+        break;
+      }
+
+      const pool = routePoolsBySpawnIndex.get(task.spawnIndex) ?? [];
+      if (pool.length >= ROUTE_VARIANT_COUNT || task.attempts >= ROUTE_VARIANT_ATTEMPT_BUDGET) {
+        continue;
+      }
+
+      const candidateRoute = buildShortestRouteFromNode(spawnNodeIds[task.spawnIndex], {
+        distanceField: distanceToEnd,
+        preferDiversity: true,
+        selectedRoutes: pool,
+        spawnIndex: task.spawnIndex,
+        attemptSeed: task.seed,
+      });
+      task.attempts += 1;
+      task.seed += 1;
+
+      if (candidateRoute && !pool.some((route) => route.key === candidateRoute.key)) {
+        pool.push(candidateRoute);
+        pool.sort(comparePathObjects);
+        if (pool.length > ROUTE_VARIANT_COUNT) {
+          pool.length = ROUTE_VARIANT_COUNT;
+        }
+        routePoolsBySpawnIndex.set(task.spawnIndex, pool);
+        routesAdded += 1;
+      }
+
+      if (pool.length < ROUTE_VARIANT_COUNT && task.attempts < ROUTE_VARIANT_ATTEMPT_BUDGET) {
+        variantBuildQueue.push(task);
+      }
+
+      safety += 1;
+      if (safety > (spawnNodeIds.length * ROUTE_VARIANT_ATTEMPT_BUDGET * 2)) {
+        break;
+      }
+    }
+
+    const elapsedMs = getNowMs() - startMs;
+    pathPerfStats.variantBuildFrames += 1;
+    pathPerfStats.variantBuildLastMs = elapsedMs;
+    pathPerfStats.variantBuildTotalMs += elapsedMs;
+    pathPerfStats.variantRoutesAdded += routesAdded;
+  }
+
+  function sanitizeBlockedCellList(cells) {
+    const mask = new Uint8Array(totalNodeCount);
+    const keys = new Set();
+    if (!Array.isArray(cells)) {
+      return { mask, keys };
+    }
+
+    for (const cell of cells) {
+      const x = Number.parseInt(cell?.x, 10);
+      const z = Number.parseInt(cell?.z, 10);
+      if (!Number.isInteger(x) || !Number.isInteger(z) || !isCellInsideLevel(x, z)) {
+        continue;
+      }
+      if (isReservedEndpoint(x, z)) {
+        continue;
+      }
+      const nodeId = nodeIdFromCell(x, z);
+      if (nodeId < 0 || nodeExists[nodeId] !== 1) {
+        continue;
+      }
+      mask[nodeId] = 1;
+      keys.add(cellKey(x, z));
+    }
+
+    return { mask, keys };
+  }
+
+  function blockedCellMasksEqual(maskA, maskB) {
+    if (!maskA || !maskB || maskA.length !== maskB.length) {
+      return false;
+    }
+    for (let i = 0; i < maskA.length; i += 1) {
+      if (maskA[i] !== maskB[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function applyBlockedState(mask, keys) {
+    blockedByNode.set(mask);
+    blockedCellKeys.clear();
+    for (const key of keys) {
+      blockedCellKeys.add(key);
+    }
+  }
+
+  function canBlockCell(cellX, cellZ) {
+    const startMs = getNowMs();
+    pathPerfStats.canBlockCalls += 1;
+
+    if (!isCellInsideLevel(cellX, cellZ) || isReservedEndpoint(cellX, cellZ)) {
+      pathPerfStats.canBlockLastMs = getNowMs() - startMs;
+      pathPerfStats.canBlockTotalMs += pathPerfStats.canBlockLastMs;
+      return false;
+    }
+
+    const candidateNodeId = nodeIdFromCell(cellX, cellZ);
+    if (candidateNodeId < 0 || nodeExists[candidateNodeId] !== 1 || blockedByNode[candidateNodeId] === 1) {
+      pathPerfStats.canBlockLastMs = getNowMs() - startMs;
+      pathPerfStats.canBlockTotalMs += pathPerfStats.canBlockLastMs;
+      return false;
+    }
+
+    const cached = canBlockCacheByNode.get(candidateNodeId);
+    if (typeof cached === "boolean") {
+      pathPerfStats.canBlockCacheHits += 1;
+      pathPerfStats.canBlockLastMs = getNowMs() - startMs;
+      pathPerfStats.canBlockTotalMs += pathPerfStats.canBlockLastMs;
+      return cached;
+    }
+
+    const rebuilt = rebuildDistanceField(scratchDistanceToEnd, candidateNodeId);
+    const canBlock = rebuilt && areAllSpawnsReachable(scratchDistanceToEnd);
+    canBlockCacheByNode.set(candidateNodeId, canBlock);
+    pathPerfStats.canBlockLastMs = getNowMs() - startMs;
+    pathPerfStats.canBlockTotalMs += pathPerfStats.canBlockLastMs;
+    return canBlock;
+  }
+
+  function rerouteEnemy(enemy) {
+    if (!enemy || !enemy.alive || enemy.dying) {
+      return false;
+    }
+
+    const currentCell = getEnemyCurrentCell(enemy);
+    if (!currentCell) {
+      return false;
+    }
+
+    const currentNodeId = nodeIdFromCell(currentCell.x, currentCell.z);
+    if (currentNodeId < 0 || nodeExists[currentNodeId] !== 1) {
+      return false;
+    }
+
+    const route = buildShortestRouteFromNode(currentNodeId, {
+      distanceField: distanceToEnd,
+      allowStartBlocked: true,
+      preferDiversity: false,
+    });
+    if (!route) {
+      return false;
+    }
+
+    return applyRouteToEnemy(enemy, route.cells, {
+      fromCurrentPosition: true,
+      currentCell,
+    });
+  }
+
+  function rerouteActiveEnemies() {
+    const startMs = getNowMs();
+    pathPerfStats.rerouteCalls += 1;
+    for (const enemy of activeEnemies) {
+      rerouteEnemy(enemy);
+    }
+    pathPerfStats.rerouteLastMs = getNowMs() - startMs;
+    pathPerfStats.rerouteTotalMs += pathPerfStats.rerouteLastMs;
+  }
+
+  function setBlockedCells(cells) {
+    const startMs = getNowMs();
+    pathPerfStats.setBlockedCalls += 1;
+
+    const nextBlocked = sanitizeBlockedCellList(cells);
+    if (blockedCellMasksEqual(blockedByNode, nextBlocked.mask)) {
+      pathPerfStats.setBlockedLastMs = getNowMs() - startMs;
+      pathPerfStats.setBlockedTotalMs += pathPerfStats.setBlockedLastMs;
+      return true;
+    }
+
+    const previousBlockedMask = blockedByNode.slice();
+    const previousBlockedKeys = new Set(blockedCellKeys);
+    const previousRoutePools = cloneRoutePoolMap(routePoolsBySpawnIndex);
+    const previousDistanceField = distanceToEnd.slice();
+    const previousVariantQueue = variantBuildQueue.map((task) => ({ ...task }));
+    const previousRevision = blockedRevision;
+
+    applyBlockedState(nextBlocked.mask, nextBlocked.keys);
+    blockedRevision += 1;
+    canBlockCacheByNode.clear();
+
+    const rebuiltDistance = rebuildDistanceField(distanceToEnd);
+    const reachable = rebuiltDistance && areAllSpawnsReachable(distanceToEnd);
+    const rebuiltPools = reachable && rebuildSpawnRoutePools();
+    if (!rebuiltPools) {
+      applyBlockedState(previousBlockedMask, previousBlockedKeys);
+      routePoolsBySpawnIndex.clear();
+      for (const [spawnIndex, pool] of previousRoutePools.entries()) {
+        routePoolsBySpawnIndex.set(spawnIndex, pool);
+      }
+      distanceToEnd.set(previousDistanceField);
+      variantBuildQueue = previousVariantQueue;
+      blockedRevision = previousRevision;
+      canBlockCacheByNode.clear();
+      pathPerfStats.setBlockedLastMs = getNowMs() - startMs;
+      pathPerfStats.setBlockedTotalMs += pathPerfStats.setBlockedLastMs;
+      return false;
+    }
+
+    rerouteActiveEnemies();
+    pathPerfStats.setBlockedLastMs = getNowMs() - startMs;
+    pathPerfStats.setBlockedTotalMs += pathPerfStats.setBlockedLastMs;
+    return true;
   }
 
   function pseudoRandom01(seed) {
@@ -923,128 +1250,6 @@ export function createEnemySystem(scene, grid, options = {}) {
     }
     const randomIndex = Math.floor(Math.random() * pool.length);
     return pool[randomIndex] ?? pool[0] ?? null;
-  }
-
-  function rerouteEnemy(enemy) {
-    if (!enemy || !enemy.alive || enemy.dying) {
-      return false;
-    }
-
-    const currentCell = getEnemyCurrentCell(enemy);
-    if (!currentCell) {
-      return false;
-    }
-
-    const reroutePool = buildRoutePoolForStartCell(currentCell, { allowStartBlocked: true });
-    const pathObj = reroutePool.length > 0
-      ? reroutePool[Math.floor(Math.random() * reroutePool.length)]
-      : null;
-
-    if (!pathObj) {
-      return false;
-    }
-
-    return applyRouteToEnemy(enemy, pathObj.cells, {
-      fromCurrentPosition: true,
-      currentCell,
-    });
-  }
-
-  function rerouteActiveEnemies() {
-    for (const enemy of activeEnemies) {
-      rerouteEnemy(enemy);
-    }
-  }
-
-  function canBlockCell(cellX, cellZ) {
-    if (!isCellInsideLevel(cellX, cellZ)) {
-      return false;
-    }
-    if (isReservedEndpoint(cellX, cellZ)) {
-      return false;
-    }
-
-    const candidateKey = cellKey(cellX, cellZ);
-    if (blockedCells.has(candidateKey)) {
-      return false;
-    }
-
-    const simulatedBlocked = new Set(blockedCells);
-    simulatedBlocked.add(candidateKey);
-
-    for (const spawnCell of spawnCells) {
-      const path = findShortestPathCells(spawnCell, endCell, {
-        extraBlockedSet: simulatedBlocked,
-      });
-      if (!path || path.length === 0) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  function sanitizeBlockedCellList(cells) {
-    const sanitized = new Set();
-    if (!Array.isArray(cells)) {
-      return sanitized;
-    }
-
-    for (const cell of cells) {
-      const x = Number.parseInt(cell?.x, 10);
-      const z = Number.parseInt(cell?.z, 10);
-      if (!Number.isInteger(x) || !Number.isInteger(z) || !isCellInsideLevel(x, z)) {
-        continue;
-      }
-      if (isReservedEndpoint(x, z)) {
-        continue;
-      }
-      sanitized.add(cellKey(x, z));
-    }
-
-    return sanitized;
-  }
-
-  function blockedCellSetsEqual(a, b) {
-    if (a.size !== b.size) {
-      return false;
-    }
-    for (const key of a) {
-      if (!b.has(key)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  function setBlockedCells(cells) {
-    const nextBlocked = sanitizeBlockedCellList(cells);
-    if (blockedCellSetsEqual(blockedCells, nextBlocked)) {
-      return true;
-    }
-
-    const previousBlocked = new Set(blockedCells);
-    const previousPools = cloneRoutePoolMap(routePoolsBySpawnIndex);
-
-    blockedCells.clear();
-    for (const key of nextBlocked) {
-      blockedCells.add(key);
-    }
-
-    if (!rebuildSpawnRoutePools()) {
-      blockedCells.clear();
-      for (const key of previousBlocked) {
-        blockedCells.add(key);
-      }
-      routePoolsBySpawnIndex.clear();
-      for (const [spawnIndex, pool] of previousPools.entries()) {
-        routePoolsBySpawnIndex.set(spawnIndex, pool);
-      }
-      return false;
-    }
-
-    rerouteActiveEnemies();
-    return true;
   }
 
   function upgradeSlowEnemies(multiplier = ENEMY_CONFIG.slowUpgradeMultiplier) {
@@ -1597,6 +1802,8 @@ export function createEnemySystem(scene, grid, options = {}) {
   }
 
   function update(deltaSeconds, camera) {
+    runVariantBuildStep();
+
     if (spawnEventCursor < scheduledSpawns.length) {
       waveElapsedTime += deltaSeconds;
       while (
@@ -1739,13 +1946,55 @@ export function createEnemySystem(scene, grid, options = {}) {
 
   function getBlockedCells() {
     const cells = [];
-    for (const key of blockedCells) {
+    for (const key of blockedCellKeys) {
       const parsed = parseCellKey(key);
       if (Number.isInteger(parsed.x) && Number.isInteger(parsed.z)) {
         cells.push(parsed);
       }
     }
     return cells;
+  }
+
+  function getBlockedRevision() {
+    return blockedRevision;
+  }
+
+  function getPathfindingPerfStats() {
+    const canBlockAvg = pathPerfStats.canBlockCalls > 0
+      ? (pathPerfStats.canBlockTotalMs / pathPerfStats.canBlockCalls)
+      : 0;
+    const setBlockedAvg = pathPerfStats.setBlockedCalls > 0
+      ? (pathPerfStats.setBlockedTotalMs / pathPerfStats.setBlockedCalls)
+      : 0;
+    const rerouteAvg = pathPerfStats.rerouteCalls > 0
+      ? (pathPerfStats.rerouteTotalMs / pathPerfStats.rerouteCalls)
+      : 0;
+    const variantAvg = pathPerfStats.variantBuildFrames > 0
+      ? (pathPerfStats.variantBuildTotalMs / pathPerfStats.variantBuildFrames)
+      : 0;
+    const routePoolSizes = {};
+    for (const [spawnIndex, routePool] of routePoolsBySpawnIndex.entries()) {
+      routePoolSizes[spawnIndex] = Array.isArray(routePool) ? routePool.length : 0;
+    }
+    return {
+      blockedRevision,
+      pendingVariantTasks: variantBuildQueue.length,
+      routePoolSizes,
+      canBlockCalls: pathPerfStats.canBlockCalls,
+      canBlockCacheHits: pathPerfStats.canBlockCacheHits,
+      canBlockLastMs: pathPerfStats.canBlockLastMs,
+      canBlockAvgMs: canBlockAvg,
+      setBlockedCalls: pathPerfStats.setBlockedCalls,
+      setBlockedLastMs: pathPerfStats.setBlockedLastMs,
+      setBlockedAvgMs: setBlockedAvg,
+      rerouteCalls: pathPerfStats.rerouteCalls,
+      rerouteLastMs: pathPerfStats.rerouteLastMs,
+      rerouteAvgMs: rerouteAvg,
+      variantBuildFrames: pathPerfStats.variantBuildFrames,
+      variantBuildLastMs: pathPerfStats.variantBuildLastMs,
+      variantBuildAvgMs: variantAvg,
+      variantRoutesAdded: pathPerfStats.variantRoutesAdded,
+    };
   }
 
   function getRoutePreviewPaths() {
@@ -1783,7 +2032,27 @@ export function createEnemySystem(scene, grid, options = {}) {
     return true;
   }
 
-  if (!rebuildSpawnRoutePools()) {
+  function initializePathfindingState() {
+    buildNavigationGraph();
+    spawnNodeIds.length = 0;
+    for (const spawnCell of spawnCells) {
+      const spawnNodeId = nodeIdFromCell(spawnCell.x, spawnCell.z);
+      if (spawnNodeId < 0 || nodeExists[spawnNodeId] !== 1) {
+        return false;
+      }
+      spawnNodeIds.push(spawnNodeId);
+    }
+    if (endNodeId < 0 || nodeExists[endNodeId] !== 1) {
+      return false;
+    }
+    const rebuiltDistance = rebuildDistanceField(distanceToEnd);
+    if (!rebuiltDistance || !areAllSpawnsReachable(distanceToEnd)) {
+      return false;
+    }
+    return rebuildSpawnRoutePools();
+  }
+
+  if (!initializePathfindingState()) {
     throw new Error("Enemy system could not find a valid route from every spawn to the destination.");
   }
 
@@ -1804,6 +2073,8 @@ export function createEnemySystem(scene, grid, options = {}) {
     canBlockCell,
     setBlockedCells,
     getBlockedCells,
+    getBlockedRevision,
+    getPathfindingPerfStats,
     getRoutePreviewPaths,
     forceSpawnEnemy: (type, spawnIndex = 0) => spawnEnemyByIndex(type, spawnIndex),
   };

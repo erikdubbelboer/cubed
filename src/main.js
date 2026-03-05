@@ -1619,6 +1619,12 @@ function initGame() {
       }
       return enemySystem.canBlockCell(cellX, cellZ);
     },
+    getBlockedRevision: () => {
+      if (!enemySystem || typeof enemySystem.getBlockedRevision !== "function") {
+        return 0;
+      }
+      return enemySystem.getBlockedRevision();
+    },
     onBlockedCellsChanged: (blockedCells) => {
       if (!enemySystem) {
         return true;
@@ -1658,6 +1664,12 @@ function initGame() {
       addMoney(amount);
     },
     getMoney: () => playerMoney,
+    getPathfindingPerf: () => {
+      if (!enemySystem || typeof enemySystem.getPathfindingPerfStats !== "function") {
+        return null;
+      }
+      return enemySystem.getPathfindingPerfStats();
+    },
     unlockTower: (type) => {
       if (towerSystem) {
         return towerSystem.unlockTowerType(type);

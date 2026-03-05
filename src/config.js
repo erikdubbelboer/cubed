@@ -809,10 +809,12 @@ export const GAME_CONFIG = {
     slowUpgradeMultiplier: 0.8,
     // Number of route variants cached per spawn.
     pathVariantCount: 6,
-    // Candidate pool size considered before diversity filtering.
+    // Max number of adaptive variant build attempts per spawn after route-0 is ready.
     pathCandidatePoolSize: 24,
     // Penalizes overlap when selecting route variants (higher => more diverse).
     pathOverlapPenalty: 0.45,
+    // Max main-thread milliseconds spent per frame building extra route variants.
+    pathVariantBuildBudgetMs: 1.0,
     // Fallback portal entry distance = radius * multiplier. Typical range: 1.5-4.
     portalEntryDistanceFromRadius: 2.6,
     // Portal clipping is removed after enemy crosses this radius fraction. Typical range: 0.2-1.
