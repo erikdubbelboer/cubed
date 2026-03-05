@@ -59,6 +59,30 @@ const BUILD_PREVIEW_ARROW_RADIUS_FROM_CELL = 0.07;
 const BUILD_PREVIEW_ARROW_VERTICAL_JITTER = 0.06;
 const FPS_SAMPLE_WINDOW_SECONDS = 0.35;
 const EDITOR_TOOL_ROTATE_INTERVAL_MS = 200;
+
+function normalizeCardinalRotation(rawRotation = 0) {
+  const numericRotation = Number(rawRotation);
+  if (!Number.isFinite(numericRotation)) {
+    return 0;
+  }
+  const quantized = Math.round(numericRotation / 90) * 90;
+  return ((quantized % 360) + 360) % 360;
+}
+
+function getDirectionFromCardinalRotation(rotation = 0) {
+  const normalized = normalizeCardinalRotation(rotation);
+  if (normalized === 90) {
+    return { x: 1, z: 0 };
+  }
+  if (normalized === 180) {
+    return { x: 0, z: -1 };
+  }
+  if (normalized === 270) {
+    return { x: -1, z: 0 };
+  }
+  return { x: 0, z: 1 };
+}
+
 const EDITOR_TOOL_INVENTORY = [
   {
     type: "eraser",
@@ -220,10 +244,16 @@ function placeCameraAtPlayerSpawn(targetGrid = grid) {
       markerY
     );
     camera.position.set(spawnCenter.x, markerY + targetGrid.eyeHeight, spawnCenter.z);
+    const facingDirection = getDirectionFromCardinalRotation(targetGrid.playerSpawnRotation);
+    camera.lookAt(
+      spawnCenter.x + facingDirection.x,
+      markerY + targetGrid.eyeHeight,
+      spawnCenter.z + facingDirection.z
+    );
   } else {
     camera.position.set(0, targetGrid.eyeHeight, targetGrid.moveBounds.maxZ - SCENE_CONFIG.cameraStartOffsetZ);
+    camera.lookAt(0, targetGrid.eyeHeight, 0);
   }
-  camera.lookAt(0, targetGrid.eyeHeight, 0);
 }
 placeCameraAtPlayerSpawn(grid);
 
@@ -2028,7 +2058,9 @@ function initGame() {
     if (waveState === "EDITOR" && levelEditor && typeof levelEditor.getExportPayload === "function") {
       return levelEditor.getExportPayload();
     }
-    return typeof grid?.getLevelObjects === "function" ? grid.getLevelObjects() : [];
+    return {
+      levelObjects: typeof grid?.getLevelObjects === "function" ? grid.getLevelObjects() : [],
+    };
   };
 
   startBuildPhase(WAVE_CONFIG.initialWave);

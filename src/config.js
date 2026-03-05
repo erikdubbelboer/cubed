@@ -501,31 +501,8 @@ export const GAME_CONFIG = {
     // type: wall | spawn | end | playerSpawn | ramp
     // rotation for ramps is low->high direction:
     // 0 => +Z, 90 => +X, 180 => -Z, 270 => -X.
-    levelObjects: [
-      // Wall blocks.
-      { type: "wall", position: { x: 4, y: 0, z: 0 }, rotation: 0 },
-      { type: "wall", position: { x: 5, y: 0, z: 0 }, rotation: 0 },
-      { type: "wall", position: { x: 4, y: 0, z: 1 }, rotation: 0 },
-      { type: "wall", position: { x: 5, y: 0, z: 1 }, rotation: 0 },
-      { type: "wall", position: { x: 4, y: 0, z: 2 }, rotation: 0 },
-      { type: "wall", position: { x: 5, y: 0, z: 2 }, rotation: 0 },
-      { type: "wall", position: { x: 2, y: 0, z: 3 }, rotation: 0 },
-      { type: "wall", position: { x: 3, y: 0, z: 3 }, rotation: 0 },
-      { type: "wall", position: { x: 4, y: 0, z: 3 }, rotation: 0 },
-      { type: "wall", position: { x: 5, y: 0, z: 3 }, rotation: 0 },
-      { type: "wall", position: { x: 5, y: 0, z: 6 }, rotation: 0 },
-      { type: "wall", position: { x: 5, y: 0, z: 7 }, rotation: 0 },
-      { type: "wall", position: { x: 4, y: 0, z: 10 }, rotation: 0 },
-      { type: "wall", position: { x: 5, y: 0, z: 10 }, rotation: 0 },
-      { type: "wall", position: { x: 4, y: 0, z: 11 }, rotation: 0 },
-      { type: "wall", position: { x: 5, y: 0, z: 11 }, rotation: 0 },
-      { type: "playerSpawn", position: { x: 2, y: 0, z: 1 }, rotation: 0 },
-      { type: "end", position: { x: 3, y: 0, z: 1 }, rotation: 0 },
-      { type: "spawn", position: { x: 9, y: 0, z: 3 }, rotation: 0 },
-      { type: "spawn", position: { x: 9, y: 0, z: 9 }, rotation: 0 },
-      { type: "ramp", position: { x: 3, y: 0, z: 6 }, rotation: 90 },
-      { type: "ramp", position: { x: 7, y: 0, z: 6 }, rotation: 270 },
-    ],
+    levelObjects: 
+      [{"type":"wall","position":{"x":4,"y":0,"z":0},"rotation":0},{"type":"wall","position":{"x":5,"y":0,"z":0},"rotation":0},{"type":"wall","position":{"x":4,"y":0,"z":1},"rotation":0},{"type":"wall","position":{"x":5,"y":0,"z":1},"rotation":0},{"type":"wall","position":{"x":4,"y":0,"z":2},"rotation":0},{"type":"wall","position":{"x":5,"y":0,"z":2},"rotation":0},{"type":"wall","position":{"x":2,"y":0,"z":3},"rotation":0},{"type":"wall","position":{"x":3,"y":0,"z":3},"rotation":0},{"type":"wall","position":{"x":4,"y":0,"z":3},"rotation":0},{"type":"wall","position":{"x":5,"y":0,"z":3},"rotation":0},{"type":"wall","position":{"x":5,"y":0,"z":6},"rotation":0},{"type":"wall","position":{"x":5,"y":0,"z":7},"rotation":0},{"type":"wall","position":{"x":4,"y":0,"z":10},"rotation":0},{"type":"wall","position":{"x":5,"y":0,"z":10},"rotation":0},{"type":"wall","position":{"x":4,"y":0,"z":11},"rotation":0},{"type":"wall","position":{"x":5,"y":0,"z":11},"rotation":0},{"type":"playerSpawn","position":{"x":0,"y":0,"z":5},"rotation":90},{"type":"end","position":{"x":3,"y":0,"z":1},"rotation":0},{"type":"spawn","position":{"x":9,"y":0,"z":3},"rotation":0},{"type":"spawn","position":{"x":9,"y":0,"z":9},"rotation":0},{"type":"ramp","position":{"x":3,"y":0,"z":6},"rotation":90},{"type":"ramp","position":{"x":7,"y":0,"z":6},"rotation":270}],
   },
 
   towers: {

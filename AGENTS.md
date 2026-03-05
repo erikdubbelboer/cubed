@@ -363,6 +363,9 @@
 - Marker `y` semantics are authoritative:
   - Marker positions keep explicit `y` in level objects and runtime grid state.
   - Enemy system validates spawn/end markers at init: marker `y` must equal traversable surface level (`grid.getCellHeight(x,z)`), otherwise enemy init fails with explicit error.
+- Player spawn facing contract (latest):
+  - Runtime spawn camera facing now uses `playerSpawn.rotation` cardinal mapping from level data (`0 => +Z`, `90 => +X`, `180 => -Z`, `270 => -X`) instead of always looking toward world origin.
+  - This mapping must match editor preview/marker facing arrows so exported/imported levels keep identical spawn-facing behavior.
 - Editor path preview:
   - Build-style route arrows are reused in editor mode.
   - Preview is rebuilt from a temporary enemy-system init after each edit.
