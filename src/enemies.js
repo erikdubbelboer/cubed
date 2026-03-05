@@ -97,7 +97,11 @@ function parseCellKey(key) {
 }
 
 function cloneCell(cell) {
-  return { x: cell.x, z: cell.z };
+  const cloned = { x: cell.x, z: cell.z };
+  if (Number.isInteger(cell?.y)) {
+    cloned.y = cell.y;
+  }
+  return cloned;
 }
 
 function makeUndirectedEdgeKey(aKey, bKey) {
@@ -200,13 +204,20 @@ export function createEnemySystem(scene, grid, options = {}) {
     return hasPerformanceNow ? globalThis.performance.now() : Date.now();
   }
 
-  const endCellSurfaceY = typeof grid?.getCellSurfaceY === "function"
-    ? grid.getCellSurfaceY(endCell.x, endCell.z)
+  const gridBaseY = Number.isFinite(Number(grid?.tileTopY))
+    ? Number(grid.tileTopY)
     : 0;
+  const gridCellSize = Math.max(0.0001, Number(grid?.cellSize) || 1);
+  function markerLevelToWorldY(level) {
+    const numericLevel = Math.floor(Number(level) || 0);
+    return gridBaseY + (Math.max(0, numericLevel) * gridCellSize);
+  }
+
+  const endCellSurfaceY = markerLevelToWorldY(endCell.y ?? 0);
   const endCellCenter = typeof grid?.cellToWorldCenter === "function"
     ? grid.cellToWorldCenter(endCell.x, endCell.z, endCellSurfaceY)
     : new THREE.Vector3();
-  const endHalfSize = (Number(grid?.cellSize) || 0) * 0.5;
+  const endHalfSize = gridCellSize * 0.5;
 
   function isCellInsideLevel(cellX, cellZ) {
     if (typeof grid?.isCellInsideLevel === "function") {
@@ -224,6 +235,27 @@ export function createEnemySystem(scene, grid, options = {}) {
       return Number.isFinite(height) ? height : 0;
     }
     return 0;
+  }
+
+  function validateMarkerOnTraversableSurface(markerCell, label) {
+    if (!markerCell) {
+      throw new Error(`Enemy system requires a ${label} marker.`);
+    }
+    if (!Number.isInteger(markerCell.x) || !Number.isInteger(markerCell.z) || !Number.isInteger(markerCell.y)) {
+      throw new Error(`Enemy ${label} marker must use integer x/y/z.`);
+    }
+    if (!isCellInsideLevel(markerCell.x, markerCell.z)) {
+      throw new Error(`Enemy ${label} marker (${markerCell.x},${markerCell.z}) is outside the level.`);
+    }
+    const expectedSurfaceLevel = getCellHeight(markerCell.x, markerCell.z);
+    if (!Number.isInteger(expectedSurfaceLevel)) {
+      throw new Error(`Enemy ${label} marker (${markerCell.x},${markerCell.z}) has no traversable surface.`);
+    }
+    if (markerCell.y !== expectedSurfaceLevel) {
+      throw new Error(
+        `Enemy ${label} marker at (${markerCell.x},${markerCell.y},${markerCell.z}) must be on surface y=${expectedSurfaceLevel}.`
+      );
+    }
   }
 
   function getCellSurfaceY(cellX, cellZ) {
@@ -303,6 +335,11 @@ export function createEnemySystem(scene, grid, options = {}) {
       z: Math.floor(nodeId / gridSize),
     };
   }
+
+  for (const spawnCell of spawnCells) {
+    validateMarkerOnTraversableSurface(spawnCell, "spawn");
+  }
+  validateMarkerOnTraversableSurface(endCell, "end");
 
   const endNodeId = nodeIdFromCell(endCell.x, endCell.z);
 
@@ -1166,7 +1203,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     const minZ = endCellCenter.z - endHalfSize;
     const maxZ = endCellCenter.z + endHalfSize;
     const minY = endCellSurfaceY;
-    const maxY = endCellSurfaceY + (Number(grid?.cellSize) || 0);
+    const maxY = endCellSurfaceY + gridCellSize;
 
     return (
       center.x - containmentRadius >= minX
@@ -2022,6 +2059,40 @@ export function createEnemySystem(scene, grid, options = {}) {
     return previewPaths;
   }
 
+  function disposeEnemyVisual(enemy) {
+    if (!enemy?.mesh) {
+      return;
+    }
+    scene.remove(enemy.mesh);
+    enemy.mesh.traverse((child) => {
+      if (child?.geometry && typeof child.geometry.dispose === "function") {
+        child.geometry.dispose();
+      }
+      if (!child?.material) {
+        return;
+      }
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        material?.dispose?.();
+      }
+    });
+  }
+
+  function clearAll() {
+    for (const enemy of activeEnemies) {
+      disposeEnemyVisual(enemy);
+    }
+    activeEnemies.length = 0;
+    scheduledSpawns = [];
+    spawnEventCursor = 0;
+    waveElapsedTime = 0;
+    spawnCellCursor = 0;
+  }
+
+  function dispose() {
+    clearAll();
+  }
+
   function spawnEnemyByIndex(type, spawnIndex = 0) {
     const safeIndex = ((Math.floor(spawnIndex) % spawnCells.length) + spawnCells.length) % spawnCells.length;
     const enemy = createEnemyMesh(normalizeEnemyType(type), safeIndex);
@@ -2076,6 +2147,8 @@ export function createEnemySystem(scene, grid, options = {}) {
     getBlockedRevision,
     getPathfindingPerfStats,
     getRoutePreviewPaths,
+    clearAll,
+    dispose,
     forceSpawnEnemy: (type, spawnIndex = 0) => spawnEnemyByIndex(type, spawnIndex),
   };
 }

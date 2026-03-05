@@ -1439,6 +1439,49 @@ export function createPlayer({
     setJumpHeld(false);
   }
 
+  function clearActiveProjectilesAndImpacts() {
+    for (const projectile of projectiles) {
+      if (projectile?.mesh?.parent) {
+        scene.remove(projectile.mesh);
+      }
+    }
+    projectiles.length = 0;
+
+    for (const impact of projectileImpacts) {
+      if (impact?.root?.parent) {
+        scene.remove(impact.root);
+      }
+      impact?.flash?.material?.dispose?.();
+      impact?.ring?.material?.dispose?.();
+    }
+    projectileImpacts.length = 0;
+  }
+
+  function resetRunState() {
+    resetMovement();
+    setMenuMode(false);
+
+    verticalVelocity = 0;
+    gunFlashTimer = 0;
+    hasInfiniteJetpackFuel = false;
+    jetpackFuelEfficiencyMultiplier = 1;
+    jetpackFuel = jetpackMaxFuel;
+
+    playerDamageMultiplier = 1;
+    playerFireRateMultiplier = 1;
+    currentFireCooldown = baseFireCooldown;
+    currentBurstShotDelay = Math.max(0, baseBurstShotDelay);
+    maxWeaponCharges = baseMaxCharges;
+    currentWeaponCharges = Math.min(maxWeaponCharges, baseStartingCharges);
+    chargeReloadProgress = 0;
+    shotDelayRemaining = 0;
+    weaponPierceCount = baseWeaponPierce;
+
+    clearActiveProjectilesAndImpacts();
+    rebuildChargeDots();
+    updateReloadBar(currentWeaponCharges >= maxWeaponCharges ? 1 : 0);
+  }
+
   function getPosition() {
     return camera.position;
   }
@@ -1452,6 +1495,7 @@ export function createPlayer({
     setVirtualMove,
     setJumpHeld,
     resetMovement,
+    resetRunState,
     getPosition,
     getJetpackFuelRatio,
     getJetpackFuelPercent,

@@ -2637,6 +2637,109 @@ export function createTowerSystem({
     updateSlowFieldEffects(deltaSeconds);
   }
 
+  function disposeMeshResources(root, { disposeGeometry = true } = {}) {
+    if (!root) {
+      return;
+    }
+    const disposedMaterials = new Set();
+    const disposedGeometries = new Set();
+    root.traverse((child) => {
+      if (disposeGeometry && child?.geometry && typeof child.geometry.dispose === "function" && !disposedGeometries.has(child.geometry)) {
+        disposedGeometries.add(child.geometry);
+        child.geometry.dispose();
+      }
+      if (!child?.material) {
+        return;
+      }
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (!material || disposedMaterials.has(material) || typeof material.dispose !== "function") {
+          continue;
+        }
+        disposedMaterials.add(material);
+        material.dispose();
+      }
+    });
+  }
+
+  function clearAllTowers() {
+    cancelPlacement();
+
+    for (let i = impactEffects.length - 1; i >= 0; i -= 1) {
+      destroyImpactEffect(impactEffects[i]);
+    }
+    impactEffects.length = 0;
+
+    for (let i = aoePulseEffects.length - 1; i >= 0; i -= 1) {
+      destroyAoePulseEffect(aoePulseEffects[i]);
+    }
+    aoePulseEffects.length = 0;
+
+    for (let i = slowFieldEffects.length - 1; i >= 0; i -= 1) {
+      destroySlowFieldEffect(slowFieldEffects[i]);
+    }
+    slowFieldEffects.length = 0;
+
+    for (let i = activeBuildEffects.length - 1; i >= 0; i -= 1) {
+      const tower = activeBuildEffects[i];
+      if (!tower) {
+        continue;
+      }
+      if (tower.buildFxState) {
+        restoreTowerBuildMaterialStates(tower.buildFxState.materialStates || []);
+        disposeTowerBuildFxState(tower.buildFxState);
+        tower.buildFxState = null;
+      }
+      tower.isOperational = true;
+    }
+    activeBuildEffects.length = 0;
+
+    for (const tower of towers) {
+      clearLaserBeamVisual(tower);
+      scene.remove(tower.mesh);
+      disposeMeshResources(tower.mesh);
+    }
+    towers.length = 0;
+    notifyBlockedCellsChanged();
+  }
+
+  function dispose() {
+    clearAllTowers();
+
+    hidePathRangeHighlights();
+    if (preview?.parent) {
+      scene.remove(preview);
+    }
+    disposeMeshResources(preview);
+
+    for (const entry of pathRangeHighlights.entries) {
+      if (entry?.mesh?.parent) {
+        scene.remove(entry.mesh);
+      }
+    }
+    pathRangeHighlights.entries.length = 0;
+    pathRangeHighlights.material?.dispose?.();
+
+    beamGeometry.dispose();
+    beamMaterial.dispose();
+    muzzleFlashGeometry.dispose();
+    muzzleFlashMaterial.dispose();
+    impactFlashGeometry.dispose();
+    impactFlashMaterial.dispose();
+    impactRingGeometry.dispose();
+    impactRingMaterial.dispose();
+    impactParticleGeometry.dispose();
+    impactParticleMaterial.dispose();
+    aoePulseGeometry.dispose();
+    aoePulseMaterial.dispose();
+    slowFieldGeometry.dispose();
+    slowFieldMaterial.dispose();
+    buildFxTeleportColumnGeometry.dispose();
+    buildFxRingGeometry.dispose();
+    buildFxSparkGeometry.dispose();
+    buildFxSparkBaseMaterial.dispose();
+  }
+
   function isBuildMode() {
     return buildMode;
   }
@@ -2709,6 +2812,8 @@ export function createTowerSystem({
     getUnlockedTowerTypes,
     upgradeTowerDamage,
     upgradeTowerFireRate,
+    clearAllTowers,
+    dispose,
     forcePlaceTower: (x, z, towerType = "laser") => {
       const normalizedType = normalizeTowerType(towerType);
       const towerSpec = getTowerSpec(normalizedType);

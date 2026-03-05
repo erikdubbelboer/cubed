@@ -442,6 +442,136 @@ function drawIconWeaponPierce(ctx, x, y, size) {
   ctx.fill();
 }
 
+function drawIconEditorEraser(ctx, x, y, size) {
+  ctx.save();
+  ctx.translate(x + size * 0.55, y + size * 0.52);
+  ctx.rotate(-0.32);
+  drawPanel(
+    ctx,
+    -size * 0.24,
+    -size * 0.18,
+    size * 0.4,
+    size * 0.28,
+    size * 0.05,
+    "rgba(255, 188, 164, 0.94)",
+    "rgba(255, 222, 206, 0.95)",
+    Math.max(1.2, size * 0.045)
+  );
+  drawPanel(
+    ctx,
+    -size * 0.24,
+    -size * 0.03,
+    size * 0.4,
+    size * 0.12,
+    size * 0.04,
+    "rgba(255, 126, 126, 0.96)",
+    "rgba(255, 208, 208, 0.8)",
+    Math.max(1, size * 0.03)
+  );
+  ctx.restore();
+
+  ctx.strokeStyle = "rgba(255, 104, 104, 0.95)";
+  ctx.lineWidth = Math.max(1.5, size * 0.055);
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.14, y + size * 0.72);
+  ctx.lineTo(x + size * 0.84, y + size * 0.24);
+  ctx.stroke();
+}
+
+function drawIconEditorWall(ctx, x, y, size) {
+  drawPanel(
+    ctx,
+    x + size * 0.2,
+    y + size * 0.2,
+    size * 0.6,
+    size * 0.6,
+    size * 0.07,
+    "rgba(150, 196, 245, 0.9)",
+    "rgba(208, 232, 255, 0.95)",
+    Math.max(1.4, size * 0.05)
+  );
+  ctx.strokeStyle = "rgba(110, 156, 212, 0.72)";
+  ctx.lineWidth = Math.max(1.1, size * 0.035);
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.2, y + size * 0.5);
+  ctx.lineTo(x + size * 0.8, y + size * 0.5);
+  ctx.moveTo(x + size * 0.5, y + size * 0.2);
+  ctx.lineTo(x + size * 0.5, y + size * 0.8);
+  ctx.stroke();
+}
+
+function drawIconEditorSpawn(ctx, x, y, size) {
+  drawIconEditorWall(ctx, x, y, size);
+  ctx.fillStyle = "rgba(106, 255, 184, 0.98)";
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.12, y + size * 0.5);
+  ctx.lineTo(x + size * 0.38, y + size * 0.36);
+  ctx.lineTo(x + size * 0.38, y + size * 0.45);
+  ctx.lineTo(x + size * 0.78, y + size * 0.45);
+  ctx.lineTo(x + size * 0.78, y + size * 0.55);
+  ctx.lineTo(x + size * 0.38, y + size * 0.55);
+  ctx.lineTo(x + size * 0.38, y + size * 0.64);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawIconEditorEnd(ctx, x, y, size) {
+  drawIconEditorWall(ctx, x, y, size);
+  const cx = x + size * 0.5;
+  const cy = y + size * 0.5;
+  const rOuter = size * 0.22;
+  const rInner = size * 0.09;
+  ctx.strokeStyle = "rgba(255, 166, 132, 0.96)";
+  ctx.lineWidth = Math.max(1.4, size * 0.05);
+  ctx.beginPath();
+  ctx.arc(cx, cy, rOuter, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(255, 220, 198, 0.96)";
+  ctx.beginPath();
+  ctx.arc(cx, cy, rInner, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function drawIconEditorRamp(ctx, x, y, size) {
+  fillPath(
+    ctx,
+    [
+      [x + size * 0.2, y + size * 0.76],
+      [x + size * 0.8, y + size * 0.76],
+      [x + size * 0.8, y + size * 0.28],
+    ],
+    "rgba(170, 218, 255, 0.92)",
+    "rgba(224, 241, 255, 0.96)",
+    Math.max(1.3, size * 0.045)
+  );
+  ctx.strokeStyle = "rgba(129, 185, 235, 0.9)";
+  ctx.lineWidth = Math.max(1.2, size * 0.04);
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.2, y + size * 0.76);
+  ctx.lineTo(x + size * 0.8, y + size * 0.28);
+  ctx.stroke();
+}
+
+function drawIconEditorPlayerSpawn(ctx, x, y, size) {
+  drawPanel(
+    ctx,
+    x + size * 0.2,
+    y + size * 0.2,
+    size * 0.6,
+    size * 0.6,
+    size * 0.07,
+    "rgba(111, 255, 143, 0.34)",
+    "rgba(140, 255, 166, 0.96)",
+    Math.max(1.3, size * 0.048)
+  );
+  ctx.fillStyle = "rgba(132, 255, 160, 0.98)";
+  ctx.beginPath();
+  ctx.arc(x + size * 0.5, y + size * 0.44, size * 0.08, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(x + size * 0.47, y + size * 0.53, size * 0.06, size * 0.17);
+}
+
 function drawIconDefault(ctx, x, y, size) {
   drawTowerBaseIcon(ctx, x, y, size);
 }
@@ -495,6 +625,24 @@ function drawIconById(ctx, iconId, x, y, size) {
       return;
     case "player_weapon_pierce":
       drawIconWeaponPierce(ctx, x, y, size);
+      return;
+    case "editor_eraser":
+      drawIconEditorEraser(ctx, x, y, size);
+      return;
+    case "editor_wall":
+      drawIconEditorWall(ctx, x, y, size);
+      return;
+    case "editor_spawn":
+      drawIconEditorSpawn(ctx, x, y, size);
+      return;
+    case "editor_end":
+      drawIconEditorEnd(ctx, x, y, size);
+      return;
+    case "editor_ramp":
+      drawIconEditorRamp(ctx, x, y, size);
+      return;
+    case "editor_player_spawn":
+      drawIconEditorPlayerSpawn(ctx, x, y, size);
       return;
     default:
       drawIconDefault(ctx, x, y, size);

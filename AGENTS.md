@@ -331,6 +331,45 @@
     - Collision/containment remains clamp-only in `player.js`; boundary visuals must not change physics.
   - Enemy routing is level-cell bounded, so enemies cannot leave the level either.
 
+### Level Editor Mode (Latest, Override)
+- Desktop-only editor mode is toggled with `N` in `main.js` (`waveState === "EDITOR"`).
+- Entering editor:
+  - tears down tower/enemy systems, removes active enemies, and stops pending spawns.
+  - rebuilds grid with `createGrid(scene, { levelObjects, allowIncompleteMarkers: true, editorMode: true })`.
+  - disables tower build tray/actions (editor uses dedicated tools instead).
+- Editor controls:
+  - `1` eraser, `2` wall, `3` spawn, `4` end, `5` ramp, `6` playerSpawn.
+  - `Enter` and desktop LMB (while pointer lock is active) apply the current tool.
+  - Mouse wheel rotates ramp tool in 90-degree steps.
+  - Editor tool selection is mirrored in the bottom tray (same slot UI as towers) with dedicated editor icon IDs and hotkeys `1..6`.
+- Editor mutation model lives in `src/levelEditor.js` and is rebuilt back into grid objects after each change.
+  - Wall editing is sparse voxel based (exact `(x,y,z)` add/remove), not column-trim based.
+  - Eraser removes the directly hit object (inside target), not an adjacent placement cell.
+  - `end` and `playerSpawn` are unique markers (new placement replaces old); `spawn` is multi-place.
+  - Ramps are anchored at their low cell with 0/90/180/270 rotations and cannot overlap ramp-occupied cells or walls.
+  - Voxel preview center uses `y + 0.5` cell height so editor preview aligns exactly with placed cube centers (fixes half-block vertical offset).
+  - Ramp preview uses a wedge mesh positioned at the ramp low-base world `y` (not cube-center averaging), matching runtime ramp placement transform.
+- Grid/editor data model updates:
+  - `createGrid(scene, options)` supports `levelObjects`, `allowIncompleteMarkers`, and `editorMode`.
+  - Grid now tracks explicit sparse wall voxels and marker `y` values (`spawn/end/playerSpawn`) in runtime/export state.
+  - `grid.getEditorRaycastTargets()` exposes editor-hit meshes; `grid.getLevelObjects()` returns normalized export objects; `grid.dispose()` tears down all grid-owned scene resources.
+  - In editor mode only, `playerSpawn` is rendered as a green transparent marker cube.
+- Marker `y` semantics are authoritative:
+  - Marker positions keep explicit `y` in level objects and runtime grid state.
+  - Enemy system validates spawn/end markers at init: marker `y` must equal traversable surface level (`grid.getCellHeight(x,z)`), otherwise enemy init fails with explicit error.
+- Editor path preview:
+  - Build-style route arrows are reused in editor mode.
+  - Preview is rebuilt from a temporary enemy-system init after each edit.
+  - If marker/path validation fails, preview arrows are cleared.
+- Exiting editor with `N`:
+  - validates playability by initializing enemy/path system on edited level.
+  - invalid level: stay in editor and log clear warning reason.
+  - valid level: rebuild gameplay grid (`allowIncompleteMarkers: false`, `editorMode: false`), recreate tower/enemy systems, reset run state, and restart at build phase wave 1.
+- Global export API:
+  - `window.exportLevel()` returns `{ levelObjects: [...] }`.
+  - While editor is active it returns editor model payload; otherwise it exports from current gameplay grid.
+  - Intended workflow: `copy(JSON.stringify(window.exportLevel()))`.
+
 ### AGENTS.md
 
 Make sure to update AGENTS.md to reflect any important changes that you need to remember for later.

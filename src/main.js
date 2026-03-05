@@ -3,6 +3,7 @@ import { createGrid } from "./grid.js";
 import { createPlayer } from "./player.js";
 import { createEnemySystem } from "./enemies.js";
 import { createTowerSystem } from "./towers.js";
+import { createLevelEditor } from "./levelEditor.js";
 import { createUiOverlay } from "./uiOverlay.js";
 import { GAME_CONFIG } from "./config.js";
 
@@ -23,6 +24,7 @@ const MOBILE_LOOK_SENSITIVITY_SCALE = Number.isFinite(Number(MOBILE_UI_CONFIG.lo
 const GAME_SPEED_NORMAL = 1;
 const GAME_SPEED_FAST = 2;
 const DESKTOP_SPEED_TOGGLE_KEY = "KeyF";
+const DESKTOP_EDITOR_TOGGLE_KEY = "KeyN";
 const DEFAULT_BUILD_PHASE_DURATION_SECONDS = 300;
 const BUILD_PHASE_DURATION_SECONDS = Number.isFinite(Number(WAVE_CONFIG.buildPhaseDurationSeconds))
   ? Math.max(0, Number(WAVE_CONFIG.buildPhaseDurationSeconds))
@@ -56,6 +58,45 @@ const BUILD_PREVIEW_ARROW_LENGTH_FROM_CELL = 0.24;
 const BUILD_PREVIEW_ARROW_RADIUS_FROM_CELL = 0.07;
 const BUILD_PREVIEW_ARROW_VERTICAL_JITTER = 0.06;
 const FPS_SAMPLE_WINDOW_SECONDS = 0.35;
+const EDITOR_RAMP_ROTATE_INTERVAL_MS = 200;
+const EDITOR_TOOL_INVENTORY = [
+  {
+    type: "eraser",
+    label: "Eraser",
+    iconId: "editor_eraser",
+    hotkey: "1",
+  },
+  {
+    type: "wall",
+    label: "Wall",
+    iconId: "editor_wall",
+    hotkey: "2",
+  },
+  {
+    type: "spawn",
+    label: "Enemy Start",
+    iconId: "editor_spawn",
+    hotkey: "3",
+  },
+  {
+    type: "end",
+    label: "Enemy End",
+    iconId: "editor_end",
+    hotkey: "4",
+  },
+  {
+    type: "ramp",
+    label: "Ramp",
+    iconId: "editor_ramp",
+    hotkey: "5",
+  },
+  {
+    type: "playerSpawn",
+    label: "Player Start",
+    iconId: "editor_player_spawn",
+    hotkey: "6",
+  },
+];
 
 const app = document.getElementById("app");
 
@@ -163,22 +204,28 @@ directionalLight.shadow.camera.bottom = LIGHT_CONFIG.directional.shadowBottom;
 directionalLight.shadow.normalBias = LIGHT_CONFIG.directional.shadowNormalBias;
 scene.add(directionalLight);
 
-const grid = createGrid(scene);
-const hasPlayerSpawnCell = !!(
-  grid.playerSpawnCell
-  && Number.isInteger(grid.playerSpawnCell.x)
-  && Number.isInteger(grid.playerSpawnCell.z)
-);
-if (hasPlayerSpawnCell && typeof grid.cellToWorldCenter === "function") {
-  const spawnCenter = grid.cellToWorldCenter(grid.playerSpawnCell.x, grid.playerSpawnCell.z);
-  const spawnSurfaceY = typeof grid.getBuildSurfaceYAtWorld === "function"
-    ? grid.getBuildSurfaceYAtWorld(spawnCenter.x, spawnCenter.z)
-    : 0;
-  camera.position.set(spawnCenter.x, spawnSurfaceY + grid.eyeHeight, spawnCenter.z);
-} else {
-  camera.position.set(0, grid.eyeHeight, grid.moveBounds.maxZ - SCENE_CONFIG.cameraStartOffsetZ);
+let grid = createGrid(scene);
+function placeCameraAtPlayerSpawn(targetGrid = grid) {
+  const hasPlayerSpawnCell = !!(
+    targetGrid?.playerSpawnCell
+    && Number.isInteger(targetGrid.playerSpawnCell.x)
+    && Number.isInteger(targetGrid.playerSpawnCell.z)
+    && Number.isInteger(targetGrid.playerSpawnCell.y)
+  );
+  if (hasPlayerSpawnCell && typeof targetGrid.cellToWorldCenter === "function") {
+    const markerY = (Number(targetGrid.tileTopY) || 0) + (targetGrid.playerSpawnCell.y * (Number(targetGrid.cellSize) || 1));
+    const spawnCenter = targetGrid.cellToWorldCenter(
+      targetGrid.playerSpawnCell.x,
+      targetGrid.playerSpawnCell.z,
+      markerY
+    );
+    camera.position.set(spawnCenter.x, markerY + targetGrid.eyeHeight, spawnCenter.z);
+  } else {
+    camera.position.set(0, targetGrid.eyeHeight, targetGrid.moveBounds.maxZ - SCENE_CONFIG.cameraStartOffsetZ);
+  }
+  camera.lookAt(0, targetGrid.eyeHeight, 0);
 }
-camera.lookAt(0, grid.eyeHeight, 0);
+placeCameraAtPlayerSpawn(grid);
 
 const buildPhasePathPreviewGroup = new THREE.Group();
 buildPhasePathPreviewGroup.visible = false;
@@ -192,6 +239,8 @@ const buildPhasePathPreviewTrails = [];
 let player;
 let enemySystem;
 let towerSystem;
+let levelEditor;
+let lastEditorRampRotateAtMs = -Infinity;
 
 const clock = new THREE.Clock();
 let isPaused = false;
@@ -366,7 +415,14 @@ function trySpendMoney(amount) {
 }
 
 function handlePrimaryAction() {
-  if (towerSystem.isBuildMode()) {
+  if (waveState === "EDITOR") {
+    const didMutateLevel = levelEditor?.applyPrimaryAction?.();
+    if (didMutateLevel) {
+      rebuildEditorGridFromCurrentModel();
+    }
+    return;
+  }
+  if (towerSystem?.isBuildMode()) {
     const didPlaceTower = towerSystem.placeSelectedTower();
     if (didPlaceTower) {
       isPrimaryDown = false;
@@ -776,17 +832,12 @@ function updateBuildPhasePreviewTrail(trail, deltaSeconds) {
 }
 
 function syncBuildPhasePathPreviewVisibility() {
-  buildPhasePathPreviewGroup.visible = waveState === "BUILD" && buildPhasePathPreviewTrails.length > 0;
+  buildPhasePathPreviewGroup.visible = (waveState === "BUILD" || waveState === "EDITOR")
+    && buildPhasePathPreviewTrails.length > 0;
 }
 
-function rebuildBuildPhasePathPreview() {
+function rebuildPathPreviewFromRoutes(previewRoutes) {
   clearBuildPhasePathPreview();
-  if (!enemySystem || typeof enemySystem.getRoutePreviewPaths !== "function") {
-    syncBuildPhasePathPreviewVisibility();
-    return;
-  }
-
-  const previewRoutes = enemySystem.getRoutePreviewPaths();
   if (!Array.isArray(previewRoutes) || previewRoutes.length === 0) {
     syncBuildPhasePathPreviewVisibility();
     return;
@@ -880,6 +931,34 @@ function rebuildBuildPhasePathPreview() {
   }
 
   syncBuildPhasePathPreviewVisibility();
+}
+
+function rebuildBuildPhasePathPreview() {
+  if (!enemySystem || typeof enemySystem.getRoutePreviewPaths !== "function") {
+    clearBuildPhasePathPreview();
+    syncBuildPhasePathPreviewVisibility();
+    return;
+  }
+  rebuildPathPreviewFromRoutes(enemySystem.getRoutePreviewPaths());
+}
+
+function rebuildEditorPathPreview() {
+  if (waveState !== "EDITOR") {
+    return;
+  }
+  let previewEnemySystem = null;
+  try {
+    previewEnemySystem = createEnemySystem(scene, grid);
+    const previewRoutes = typeof previewEnemySystem.getRoutePreviewPaths === "function"
+      ? previewEnemySystem.getRoutePreviewPaths()
+      : [];
+    rebuildPathPreviewFromRoutes(previewRoutes);
+  } catch (error) {
+    clearBuildPhasePathPreview();
+    syncBuildPhasePathPreviewVisibility();
+  } finally {
+    previewEnemySystem?.dispose?.();
+  }
 }
 
 function updateBuildPhasePathPreview(deltaSeconds) {
@@ -1025,8 +1104,29 @@ if (!isTouchDevice) {
     }
   }, true);
 
+  window.addEventListener("wheel", (event) => {
+    if (waveState !== "EDITOR" || !levelEditor) {
+      return;
+    }
+    if (levelEditor.getSelectedTool?.() !== "ramp") {
+      return;
+    }
+    if (event.deltaY === 0) {
+      return;
+    }
+    const nowMs = typeof performance?.now === "function" ? performance.now() : Date.now();
+    if ((nowMs - lastEditorRampRotateAtMs) < EDITOR_RAMP_ROTATE_INTERVAL_MS) {
+      event.preventDefault();
+      return;
+    }
+    lastEditorRampRotateAtMs = nowMs;
+    const direction = event.deltaY > 0 ? 1 : -1;
+    levelEditor.rotateRamp(direction);
+    event.preventDefault();
+  }, { passive: false });
+
   window.addEventListener("mousedown", (event) => {
-    if (!player || !towerSystem) {
+    if (!player) {
       return;
     }
 
@@ -1061,7 +1161,18 @@ if (!isTouchDevice) {
       return;
     }
 
-    if (event.button === 2) {
+    if (waveState === "EDITOR") {
+      if (event.button !== 0 || !player.controls.isLocked) {
+        return;
+      }
+      const didMutateLevel = levelEditor?.applyPrimaryAction?.();
+      if (didMutateLevel) {
+        rebuildEditorGridFromCurrentModel();
+      }
+      return;
+    }
+
+    if (event.button === 2 && towerSystem) {
       towerSystem.selectTower("laser");
       return;
     }
@@ -1074,7 +1185,7 @@ if (!isTouchDevice) {
       return;
     }
 
-    if (towerSystem.isBuildMode()) {
+    if (towerSystem?.isBuildMode()) {
       towerSystem.placeSelectedTower();
       return;
     }
@@ -1256,7 +1367,33 @@ if (isTouchDevice) {
 
 
 window.addEventListener("keydown", (event) => {
-  if (!player || !towerSystem) return;
+  if (!player) return;
+
+  if (event.code === DESKTOP_EDITOR_TOGGLE_KEY && !event.repeat && !isTouchDevice) {
+    if (waveState === "EDITOR") {
+      exitEditorMode();
+    } else {
+      enterEditorMode();
+    }
+    return;
+  }
+
+  if (waveState === "EDITOR") {
+    if (event.code.startsWith("Digit")) {
+      const rawDigit = Number(event.code.slice(5));
+      if (!Number.isNaN(rawDigit)) {
+        levelEditor?.selectToolByDigit?.(rawDigit);
+      }
+      return;
+    }
+    if (event.code === "Enter") {
+      const didMutateLevel = levelEditor?.applyPrimaryAction?.();
+      if (didMutateLevel) {
+        rebuildEditorGridFromCurrentModel();
+      }
+    }
+    return;
+  }
 
   if (event.code === "KeyK" && !event.repeat) {
     if (waveState === "MENU") {
@@ -1302,12 +1439,12 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (event.code === "Escape" && towerSystem.isBuildMode()) {
+  if (event.code === "Escape" && towerSystem?.isBuildMode()) {
     towerSystem.cancelPlacement();
     return;
   }
 
-  if (event.code.startsWith("Digit")) {
+  if (event.code.startsWith("Digit") && towerSystem) {
     const rawDigit = Number(event.code.slice(5));
     if (!Number.isNaN(rawDigit)) {
       const slotIndex = rawDigit === 0 ? 9 : rawDigit - 1;
@@ -1320,11 +1457,11 @@ window.addEventListener("keydown", (event) => {
   }
 
   if (event.code === "KeyQ") {
-    towerSystem.cancelPlacement();
+    towerSystem?.cancelPlacement?.();
     return;
   }
 
-  if (event.code === "Enter" && towerSystem.isBuildMode()) {
+  if (event.code === "Enter" && towerSystem?.isBuildMode()) {
     towerSystem.placeSelectedTower();
   }
 });
@@ -1337,6 +1474,209 @@ let buildPhaseRemainingSeconds = 0;
 let fpsDisplay = 0;
 let fpsSampleTime = 0;
 let fpsSampleFrames = 0;
+
+function resetRunStateForNewLevel() {
+  player?.resetRunState?.();
+  playerMoney = startingCash;
+  currentWave = WAVE_CONFIG.initialWave;
+  waveDelay = 0;
+  queuedWaveNumber = null;
+  buildPhaseRemainingSeconds = 0;
+  currentUpgradeOptions = [];
+  hoveredUpgradeIndex = -1;
+  menuAdvancesWaveOnChoice = true;
+  menuResumeWaveState = "PLAYING";
+  hasShownFirstUpgradeMenu = false;
+  upgradeCountsById.clear();
+  isPrimaryDown = false;
+  gameSpeedMultiplier = GAME_SPEED_NORMAL;
+}
+
+function disposeCombatSystems() {
+  if (towerSystem && typeof towerSystem.dispose === "function") {
+    towerSystem.dispose();
+  }
+  if (enemySystem && typeof enemySystem.dispose === "function") {
+    enemySystem.dispose();
+  }
+  towerSystem = null;
+  enemySystem = null;
+}
+
+function createEnemySystemForCurrentGrid() {
+  return createEnemySystem(scene, grid, {
+    onEnemyDefeated: (cashReward) => {
+      addMoney(cashReward);
+    },
+  });
+}
+
+function createTowerSystemForCurrentGrid() {
+  return createTowerSystem({
+    scene,
+    camera,
+    grid,
+    getCurrentMoney: () => playerMoney,
+    spendMoney: (amount) => trySpendMoney(amount),
+    canBlockCell: (cellX, cellZ) => {
+      if (!enemySystem || typeof enemySystem.canBlockCell !== "function") {
+        return true;
+      }
+      return enemySystem.canBlockCell(cellX, cellZ);
+    },
+    getBlockedRevision: () => {
+      if (!enemySystem || typeof enemySystem.getBlockedRevision !== "function") {
+        return 0;
+      }
+      return enemySystem.getBlockedRevision();
+    },
+    onBlockedCellsChanged: (blockedCells) => {
+      if (!enemySystem || typeof enemySystem.setBlockedCells !== "function") {
+        return true;
+      }
+      const didUpdate = enemySystem.setBlockedCells(blockedCells);
+      if (didUpdate && waveState === "BUILD") {
+        rebuildBuildPhasePathPreview();
+      } else if (didUpdate && waveState === "EDITOR") {
+        rebuildEditorPathPreview();
+      }
+      return didUpdate;
+    },
+  });
+}
+
+function recreateGameplaySystems() {
+  disposeCombatSystems();
+  enemySystem = createEnemySystemForCurrentGrid();
+  towerSystem = createTowerSystemForCurrentGrid();
+  enemySystem.setBlockedCells(towerSystem.getBlockedCells());
+}
+
+function replaceGrid(nextLevelObjects, options = {}) {
+  const {
+    allowIncompleteMarkers = false,
+    editorMode = false,
+  } = options;
+  const nextGrid = createGrid(scene, {
+    levelObjects: nextLevelObjects,
+    allowIncompleteMarkers,
+    editorMode,
+  });
+  if (grid && typeof grid.dispose === "function") {
+    grid.dispose();
+  }
+  grid = nextGrid;
+  if (levelEditor) {
+    levelEditor.setGrid(grid);
+  }
+}
+
+function getCurrentLevelObjectsSnapshot() {
+  if (waveState === "EDITOR" && levelEditor && typeof levelEditor.getLevelObjects === "function") {
+    return levelEditor.getLevelObjects();
+  }
+  if (grid && typeof grid.getLevelObjects === "function") {
+    return grid.getLevelObjects();
+  }
+  return [];
+}
+
+function rebuildEditorGridFromCurrentModel() {
+  const levelObjects = levelEditor?.getLevelObjects?.() ?? [];
+  replaceGrid(levelObjects, {
+    allowIncompleteMarkers: true,
+    editorMode: true,
+  });
+  rebuildEditorPathPreview();
+}
+
+function enterEditorMode() {
+  if (isTouchDevice) {
+    return false;
+  }
+  if (waveState === "EDITOR") {
+    return true;
+  }
+
+  if (waveState === "MENU") {
+    player.setMenuMode(false);
+    currentUpgradeOptions = [];
+    hoveredUpgradeIndex = -1;
+  }
+  if (towerSystem?.isBuildMode()) {
+    towerSystem.cancelPlacement();
+  }
+
+  const levelObjects = getCurrentLevelObjectsSnapshot();
+  disposeCombatSystems();
+
+  if (levelEditor) {
+    levelEditor.dispose();
+    levelEditor = null;
+  }
+
+  replaceGrid(levelObjects, {
+    allowIncompleteMarkers: true,
+    editorMode: true,
+  });
+  levelEditor = createLevelEditor({
+    scene,
+    camera,
+    grid,
+    initialLevelObjects: levelObjects,
+  });
+
+  waveState = "EDITOR";
+  queuedWaveNumber = null;
+  buildPhaseRemainingSeconds = 0;
+  resetMobileInputState();
+  clearBuildPhasePathPreview();
+  rebuildEditorPathPreview();
+  return true;
+}
+
+function validateEditorLevelPlayable() {
+  try {
+    const validationEnemySystem = createEnemySystem(scene, grid);
+    validationEnemySystem.dispose?.();
+    return { valid: true };
+  } catch (error) {
+    return {
+      valid: false,
+      error,
+    };
+  }
+}
+
+function exitEditorMode() {
+  if (waveState !== "EDITOR") {
+    return false;
+  }
+  const validation = validateEditorLevelPlayable();
+  if (!validation.valid) {
+    const reason = validation.error instanceof Error
+      ? validation.error.message
+      : String(validation.error);
+    console.warn(`[LevelEditor] Level is not playable yet: ${reason}`);
+    rebuildEditorPathPreview();
+    return false;
+  }
+
+  const levelObjects = levelEditor?.getLevelObjects?.() ?? [];
+  levelEditor?.dispose?.();
+  levelEditor = null;
+
+  replaceGrid(levelObjects, {
+    allowIncompleteMarkers: false,
+    editorMode: false,
+  });
+  recreateGameplaySystems();
+
+  resetRunStateForNewLevel();
+  placeCameraAtPlayerSpawn(grid);
+  startBuildPhase(WAVE_CONFIG.initialWave);
+  return true;
+}
 
 function normalizeMenuResumeWaveState(state) {
   if (state === "DELAY" || state === "BUILD") {
@@ -1391,6 +1731,9 @@ function startQueuedWaveNow() {
 }
 
 function startWave(wave) {
+  if (!enemySystem) {
+    return;
+  }
   currentWave = wave;
   waveState = "PLAYING";
   queuedWaveNumber = null;
@@ -1473,7 +1816,7 @@ function animate() {
 
   if (!isPaused) {
     if (waveState === "PLAYING") {
-      if (enemySystem.isWaveClear()) {
+      if (enemySystem && enemySystem.isWaveClear()) {
         waveState = "DELAY";
         waveDelay = WAVE_CONFIG.upgradeDelaySeconds;
       }
@@ -1489,6 +1832,9 @@ function animate() {
         startQueuedWaveNow();
       }
       updateBuildPhasePathPreview(rawDeltaSeconds);
+    } else if (waveState === "EDITOR") {
+      levelEditor?.update?.();
+      updateBuildPhasePathPreview(rawDeltaSeconds);
     }
 
     if (isGameplayWaveState(waveState)) {
@@ -1497,8 +1843,10 @@ function animate() {
         handlePrimaryAction();
       }
       player.update(simulationDeltaSeconds, enemySystem);
-      enemySystem.update(simulationDeltaSeconds, camera);
-      towerSystem.update(simulationDeltaSeconds, enemySystem);
+      enemySystem?.update?.(simulationDeltaSeconds, camera);
+      towerSystem?.update?.(simulationDeltaSeconds, enemySystem);
+    } else if (waveState === "EDITOR") {
+      player.update(simulationDeltaSeconds, enemySystem);
     }
   }
 
@@ -1509,7 +1857,14 @@ function animate() {
   syncBuildPhasePathPreviewVisibility();
   syncPokiGameplayState();
 
-  const towerInventory = towerSystem
+  const towerInventory = waveState === "EDITOR"
+    ? EDITOR_TOOL_INVENTORY.map((entry) => ({
+      ...entry,
+      affordable: true,
+      remaining: 1,
+      cost: 0,
+    }))
+    : (towerSystem
     ? towerSystem.getTowerInventory().map((entry, index) => ({
       ...entry,
       iconId: (
@@ -1521,7 +1876,7 @@ function animate() {
       ),
       hotkey: String((index + 1) % 10 || 0),
     }))
-    : [];
+    : []);
   const hudWaveNumber = Math.max(
     1,
     Math.floor(
@@ -1552,12 +1907,14 @@ function animate() {
     money: playerMoney,
     waveNumber: hudWaveNumber,
     towerInventory,
-    selectedTowerType: towerSystem ? towerSystem.getSelectedTowerType() : null,
-    buildMode: towerSystem ? towerSystem.isBuildMode() : false,
+    selectedTowerType: waveState === "EDITOR"
+      ? (levelEditor?.getSelectedTool?.() ?? null)
+      : (towerSystem ? towerSystem.getSelectedTowerType() : null),
+    buildMode: waveState === "EDITOR" ? false : (towerSystem ? towerSystem.isBuildMode() : false),
     showKeyboardHints: !showTouchControls,
     showTouchControls,
-    showPauseButton: showTouchControls && waveState !== "BUILD",
-    showSpeedButton: waveState !== "BUILD",
+    showPauseButton: showTouchControls && waveState !== "BUILD" && waveState !== "EDITOR",
+    showSpeedButton: waveState !== "BUILD" && waveState !== "EDITOR",
     buildPhaseActive: waveState === "BUILD",
     buildPhaseRemainingSeconds,
     showNextWaveButton: waveState === "BUILD",
@@ -1601,42 +1958,7 @@ function initGame() {
       return [...staticObstacles, ...towerObstacles];
     },
   });
-
-  enemySystem = createEnemySystem(scene, grid, {
-    onEnemyDefeated: (cashReward) => {
-      addMoney(cashReward);
-    },
-  });
-  towerSystem = createTowerSystem({
-    scene,
-    camera,
-    grid,
-    getCurrentMoney: () => playerMoney,
-    spendMoney: (amount) => trySpendMoney(amount),
-    canBlockCell: (cellX, cellZ) => {
-      if (!enemySystem) {
-        return true;
-      }
-      return enemySystem.canBlockCell(cellX, cellZ);
-    },
-    getBlockedRevision: () => {
-      if (!enemySystem || typeof enemySystem.getBlockedRevision !== "function") {
-        return 0;
-      }
-      return enemySystem.getBlockedRevision();
-    },
-    onBlockedCellsChanged: (blockedCells) => {
-      if (!enemySystem) {
-        return true;
-      }
-      const didUpdate = enemySystem.setBlockedCells(blockedCells);
-      if (didUpdate && waveState === "BUILD") {
-        rebuildBuildPhasePathPreview();
-      }
-      return didUpdate;
-    },
-  });
-  enemySystem.setBlockedCells(towerSystem.getBlockedCells());
+  recreateGameplaySystems();
 
   player.controls.addEventListener("unlock", () => {
     updatePauseState();
@@ -1653,12 +1975,14 @@ function initGame() {
       if (player) player.controls.getObject().position.set(x, grid.eyeHeight, z);
     },
     placeBasicTower: (x, z) => {
-      if (towerSystem) towerSystem.forcePlaceTower(x, z, "laser");
+      if (towerSystem) return towerSystem.forcePlaceTower(x, z, "laser");
+      return false;
     },
     spawnEnemy: (type = "red") => {
       if (enemySystem) {
-        enemySystem.forceSpawnEnemy(type, 0);
+        return enemySystem.forceSpawnEnemy(type, 0);
       }
+      return false;
     },
     addMoney: (amount = 100) => {
       addMoney(amount);
@@ -1687,6 +2011,15 @@ function initGame() {
       return forceTouchControls;
     },
     getForceTouchControls: () => forceTouchControls,
+  };
+
+  window.exportLevel = () => {
+    if (waveState === "EDITOR" && levelEditor && typeof levelEditor.getExportPayload === "function") {
+      return levelEditor.getExportPayload();
+    }
+    return {
+      levelObjects: typeof grid?.getLevelObjects === "function" ? grid.getLevelObjects() : [],
+    };
   };
 
   startBuildPhase(WAVE_CONFIG.initialWave);

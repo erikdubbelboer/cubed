@@ -53,7 +53,22 @@ function cloneCell(cell) {
   if (!cell) {
     return null;
   }
-  return { x: cell.x, z: cell.z };
+  const cloned = { x: cell.x, z: cell.z };
+  if (Number.isInteger(cell.y)) {
+    cloned.y = cell.y;
+  }
+  return cloned;
+}
+
+function clonePosition(position) {
+  if (!position) {
+    return null;
+  }
+  return {
+    x: position.x,
+    y: position.y,
+    z: position.z,
+  };
 }
 
 function isIntegerCell(value) {
@@ -140,8 +155,19 @@ function createRampCellData({
   };
 }
 
-function parseLevelLayout(levelObjects) {
-  if (!Array.isArray(levelObjects) || levelObjects.length === 0) {
+function normalizeLevelObjectTypeForExport(type) {
+  if (type === "playerspawn") {
+    return "playerSpawn";
+  }
+  return type;
+}
+
+function parseLevelLayout(levelObjects, options = {}) {
+  const allowIncompleteMarkers = options.allowIncompleteMarkers === true;
+  if (!Array.isArray(levelObjects)) {
+    throw new Error("grid.levelObjects must be an array.");
+  }
+  if (levelObjects.length === 0 && !allowIncompleteMarkers) {
     throw new Error("grid.levelObjects must be a non-empty array.");
   }
 
@@ -164,6 +190,8 @@ function parseLevelLayout(levelObjects) {
   });
 
   const wallHeights = createHeightMatrix();
+  const wallVoxels = [];
+  const wallVoxelKeySet = new Set();
   const markers = createMarkerMatrix();
   const spawnCells = [];
   const spawnCellKeySet = new Set();
@@ -178,32 +206,46 @@ function parseLevelLayout(levelObjects) {
     }
     const { x, y, z } = entry.position;
     wallHeights[z][x] = Math.max(wallHeights[z][x], y + 1);
+    const voxelKey = `${x},${y},${z}`;
+    if (wallVoxelKeySet.has(voxelKey)) {
+      continue;
+    }
+    wallVoxelKeySet.add(voxelKey);
+    wallVoxels.push({ x, y, z });
   }
 
   for (const entry of parsedEntries) {
     if (!LEVEL_MARKER_TYPES.has(entry.type)) {
       continue;
     }
-    const { x, z } = entry.position;
-    const key = cellKey(x, z);
+    const { x, y, z } = entry.position;
+    const key = `${x},${y},${z}`;
 
     if (entry.type === "spawn") {
       if (!spawnCellKeySet.has(key)) {
         spawnCellKeySet.add(key);
-        spawnCells.push({ x, z });
+        spawnCells.push({ x, y, z });
       }
       markers[z][x] = "S";
     } else if (entry.type === "end") {
-      if (endCell && !isSameCell(endCell, entry.position)) {
-        throw new Error("grid.levelObjects must contain exactly one unique end marker.");
+      if (endCell && (
+        endCell.x !== x
+        || endCell.y !== y
+        || endCell.z !== z
+      )) {
+        throw new Error("grid.levelObjects must contain at most one end marker.");
       }
-      endCell = { x, z };
+      endCell = { x, y, z };
       markers[z][x] = "E";
     } else if (entry.type === "playerspawn") {
-      if (playerSpawnCell && !isSameCell(playerSpawnCell, entry.position)) {
-        throw new Error("grid.levelObjects must contain at most one unique playerSpawn marker.");
+      if (playerSpawnCell && (
+        playerSpawnCell.x !== x
+        || playerSpawnCell.y !== y
+        || playerSpawnCell.z !== z
+      )) {
+        throw new Error("grid.levelObjects must contain at most one playerSpawn marker.");
       }
-      playerSpawnCell = { x, z };
+      playerSpawnCell = { x, y, z };
       markers[z][x] = "X";
     } else if (entry.type === "path") {
       markers[z][x] = "P";
@@ -280,10 +322,10 @@ function parseLevelLayout(levelObjects) {
     });
   }
 
-  if (spawnCells.length === 0) {
+  if (!allowIncompleteMarkers && spawnCells.length === 0) {
     throw new Error("grid.levelObjects must contain at least one spawn marker.");
   }
-  if (!endCell) {
+  if (!allowIncompleteMarkers && !endCell) {
     throw new Error("grid.levelObjects must contain exactly one end marker.");
   }
 
@@ -307,59 +349,23 @@ function parseLevelLayout(levelObjects) {
   return {
     heights,
     wallHeights,
+    wallVoxels,
     markers,
     spawnCells,
     endCell,
     playerSpawnCell,
     ramps,
     rampCellsByKey,
+    levelObjects: parsedEntries.map((entry) => ({
+      type: normalizeLevelObjectTypeForExport(entry.type),
+      position: clonePosition(entry.position),
+      rotation: entry.rotation,
+    })),
   };
 }
 
-const LEVEL_LAYOUT = parseLevelLayout(GRID_CONFIG.levelObjects);
-
 function isMainGridCell(cellX, cellZ) {
   return cellX >= 0 && cellX < GRID_SIZE && cellZ >= 0 && cellZ < GRID_SIZE;
-}
-
-function getCellHeightLevels(cellX, cellZ) {
-  if (!isMainGridCell(cellX, cellZ)) {
-    return 0;
-  }
-  const row = LEVEL_LAYOUT.heights[cellZ];
-  if (!row) {
-    return 0;
-  }
-  return row[cellX] ?? 0;
-}
-
-function getCellMarker(cellX, cellZ) {
-  if (!isMainGridCell(cellX, cellZ)) {
-    return ".";
-  }
-  const row = LEVEL_LAYOUT.markers[cellZ];
-  if (!row) {
-    return ".";
-  }
-  return row[cellX] ?? ".";
-}
-
-function getRampCellData(cellX, cellZ) {
-  return LEVEL_LAYOUT.rampCellsByKey.get(cellKey(cellX, cellZ)) ?? null;
-}
-
-function isRampCell(cellX, cellZ) {
-  return !!getRampCellData(cellX, cellZ);
-}
-
-function getCellSurfaceY(cellX, cellZ) {
-  const rampCellData = getRampCellData(cellX, cellZ);
-  if (rampCellData) {
-    const lowSurfaceY = FLOOR_Y + (rampCellData.lowLevel * ALTITUDE_CUBE_SIZE);
-    const centerRatio = rampCellData.role === RAMP_ROLE_LOW ? 0.25 : 0.75;
-    return lowSurfaceY + (centerRatio * ALTITUDE_CUBE_SIZE);
-  }
-  return FLOOR_Y + (getCellHeightLevels(cellX, cellZ) * ALTITUDE_CUBE_SIZE);
 }
 
 function cellToWorld(cellX, cellZ, y = FLOOR_Y) {
@@ -442,7 +448,66 @@ function getRampHighEdgeKey(ramp) {
   return `z|${(highCellZ * 2) + dirZ}|${highCellX}|${highLevel}`;
 }
 
-export function createGrid(scene) {
+export function createGrid(scene, options = {}) {
+  const {
+    levelObjects = GRID_CONFIG.levelObjects,
+    allowIncompleteMarkers = false,
+    editorMode = false,
+  } = options;
+
+  const levelLayout = parseLevelLayout(levelObjects, { allowIncompleteMarkers });
+  const normalizedLevelObjects = Array.isArray(levelLayout.levelObjects)
+    ? levelLayout.levelObjects.map((entry) => ({
+      type: entry.type,
+      position: clonePosition(entry.position),
+      rotation: entry.rotation,
+    }))
+    : [];
+
+  function getCellHeightLevels(cellX, cellZ) {
+    if (!isMainGridCell(cellX, cellZ)) {
+      return 0;
+    }
+    const row = levelLayout.heights[cellZ];
+    if (!row) {
+      return 0;
+    }
+    return row[cellX] ?? 0;
+  }
+
+  function getCellMarker(cellX, cellZ) {
+    if (!isMainGridCell(cellX, cellZ)) {
+      return ".";
+    }
+    const row = levelLayout.markers[cellZ];
+    if (!row) {
+      return ".";
+    }
+    return row[cellX] ?? ".";
+  }
+
+  function getRampCellData(cellX, cellZ) {
+    return levelLayout.rampCellsByKey.get(cellKey(cellX, cellZ)) ?? null;
+  }
+
+  function isRampCell(cellX, cellZ) {
+    return !!getRampCellData(cellX, cellZ);
+  }
+
+  function getCellSurfaceY(cellX, cellZ) {
+    const rampCellData = getRampCellData(cellX, cellZ);
+    if (rampCellData) {
+      const lowSurfaceY = FLOOR_Y + (rampCellData.lowLevel * ALTITUDE_CUBE_SIZE);
+      const centerRatio = rampCellData.role === RAMP_ROLE_LOW ? 0.25 : 0.75;
+      return lowSurfaceY + (centerRatio * ALTITUDE_CUBE_SIZE);
+    }
+    return FLOOR_Y + (getCellHeightLevels(cellX, cellZ) * ALTITUDE_CUBE_SIZE);
+  }
+
+  const gridRoot = new THREE.Group();
+  gridRoot.name = "GridRoot";
+  scene.add(gridRoot);
+
   const extendedGridCellSpan = GRID_SIZE + (OUTER_EMPTY_SPACE_RINGS * 2);
   const extendedGridWorldSize = extendedGridCellSpan * CELL_SIZE;
 
@@ -459,7 +524,7 @@ export function createGrid(scene) {
   farFloor.rotation.x = -Math.PI * 0.5;
   farFloor.position.y = FLOOR_Y;
   farFloor.receiveShadow = true;
-  scene.add(farFloor);
+  gridRoot.add(farFloor);
 
   const platform = new THREE.Mesh(
     new THREE.BoxGeometry(
@@ -477,19 +542,20 @@ export function createGrid(scene) {
   );
   platform.position.y = FLOOR_Y - (PLATFORM_HEIGHT / 2) - GRID_CONFIG.platformSink;
   platform.receiveShadow = true;
-  scene.add(platform);
+  gridRoot.add(platform);
 
   const half = (GRID_SIZE * CELL_SIZE) / 2;
   const altitudeObstacles = [];
   const rampObstacles = [];
   const rampTopSurfaces = [];
+  const editorRaycastTargets = [];
   const buildRaycastObstacleBox = new THREE.Box3();
   const buildRaycastHitPoint = new THREE.Vector3();
   const buildRaycastBestPoint = new THREE.Vector3();
   const buildRaycastRampHitPoint = new THREE.Vector3();
 
-  const wallHeights = LEVEL_LAYOUT.wallHeights;
-  const ramps = Array.isArray(LEVEL_LAYOUT.ramps) ? LEVEL_LAYOUT.ramps : [];
+  const ramps = Array.isArray(levelLayout.ramps) ? levelLayout.ramps : [];
+  const wallVoxels = Array.isArray(levelLayout.wallVoxels) ? levelLayout.wallVoxels : [];
 
   const altitudeCubeGeo = new THREE.BoxGeometry(
     ALTITUDE_CUBE_SIZE,
@@ -497,61 +563,62 @@ export function createGrid(scene) {
     ALTITUDE_CUBE_SIZE
   );
 
-  for (let cellZ = 0; cellZ < GRID_SIZE; cellZ += 1) {
-    for (let cellX = 0; cellX < GRID_SIZE; cellX += 1) {
-      const cellHeightLevels = wallHeights[cellZ]?.[cellX] ?? 0;
-      if (cellHeightLevels <= 0) {
-        continue;
-      }
-
-      const checkerOffset = ((cellX + cellZ) & 1) === 0
-        ? GRID_CONFIG.checkerLightnessOffset
-        : -GRID_CONFIG.checkerLightnessOffset;
-      const worldX = -half + cellX * CELL_SIZE + CELL_SIZE / 2;
-      const worldZ = -half + cellZ * CELL_SIZE + CELL_SIZE / 2;
-      const supportHeight = cellHeightLevels * ALTITUDE_CUBE_SIZE;
-
-      altitudeObstacles.push({
-        position: new THREE.Vector3(worldX, FLOOR_Y, worldZ),
-        halfSize: TERRAIN_OBSTACLE_HALF_SIZE,
-        halfSizeX: TERRAIN_OBSTACLE_HALF_SIZE,
-        halfSizeZ: TERRAIN_OBSTACLE_HALF_SIZE,
-        height: supportHeight,
-        baseY: FLOOR_Y,
-        // Terrain tops should remain continuously walkable across adjacent cells.
-        topInsetFromRadius: 0,
-      });
-
-      for (let level = 0; level < cellHeightLevels; level += 1) {
-        const lightness = GRID_CONFIG.altitudeBaseLightness
-          + checkerOffset
-          + level * GRID_CONFIG.altitudePerLevelLightnessStep;
-        const color = new THREE.Color().setHSL(
-          GRID_CONFIG.altitudeHue,
-          GRID_CONFIG.altitudeSaturation,
-          lightness
-        );
-        const cube = new THREE.Mesh(
-          altitudeCubeGeo,
-          new THREE.MeshStandardMaterial({
-            color,
-            emissive: color.clone().multiplyScalar(GRID_CONFIG.altitudeEmissiveScale),
-            emissiveIntensity: GRID_CONFIG.altitudeEmissiveIntensity,
-            roughness: GRID_CONFIG.altitudeRoughness,
-            metalness: GRID_CONFIG.altitudeMetalness,
-          })
-        );
-
-        cube.position.set(
-          worldX,
-          FLOOR_Y + ALTITUDE_CUBE_SIZE * 0.5 + level * ALTITUDE_CUBE_SIZE,
-          worldZ
-        );
-        cube.castShadow = true;
-        cube.receiveShadow = true;
-        scene.add(cube);
-      }
+  for (const voxel of wallVoxels) {
+    const cellX = Number(voxel?.x);
+    const cellY = Number(voxel?.y);
+    const cellZ = Number(voxel?.z);
+    if (!Number.isInteger(cellX) || !Number.isInteger(cellY) || !Number.isInteger(cellZ)) {
+      continue;
     }
+
+    const checkerOffset = ((cellX + cellZ) & 1) === 0
+      ? GRID_CONFIG.checkerLightnessOffset
+      : -GRID_CONFIG.checkerLightnessOffset;
+    const worldX = -half + cellX * CELL_SIZE + CELL_SIZE / 2;
+    const worldZ = -half + cellZ * CELL_SIZE + CELL_SIZE / 2;
+    const baseY = FLOOR_Y + (cellY * ALTITUDE_CUBE_SIZE);
+
+    altitudeObstacles.push({
+      position: new THREE.Vector3(worldX, baseY, worldZ),
+      halfSize: TERRAIN_OBSTACLE_HALF_SIZE,
+      halfSizeX: TERRAIN_OBSTACLE_HALF_SIZE,
+      halfSizeZ: TERRAIN_OBSTACLE_HALF_SIZE,
+      height: ALTITUDE_CUBE_SIZE,
+      baseY,
+      // Terrain tops should remain continuously walkable across adjacent cells.
+      topInsetFromRadius: 0,
+    });
+
+    const lightness = GRID_CONFIG.altitudeBaseLightness
+      + checkerOffset
+      + cellY * GRID_CONFIG.altitudePerLevelLightnessStep;
+    const color = new THREE.Color().setHSL(
+      GRID_CONFIG.altitudeHue,
+      GRID_CONFIG.altitudeSaturation,
+      lightness
+    );
+    const cube = new THREE.Mesh(
+      altitudeCubeGeo,
+      new THREE.MeshStandardMaterial({
+        color,
+        emissive: color.clone().multiplyScalar(GRID_CONFIG.altitudeEmissiveScale),
+        emissiveIntensity: GRID_CONFIG.altitudeEmissiveIntensity,
+        roughness: GRID_CONFIG.altitudeRoughness,
+        metalness: GRID_CONFIG.altitudeMetalness,
+      })
+    );
+
+    cube.position.set(
+      worldX,
+      baseY + (ALTITUDE_CUBE_SIZE * 0.5),
+      worldZ
+    );
+    cube.castShadow = true;
+    cube.receiveShadow = true;
+    cube.userData.editorObjectType = "wall";
+    cube.userData.editorWall = { x: cellX, y: cellY, z: cellZ };
+    editorRaycastTargets.push(cube);
+    gridRoot.add(cube);
   }
 
   const rampHighEdgeCounts = new Map();
@@ -600,7 +667,15 @@ export function createGrid(scene) {
     rampMesh.receiveShadow = true;
     rampMesh.userData.isRamp = true;
     rampMesh.userData.rampId = ramp.id;
-    scene.add(rampMesh);
+    rampMesh.userData.editorObjectType = "ramp";
+    rampMesh.userData.editorRamp = {
+      x: ramp.lowCell.x,
+      y: ramp.lowLevel,
+      z: ramp.lowCell.z,
+      rotation: ramp.rotation,
+    };
+    editorRaycastTargets.push(rampMesh);
+    gridRoot.add(rampMesh);
 
     const rampDirectionWorld = new THREE.Vector2(ramp.direction.x, ramp.direction.z).normalize();
     const rampRightWorld = new THREE.Vector2(-rampDirectionWorld.y, rampDirectionWorld.x);
@@ -721,7 +796,7 @@ export function createGrid(scene) {
       tile.receiveShadow = true;
       tile.castShadow = true;
       tiles.push(tile);
-      scene.add(tile);
+      gridRoot.add(tile);
     }
   }
 
@@ -741,9 +816,9 @@ export function createGrid(scene) {
     metalness: 0.15,
   });
 
-  const spawnCells = LEVEL_LAYOUT.spawnCells.map((cell) => cloneCell(cell));
-  const endCell = cloneCell(LEVEL_LAYOUT.endCell);
-  const playerSpawnCell = cloneCell(LEVEL_LAYOUT.playerSpawnCell);
+  const spawnCells = levelLayout.spawnCells.map((cell) => cloneCell(cell));
+  const endCell = cloneCell(levelLayout.endCell);
+  const playerSpawnCell = cloneCell(levelLayout.playerSpawnCell);
   const spawnCellSet = new Set(spawnCells.map((cell) => cellKey(cell.x, cell.z)));
   const endCellKey = endCell ? cellKey(endCell.x, endCell.z) : null;
   const endpointObstacles = [];
@@ -752,7 +827,7 @@ export function createGrid(scene) {
   const spawnMarkers = [];
   for (const spawnCell of spawnCells) {
     const marker = new THREE.Mesh(endpointGeo, spawnMat);
-    const spawnSurfaceY = getCellSurfaceY(spawnCell.x, spawnCell.z);
+    const spawnSurfaceY = FLOOR_Y + ((Number.isFinite(Number(spawnCell.y)) ? Number(spawnCell.y) : 0) * CELL_SIZE);
     const center = cellToWorld(spawnCell.x, spawnCell.z, spawnSurfaceY);
     marker.position.set(center.x, center.y + CELL_SIZE * 0.5, center.z);
     marker.castShadow = true;
@@ -760,8 +835,16 @@ export function createGrid(scene) {
     marker.userData.isEndpointMarker = true;
     marker.userData.endpointType = "spawn";
     marker.userData.cellX = spawnCell.x;
+    marker.userData.cellY = spawnCell.y ?? 0;
     marker.userData.cellZ = spawnCell.z;
-    scene.add(marker);
+    marker.userData.editorObjectType = "spawn";
+    marker.userData.editorMarker = {
+      x: spawnCell.x,
+      y: spawnCell.y ?? 0,
+      z: spawnCell.z,
+    };
+    editorRaycastTargets.push(marker);
+    gridRoot.add(marker);
     spawnMarkers.push(marker);
     endpointObstacles.push({
       mesh: marker,
@@ -779,7 +862,7 @@ export function createGrid(scene) {
   let endMarker = null;
   if (endCell) {
     endMarker = new THREE.Mesh(endpointGeo, endMat);
-    const endSurfaceY = getCellSurfaceY(endCell.x, endCell.z);
+    const endSurfaceY = FLOOR_Y + ((Number.isFinite(Number(endCell.y)) ? Number(endCell.y) : 0) * CELL_SIZE);
     const center = cellToWorld(endCell.x, endCell.z, endSurfaceY);
     endMarker.position.set(center.x, center.y + CELL_SIZE * 0.5, center.z);
     endMarker.castShadow = true;
@@ -787,8 +870,16 @@ export function createGrid(scene) {
     endMarker.userData.isEndpointMarker = true;
     endMarker.userData.endpointType = "end";
     endMarker.userData.cellX = endCell.x;
+    endMarker.userData.cellY = endCell.y ?? 0;
     endMarker.userData.cellZ = endCell.z;
-    scene.add(endMarker);
+    endMarker.userData.editorObjectType = "end";
+    endMarker.userData.editorMarker = {
+      x: endCell.x,
+      y: endCell.y ?? 0,
+      z: endCell.z,
+    };
+    editorRaycastTargets.push(endMarker);
+    gridRoot.add(endMarker);
     endpointObstacles.push({
       mesh: endMarker,
       position: new THREE.Vector3(center.x, endSurfaceY, center.z),
@@ -800,6 +891,39 @@ export function createGrid(scene) {
       // Match terrain wall-block top-support behavior for player movement.
       topInsetFromRadius: 0,
     });
+  }
+
+  let playerSpawnMarker = null;
+  if (playerSpawnCell && editorMode) {
+    const playerSpawnMat = new THREE.MeshStandardMaterial({
+      color: 0x60ff7f,
+      emissive: 0x1d6231,
+      emissiveIntensity: 0.45,
+      roughness: 0.5,
+      metalness: 0.1,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false,
+    });
+    playerSpawnMarker = new THREE.Mesh(endpointGeo, playerSpawnMat);
+    const playerSpawnSurfaceY = FLOOR_Y
+      + ((Number.isFinite(Number(playerSpawnCell.y)) ? Number(playerSpawnCell.y) : 0) * CELL_SIZE);
+    const playerSpawnCenter = cellToWorld(playerSpawnCell.x, playerSpawnCell.z, playerSpawnSurfaceY);
+    playerSpawnMarker.position.set(
+      playerSpawnCenter.x,
+      playerSpawnCenter.y + CELL_SIZE * 0.5,
+      playerSpawnCenter.z
+    );
+    playerSpawnMarker.castShadow = true;
+    playerSpawnMarker.receiveShadow = true;
+    playerSpawnMarker.userData.editorObjectType = "playerSpawn";
+    playerSpawnMarker.userData.editorMarker = {
+      x: playerSpawnCell.x,
+      y: playerSpawnCell.y ?? 0,
+      z: playerSpawnCell.z,
+    };
+    editorRaycastTargets.push(playerSpawnMarker);
+    gridRoot.add(playerSpawnMarker);
   }
 
   const moveInset = CELL_SIZE * GRID_CONFIG.moveInsetCellScale;
@@ -846,7 +970,7 @@ export function createGrid(scene) {
   const boundaryWallGroup = new THREE.Group();
   boundaryWallGroup.name = "BoundaryWallGroup";
   boundaryWallGroup.visible = false;
-  scene.add(boundaryWallGroup);
+  gridRoot.add(boundaryWallGroup);
 
   const boundaryWallEntries = [];
   const boundaryWallColor = new THREE.Color(boundaryWallConfig.color);
@@ -1320,12 +1444,56 @@ export function createGrid(scene) {
     return !isRampCell(cellX, cellZ);
   }
 
+  let disposed = false;
+  function dispose() {
+    if (disposed) {
+      return;
+    }
+    disposed = true;
+
+    const disposedGeometries = new Set();
+    const disposedMaterials = new Set();
+    gridRoot.traverse((child) => {
+      if (child?.geometry && typeof child.geometry.dispose === "function" && !disposedGeometries.has(child.geometry)) {
+        disposedGeometries.add(child.geometry);
+        child.geometry.dispose();
+      }
+      if (!child?.material) {
+        return;
+      }
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (!material || disposedMaterials.has(material) || typeof material.dispose !== "function") {
+          continue;
+        }
+        disposedMaterials.add(material);
+        material.dispose();
+      }
+    });
+    if (gridRoot.parent) {
+      gridRoot.parent.remove(gridRoot);
+    }
+  }
+
+  function getLevelObjects() {
+    return normalizedLevelObjects.map((entry) => ({
+      type: entry.type,
+      position: clonePosition(entry.position),
+      rotation: entry.rotation,
+    }));
+  }
+
+  function getEditorRaycastTargets() {
+    return editorRaycastTargets.filter((target) => !!target?.parent);
+  }
+
   return {
     spawnCells,
     endCell,
     playerSpawnCell,
     spawnMarkers,
     endMarker,
+    playerSpawnMarker,
     moveBounds,
     levelBounds,
     eyeHeight: GRID_CONFIG.eyeHeight,
@@ -1352,6 +1520,9 @@ export function createGrid(scene) {
     getBuildSurfaceYAtWorld,
     raycastBuildSurface,
     updateBoundaryWallVisual,
+    getLevelObjects,
+    getEditorRaycastTargets,
+    dispose,
     isSameCell,
   };
 }
