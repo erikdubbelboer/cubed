@@ -26,23 +26,37 @@ const AOE_PULSE_INTERVAL = AOE_TOWER_CONFIG.pulseInterval;
 const AOE_PULSE_DAMAGE = AOE_TOWER_CONFIG.pulseDamage;
 const AOE_PULSE_DURATION = AOE_TOWER_CONFIG.pulseDuration;
 const AOE_SHELL_THICKNESS = AOE_TOWER_CONFIG.shellThickness;
-const AOE_TOWER_RADIUS = AOE_TOWER_CONFIG.radius;
-const AOE_TOWER_HALF_SIZE = AOE_TOWER_CONFIG.halfSize;
 const AOE_TOWER_HEIGHT = AOE_TOWER_CONFIG.height;
 const AOE_HOVER_BASE_Y = AOE_TOWER_CONFIG.hoverBaseY;
 const AOE_BOB_AMPLITUDE = AOE_TOWER_CONFIG.bobAmplitude;
 const AOE_BOB_FREQUENCY = AOE_TOWER_CONFIG.bobFrequency;
+const AOE_VISUAL_SCALE = Number.isFinite(Number(AOE_TOWER_CONFIG.visualScale))
+  ? Math.max(0.05, Number(AOE_TOWER_CONFIG.visualScale))
+  : 1;
+const AOE_TOWER_RADIUS = Number.isFinite(Number(AOE_TOWER_CONFIG.radius))
+  ? Math.max(0.05, Number(AOE_TOWER_CONFIG.radius) * AOE_VISUAL_SCALE)
+  : (1.1 * AOE_VISUAL_SCALE);
+const AOE_TOWER_HALF_SIZE = Number.isFinite(Number(AOE_TOWER_CONFIG.halfSize))
+  ? Math.max(0.05, Number(AOE_TOWER_CONFIG.halfSize) * AOE_VISUAL_SCALE)
+  : (0.9 * AOE_VISUAL_SCALE);
 const SLOW_RANGE = SLOW_TOWER_CONFIG.range;
 const SLOW_FIRE_INTERVAL = SLOW_TOWER_CONFIG.fireInterval;
 const SLOW_MULTIPLIER = SLOW_TOWER_CONFIG.slowMultiplier;
 const SLOW_DURATION = SLOW_TOWER_CONFIG.slowDuration;
 const SLOW_FIELD_DURATION = SLOW_TOWER_CONFIG.fieldDuration;
-const SLOW_TOWER_RADIUS = SLOW_TOWER_CONFIG.radius;
-const SLOW_TOWER_HALF_SIZE = SLOW_TOWER_CONFIG.halfSize;
+const SLOW_VISUAL_SCALE = Number.isFinite(Number(SLOW_TOWER_CONFIG.visualScale))
+  ? Math.max(0.05, Number(SLOW_TOWER_CONFIG.visualScale))
+  : 1.9;
+const SLOW_BODY_RADIUS = Number.isFinite(Number(SLOW_TOWER_CONFIG.bodyRadius))
+  ? Number(SLOW_TOWER_CONFIG.bodyRadius)
+  : 0.62;
+const SLOW_PEDESTAL_DIAMETER_SCALE = 1.75;
+const SLOW_PEDESTAL_RADIUS_TOP = Math.max(0.14, SLOW_BODY_RADIUS * 0.7)
+  * SLOW_PEDESTAL_DIAMETER_SCALE;
+const SLOW_PEDESTAL_RADIUS_BOTTOM = SLOW_PEDESTAL_RADIUS_TOP * 1.4;
+const SLOW_TOWER_RADIUS = Math.max(0.05, SLOW_PEDESTAL_RADIUS_BOTTOM * SLOW_VISUAL_SCALE);
+const SLOW_TOWER_HALF_SIZE = SLOW_TOWER_RADIUS;
 const SLOW_TOWER_HEIGHT = SLOW_TOWER_CONFIG.height;
-const SLOW_HOVER_BASE_Y = SLOW_TOWER_CONFIG.hoverBaseY;
-const SLOW_BOB_AMPLITUDE = SLOW_TOWER_CONFIG.bobAmplitude;
-const SLOW_BOB_FREQUENCY = SLOW_TOWER_CONFIG.bobFrequency;
 const PATH_RANGE_HIGHLIGHT_VALID_COLOR = GUN_TOWER_CONFIG.rangeHighlightValidColor;
 const PATH_RANGE_HIGHLIGHT_INVALID_COLOR = GUN_TOWER_CONFIG.rangeHighlightInvalidColor;
 const BUILD_FX_CONFIG = TOWER_CONFIG.buildFx ?? {};
@@ -729,7 +743,8 @@ export function createTowerSystem({
   }) {
     const root = new THREE.Group();
     const hoverNode = new THREE.Object3D();
-    hoverNode.position.y = AOE_HOVER_BASE_Y;
+    hoverNode.position.y = AOE_HOVER_BASE_Y * AOE_VISUAL_SCALE;
+    hoverNode.scale.setScalar(AOE_VISUAL_SCALE);
     root.add(hoverNode);
 
     const coreMaterial = new THREE.MeshStandardMaterial({
@@ -780,7 +795,11 @@ export function createTowerSystem({
     );
     hoverNode.add(auraMesh);
 
-    const glowLight = new THREE.PointLight(emissiveColor, 0.35, AOE_TOWER_CONFIG.lightDistance);
+    const glowLight = new THREE.PointLight(
+      emissiveColor,
+      0.35,
+      AOE_TOWER_CONFIG.lightDistance * AOE_VISUAL_SCALE
+    );
     hoverNode.add(glowLight);
 
     const footprintOutline = createFootprintOutlineMesh({
@@ -818,25 +837,68 @@ export function createTowerSystem({
   }) {
     const root = new THREE.Group();
     const hoverNode = new THREE.Object3D();
-    hoverNode.position.y = SLOW_HOVER_BASE_Y;
+    hoverNode.position.y = 0;
+    hoverNode.scale.setScalar(SLOW_VISUAL_SCALE);
     root.add(hoverNode);
+
+    const pedestalRadiusTop = SLOW_PEDESTAL_RADIUS_TOP;
+    const pedestalRadiusBottom = SLOW_PEDESTAL_RADIUS_BOTTOM;
+    const pedestalHeight = Math.max(0.16, SLOW_TOWER_CONFIG.bodyHeight * 0.36);
+    const crystalRadius = Math.max(0.2, SLOW_BODY_RADIUS * 0.86);
+    const crystalHeight = Math.max(0.5, SLOW_TOWER_CONFIG.bodyHeight * 1.35);
+    const crystalCenterY = (pedestalHeight * 0.5) + (crystalHeight * 0.52);
+    const ringRadius = Math.max(0.16, crystalRadius * 1.18);
+    const ringTube = Math.max(0.02, crystalRadius * 0.11);
+    const ringOffsetY = crystalHeight * 0.22;
 
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: bodyColor,
       emissive: emissiveColor,
       emissiveIntensity: SLOW_TOWER_CONFIG.emissiveIntensity,
       roughness: 0.45,
-      metalness: 0.14,
+      metalness: 0.2,
       transparent,
       opacity,
     });
-    const bodyMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(SLOW_TOWER_CONFIG.bodyRadius, 22, 18),
+    const accentMaterial = new THREE.MeshStandardMaterial({
+      color: SLOW_TOWER_CONFIG.bandColor,
+      emissive: emissiveColor,
+      emissiveIntensity: SLOW_TOWER_CONFIG.emissiveIntensity * 0.72,
+      roughness: 0.34,
+      metalness: 0.26,
+      transparent,
+      opacity,
+    });
+
+    const pedestal = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        pedestalRadiusTop,
+        pedestalRadiusBottom,
+        pedestalHeight,
+        14
+      ),
+      accentMaterial
+    );
+    pedestal.position.y = pedestalHeight * 0.5;
+    hoverNode.add(pedestal);
+
+    const crystalMesh = new THREE.Mesh(
+      new THREE.OctahedronGeometry(crystalRadius, 0),
       bodyMaterial
     );
-    const baseDiameter = Math.max(0.01, SLOW_TOWER_CONFIG.bodyRadius * 2);
-    bodyMesh.scale.y = SLOW_TOWER_CONFIG.bodyHeight / baseDiameter;
-    hoverNode.add(bodyMesh);
+    const crystalBaseDiameter = Math.max(0.01, crystalRadius * 2);
+    crystalMesh.scale.y = crystalHeight / crystalBaseDiameter;
+    crystalMesh.userData.baseScaleY = crystalMesh.scale.y;
+    crystalMesh.position.y = crystalCenterY;
+    hoverNode.add(crystalMesh);
+
+    const crystalCore = new THREE.Mesh(
+      new THREE.OctahedronGeometry(crystalRadius * 0.46, 0),
+      accentMaterial
+    );
+    crystalCore.scale.y = 1.2;
+    crystalCore.position.y = crystalCenterY;
+    hoverNode.add(crystalCore);
 
     const bandMaterial = new THREE.MeshBasicMaterial({
       color: SLOW_TOWER_CONFIG.bandColor,
@@ -845,19 +907,40 @@ export function createTowerSystem({
       depthWrite: false,
     });
     bandMaterial.toneMapped = false;
-    const band = new THREE.Mesh(
+    const upperRing = new THREE.Mesh(
       new THREE.TorusGeometry(
-        SLOW_TOWER_CONFIG.bodyRadius * 0.9,
-        SLOW_TOWER_CONFIG.bodyRadius * 0.08,
-        10,
-        26
+        ringRadius,
+        ringTube,
+        12,
+        32
       ),
       bandMaterial
     );
-    band.rotation.x = Math.PI * 0.5;
-    hoverNode.add(band);
+    upperRing.position.y = crystalCenterY + ringOffsetY;
+    upperRing.rotation.x = THREE.MathUtils.degToRad(26);
+    upperRing.rotation.z = THREE.MathUtils.degToRad(14);
+    hoverNode.add(upperRing);
 
-    const glowLight = new THREE.PointLight(emissiveColor, 0.3, SLOW_TOWER_CONFIG.lightDistance);
+    const lowerRing = new THREE.Mesh(
+      new THREE.TorusGeometry(
+        ringRadius * 0.92,
+        ringTube * 0.95,
+        12,
+        32
+      ),
+      bandMaterial
+    );
+    lowerRing.position.y = crystalCenterY - (ringOffsetY * 0.84);
+    lowerRing.rotation.x = THREE.MathUtils.degToRad(-24);
+    lowerRing.rotation.z = THREE.MathUtils.degToRad(-18);
+    hoverNode.add(lowerRing);
+
+    const glowLight = new THREE.PointLight(
+      emissiveColor,
+      0.34,
+      SLOW_TOWER_CONFIG.lightDistance * SLOW_VISUAL_SCALE
+    );
+    glowLight.position.y = crystalCenterY;
     hoverNode.add(glowLight);
 
     const footprintOutline = createFootprintOutlineMesh({
@@ -870,16 +953,24 @@ export function createTowerSystem({
     });
     root.add(footprintOutline);
 
-    root.userData.materials = [bodyMaterial, bandMaterial];
+    root.userData.materials = [bodyMaterial, accentMaterial, bandMaterial];
     root.userData.slowBodyMaterial = bodyMaterial;
     root.userData.slowBandMaterial = bandMaterial;
+    root.userData.slowAccentMaterial = accentMaterial;
+    root.userData.slowCrystalMesh = crystalMesh;
+    root.userData.slowRingUpperMesh = upperRing;
+    root.userData.slowRingLowerMesh = lowerRing;
     root.userData.slowLight = glowLight;
     root.userData.footprintOutlineMaterial = footprintOutline.userData.footprintOutlineMaterial;
     root.userData.hoverNode = hoverNode;
 
     applyShadowSettings(root);
-    band.castShadow = false;
-    band.receiveShadow = false;
+    crystalCore.castShadow = false;
+    crystalCore.receiveShadow = false;
+    upperRing.castShadow = false;
+    upperRing.receiveShadow = false;
+    lowerRing.castShadow = false;
+    lowerRing.receiveShadow = false;
     return root;
   }
 
@@ -1050,6 +1141,7 @@ export function createTowerSystem({
     if (selectedTowerType === "slow") {
       const bodyMaterial = preview.userData.slowBodyMaterial;
       const bandMaterial = preview.userData.slowBandMaterial;
+      const accentMaterial = preview.userData.slowAccentMaterial;
       const glowLight = preview.userData.slowLight;
       const footprintOutlineMaterial = preview.userData.footprintOutlineMaterial;
       if (!bodyMaterial || !bandMaterial) {
@@ -1060,6 +1152,10 @@ export function createTowerSystem({
         bodyMaterial.color.setHex(SLOW_TOWER_CONFIG.previewColor);
         bodyMaterial.emissive.setHex(SLOW_TOWER_CONFIG.previewGlow);
         bandMaterial.color.setHex(SLOW_TOWER_CONFIG.bandColor);
+        if (accentMaterial) {
+          accentMaterial.color.setHex(SLOW_TOWER_CONFIG.bandColor);
+          accentMaterial.emissive.setHex(SLOW_TOWER_CONFIG.previewGlow);
+        }
         if (footprintOutlineMaterial) {
           footprintOutlineMaterial.color.setHex(SLOW_TOWER_CONFIG.previewGlow);
         }
@@ -1070,6 +1166,10 @@ export function createTowerSystem({
         bodyMaterial.color.setHex(SLOW_TOWER_CONFIG.previewInvalidColor);
         bodyMaterial.emissive.setHex(SLOW_TOWER_CONFIG.previewInvalidGlow);
         bandMaterial.color.setHex(SLOW_TOWER_CONFIG.previewInvalidGlow);
+        if (accentMaterial) {
+          accentMaterial.color.setHex(SLOW_TOWER_CONFIG.previewInvalidColor);
+          accentMaterial.emissive.setHex(SLOW_TOWER_CONFIG.previewInvalidGlow);
+        }
         if (footprintOutlineMaterial) {
           footprintOutlineMaterial.color.setHex(SLOW_TOWER_CONFIG.previewInvalidGlow);
         }
@@ -1422,6 +1522,7 @@ export function createTowerSystem({
       aoeEmissiveIdle: new THREE.Color(AOE_TOWER_CONFIG.emissiveIdle),
       aoeEmissiveCharge: new THREE.Color(AOE_TOWER_CONFIG.emissiveCharge),
       gunMuzzleFlashTimer: 0,
+      slowProcFlash: 0,
       isOperational: true,
       buildFxState: null,
     };
@@ -2244,7 +2345,7 @@ export function createTowerSystem({
     }
 
     out.copy(tower.mesh.position);
-    out.y += AOE_HOVER_BASE_Y;
+    out.y += AOE_HOVER_BASE_Y * AOE_VISUAL_SCALE;
     return out;
   }
 
@@ -2341,10 +2442,10 @@ export function createTowerSystem({
       return;
     }
     tower.bobClock = (tower.bobClock || 0) + deltaSeconds;
-    hoverNode.position.y = AOE_HOVER_BASE_Y + (
+    hoverNode.position.y = (AOE_HOVER_BASE_Y + (
       Math.sin((tower.bobClock * AOE_BOB_FREQUENCY) + (tower.bobPhase || 0))
       * AOE_BOB_AMPLITUDE
-    );
+    )) * AOE_VISUAL_SCALE;
   }
 
   function updateAoeTowerAppearance(tower, chargeRatio) {
@@ -2385,10 +2486,72 @@ export function createTowerSystem({
       return;
     }
     tower.bobClock = (tower.bobClock || 0) + deltaSeconds;
-    hoverNode.position.y = SLOW_HOVER_BASE_Y + (
-      Math.sin((tower.bobClock * SLOW_BOB_FREQUENCY) + (tower.bobPhase || 0))
-      * SLOW_BOB_AMPLITUDE
-    );
+    tower.slowProcFlash = Math.max(0, (tower.slowProcFlash || 0) - (deltaSeconds * 2.8));
+    const flashRatio = THREE.MathUtils.clamp(tower.slowProcFlash || 0, 0, 1);
+    const breath = 0.5 + (0.5 * Math.sin((tower.bobClock * 3.2) + (tower.bobPhase || 0)));
+
+    hoverNode.position.y = 0;
+
+    const upperRing = tower.mesh?.userData?.slowRingUpperMesh;
+    if (upperRing) {
+      upperRing.rotation.y += deltaSeconds * (1.05 + (flashRatio * 2.0));
+      upperRing.rotation.x = THREE.MathUtils.degToRad(
+        26 + (Math.sin(tower.bobClock * 2.1) * 3)
+      );
+    }
+
+    const lowerRing = tower.mesh?.userData?.slowRingLowerMesh;
+    if (lowerRing) {
+      lowerRing.rotation.y -= deltaSeconds * (0.9 + (flashRatio * 1.7));
+      lowerRing.rotation.x = THREE.MathUtils.degToRad(
+        -24 + (Math.sin((tower.bobClock * 1.9) + 1.7) * 2.5)
+      );
+    }
+
+    const crystalMesh = tower.mesh?.userData?.slowCrystalMesh;
+    if (crystalMesh) {
+      const pulseScale = 1 + (breath * 0.05) + (flashRatio * 0.22);
+      const baseScaleY = Number(crystalMesh.userData?.baseScaleY) || 1;
+      crystalMesh.scale.x = pulseScale;
+      crystalMesh.scale.z = pulseScale;
+      crystalMesh.scale.y = baseScaleY * (1 + (breath * 0.04) + (flashRatio * 0.16));
+      crystalMesh.rotation.y += deltaSeconds * (0.2 + (flashRatio * 0.3));
+    }
+
+    const bandMaterial = tower.mesh?.userData?.slowBandMaterial;
+    if (bandMaterial) {
+      bandMaterial.opacity = THREE.MathUtils.clamp(
+        SLOW_TOWER_CONFIG.bandOpacity * (0.6 + (breath * 0.2) + (flashRatio * 0.58)),
+        0,
+        1
+      );
+    }
+
+    const bodyMaterial = tower.mesh?.userData?.slowBodyMaterial;
+    if (bodyMaterial) {
+      bodyMaterial.emissiveIntensity = THREE.MathUtils.lerp(
+        SLOW_TOWER_CONFIG.emissiveIntensity * 0.65,
+        SLOW_TOWER_CONFIG.emissiveIntensity * 2.2,
+        Math.min(1, flashRatio + (breath * 0.25))
+      );
+    }
+    const accentMaterial = tower.mesh?.userData?.slowAccentMaterial;
+    if (accentMaterial) {
+      accentMaterial.emissiveIntensity = THREE.MathUtils.lerp(
+        SLOW_TOWER_CONFIG.emissiveIntensity * 0.48,
+        SLOW_TOWER_CONFIG.emissiveIntensity * 1.45,
+        Math.min(1, flashRatio + (breath * 0.35))
+      );
+    }
+
+    const glowLight = tower.mesh?.userData?.slowLight;
+    if (glowLight) {
+      glowLight.intensity = THREE.MathUtils.lerp(
+        0.26,
+        1.75,
+        Math.min(1, flashRatio + (breath * 0.35))
+      );
+    }
   }
 
   function spawnSlowFieldEffect(position) {
@@ -2450,6 +2613,7 @@ export function createTowerSystem({
       enemySystem.applyTemporarySlowToEnemyMesh(target.mesh, SLOW_MULTIPLIER, SLOW_DURATION);
     }
 
+    tower.slowProcFlash = 1;
     tower.cooldown = SLOW_FIRE_INTERVAL * towerFireRateMultiplier;
   }
 

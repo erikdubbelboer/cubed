@@ -71,12 +71,31 @@
 ### Tower Footprint Outline (Latest)
 - AOE and Slow tower meshes now include a cube-edge footprint outline sized to the grid build cube (cell-sized), not the inner orb visuals.
 - For current tuning (`grid.cellSize = 4`), `footprintOutlineInset: 0.04` yields outlines that are 98% of the grid cube per axis.
+- AOE mesh upscaling is now config-driven through `GAME_CONFIG.towers.types.aoe.visualScale` (currently `2` for a 2x larger orb/spike/aura look).
+- `visualScale` affects AOE mesh size, hover height/bobbing amplitude, glow light distance, and AOE tower obstacle extents (`halfSize`/`radius`) used by player collision and LOS.
+- `visualScale` does **not** change build/path blocking cell occupancy (AOE still occupies one build cell for placement/pathing).
 - Outline is visual-only; path blocking remains cell-based for enemies and uses existing tower obstacle data for player/tower LOS checks.
 - Outline appears in both preview and placed meshes for AOE/Slow.
 - Preview validity coloring also updates outline color (`previewGlow` when valid, `previewInvalidGlow` when invalid).
 - Tuning keys live in `GAME_CONFIG.towers.types.aoe|slow`:
+  - `visualScale` (AOE + Slow)
   - `footprintOutlineInset`
   - `footprintOutlineOpacity`
+
+### Slow Tower Visual Style (Latest)
+- Slow tower now uses a `Cryo Prism` silhouette:
+  - short pedestal
+  - faceted elongated crystal core
+  - two offset halo rings that counter-rotate
+- Slow tower mesh scale is now config-driven via `GAME_CONFIG.towers.types.slow.visualScale` (currently `1.9`) so the model reads larger in a 1x1 cell.
+- Cryo Prism pedestal footprint now applies `pedestalDiameterScale: 1.75` (diameter 1.75x wider than the prior pedestal) before bottom taper (`pedestalRadiusBottom ~= top * 1.4`) so same-cell blocking reads clearly at a glance.
+- Slow tower collision box now matches the widened pedestal visual: `towerSpecs.slow.halfSize/radius` are derived from `pedestalRadiusBottom * visualScale` (not legacy `config.halfSize`).
+- Slow tower is grounded: the pedestal now sits directly on the tile surface (no vertical hover offset / float).
+- Preview/invalid-state coloring updates all prism materials (`slowBodyMaterial`, `slowAccentMaterial`, ring band material, glow light).
+- Runtime animation contract:
+  - no vertical bob/hover translation; motion comes from crystal pulse + ring rotation only.
+  - upper/lower rings rotate in opposite directions continuously.
+  - `slowProcFlash` is triggered on each successful slow application; it boosts crystal pulse scale/emissive intensity, ring opacity/rotation speed, and glow-light intensity briefly.
 
 ### Upgrade System Rules
 - Upgrades are config-driven (`GAME_CONFIG.upgrades[]`), not hardcoded lists.

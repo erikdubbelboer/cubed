@@ -653,6 +653,10 @@ export const GAME_CONFIG = {
         height: 2.0,
 
         // AOE visuals.
+        // Uniform scale for AOE mesh visuals (core/spikes/aura + hover height), while
+        // keeping build footprint/path blocking as the same 1x1 cell.
+        // Typical range: 0.5-2.5.
+        visualScale: 2,
         coreRadius: 0.82,
         auraRadius: 1.02,
         auraOpacity: 0.38,
@@ -700,6 +704,10 @@ export const GAME_CONFIG = {
         height: 2.1,
 
         // Slow visuals.
+        // Uniform scale for the slow tower mesh visuals (prism + rings).
+        // Does not change build-cell occupancy.
+        // Typical range: 0.8-2.2.
+        visualScale: 1.9,
         bodyRadius: 0.62,
         bodyHeight: 1.45,
         // Inset and alpha for the cube-edge footprint outline (visual only).
