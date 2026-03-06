@@ -584,6 +584,12 @@ function drawIconById(ctx, iconId, x, y, size) {
     case "tower_laser":
       drawIconTowerLaser(ctx, x, y, size);
       return;
+    case "tower_gun_add":
+      drawIconTowerLaser(ctx, x, y, size);
+      return;
+    case "tower_gun":
+      drawIconTowerLaser(ctx, x, y, size);
+      return;
     case "tower_aoe_add":
       drawIconTowerAoe(ctx, x, y, size);
       return;
@@ -662,7 +668,7 @@ function normalizeTowerInventory(inputInventory) {
     return {
       type: entry?.type || "unknown",
       label: entry?.label || entry?.type || "Tower",
-      iconId: entry?.iconId || "tower_laser",
+      iconId: entry?.iconId || "tower_gun",
       hotkey: entry?.hotkey || "",
       remaining,
       affordable,

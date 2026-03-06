@@ -9,16 +9,35 @@
 
 ### Economy System Contract
 - Money is owned in `main.js` (`playerMoney`), initialized from `GAME_CONFIG.economy.startingCash`.
-- Tower placement spending is delegated to `towers.js` through callbacks passed into `createTowerSystem({ getCurrentMoney, spendMoney })`.
+- Tower placement spending is delegated to `towers.js` through callbacks passed into `createTowerSystem({ getCurrentMoney, spendMoney, refundMoney })`.
 - Enemy kill rewards are emitted from `enemies.js` only on real death (inside `applyDamage` when health reaches 0), via `onEnemyDefeated(cashReward, enemyType)`.
 - Enemies that simply reach path end are removed but do not grant money.
 
 ### Tower Unlock + Purchase Rules
 - Tower availability is unlock-based, not stock-based.
-- `towers.js` unlock state comes from `GAME_CONFIG.economy.startingUnlockedTowers`, with a hard fallback that always ensures `laser` is unlocked.
+- `towers.js` unlock state comes from `GAME_CONFIG.economy.startingUnlockedTowers`, with a hard fallback that always ensures `gun` is unlocked.
 - `GAME_CONFIG.towers.types.<type>.cost` is the purchase price per placement.
 - `towerSystem.selectTower(type)` returns `false` if the tower is locked or unaffordable.
 - `towerSystem.placeSelectedTower()` spends cash through `spendMoney` and cancels build mode if post-purchase money is insufficient for another of that type.
+
+### Gun Tower Replacement (Latest, Override)
+- The default starter tower type is now `gun` (the old `laser` tower type was fully replaced).
+- `GAME_CONFIG.economy.startingUnlockedTowers` should include `gun`; `towers.js` fallback also ensures `gun` is always unlocked.
+- Gun tower footprint is fixed 1x2 (Z-axis depth) and non-rotatable:
+  - placement resolves from aimed cell hit-side:
+    - front-half hit => occupied cells `(x,z)` + `(x,z+1)`
+    - back-half hit => occupied cells `(x,z-1)` + `(x,z)`
+  - placement is invalid unless both occupied cells are buildable, unreserved, unoccupied, inside level bounds, and at the same build-surface height.
+- Path blocking is multi-cell/atomic for gun placement:
+  - enemy system exposes `canBlockCells(cells)` and `canBlockCell` remains as wrapper compatibility.
+  - tower preview cache keys by `(footprintKey, blockedRevision)` instead of single cell.
+  - post-placement preview suppression is footprint-key based (same footprint only).
+- Gun combat contract:
+  - tower top rotates in yaw toward target.
+  - turret fires traveling cube projectiles from muzzle node (no beam visuals).
+  - projectile hit checks should use enemy-system body-aware checks (`isPointNearEnemyMesh` when available), apply single hit damage, then despawn.
+- Tower obstacle geometry now supports rectangular extents (`halfSizeX`, `halfSizeZ`) and should be used by LOS and player collision paths (with `halfSize` fallback for legacy obstacles).
+- UI tower tray now maps the default tower icon to `tower_gun` (with `tower_laser` icon IDs still aliased for compatibility in `uiOverlay.js`).
 
 ### Tower Build Teleport FX (Latest)
 - Newly placed towers now run a teleport/materialization build effect before becoming combat-active.
@@ -45,8 +64,8 @@
   - `ringMaxScale`
   - `ringThickness`
 - Build-mode ghost suppression after placement:
-  - After a successful tower placement (when build mode remains active), the preview ghost is hidden while aiming at that same placed cell.
-  - The ghost reappears only after the aim snaps to a different grid cell.
+  - After a successful tower placement (when build mode remains active), the preview ghost is hidden while aiming at that same placed footprint.
+  - The ghost reappears only after the aim resolves to a different footprint key.
 - `forcePlaceTower(...)` uses the same build FX/activation timing as normal placement.
 
 ### Tower Footprint Outline (Latest)
@@ -127,10 +146,10 @@
 - Cross-system consistency:
   - `player.js`, `towers.js`, and `enemies.js` must agree on enemy hit geometry; if one side changes hit shape, update all three together.
 
-### Laser Beam Target/Loss Behavior (Latest)
-- Laser targeting should prefer damageable enemies (`getDamageableEnemies`) so dying/non-damageable enemies are dropped immediately.
-- On target loss/death, laser beam visuals should fade out quickly (config: `towers.types.laser.beamFadeOutDuration`) instead of hard-disappearing.
-- Laser impact placement should anchor to cube body size first (`bodyHalfSize`) to keep beam endpoint visually on/near cube surface.
+### Gun Turret Targeting/Projectile Behavior (Latest)
+- Gun targeting should prefer damageable enemies (`getDamageableEnemies`) so dying/non-damageable enemies are dropped immediately.
+- Gun turret top rotates in yaw toward the target; projectiles originate from the muzzle node on the turret.
+- Gun projectiles are traveling cube meshes (not hitscan/beam), apply damage on first enemy body contact, and despawn immediately on hit or lifetime expiry.
 
 ### UI Data Contract
 - `uiOverlay.setState(...)` expects `money` from `main.js` for cash HUD.

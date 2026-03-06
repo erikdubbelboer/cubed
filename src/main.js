@@ -1214,7 +1214,7 @@ if (!isTouchDevice) {
     }
 
     if (event.button === 2 && towerSystem) {
-      towerSystem.selectTower("laser");
+      towerSystem.selectTower("gun");
       return;
     }
 
@@ -1559,6 +1559,13 @@ function createTowerSystemForCurrentGrid() {
     grid,
     getCurrentMoney: () => playerMoney,
     spendMoney: (amount) => trySpendMoney(amount),
+    refundMoney: (amount) => addMoney(amount),
+    canBlockCells: (cells) => {
+      if (!enemySystem || typeof enemySystem.canBlockCells !== "function") {
+        return true;
+      }
+      return enemySystem.canBlockCells(cells);
+    },
     canBlockCell: (cellX, cellZ) => {
       if (!enemySystem || typeof enemySystem.canBlockCell !== "function") {
         return true;
@@ -1910,10 +1917,10 @@ function animate() {
       ...entry,
       iconId: (
         {
-          laser: "tower_laser",
+          gun: "tower_gun",
           aoe: "tower_aoe",
           slow: "tower_slow",
-        }[entry.type] || "tower_laser"
+        }[entry.type] || "tower_gun"
       ),
       hotkey: String((index + 1) % 10 || 0),
     }))
@@ -2016,7 +2023,7 @@ function initGame() {
       if (player) player.controls.getObject().position.set(x, grid.eyeHeight, z);
     },
     placeBasicTower: (x, z) => {
-      if (towerSystem) return towerSystem.forcePlaceTower(x, z, "laser");
+      if (towerSystem) return towerSystem.forcePlaceTower(x, z, "gun");
       return false;
     },
     spawnEnemy: (type = "red") => {

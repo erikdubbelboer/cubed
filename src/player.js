@@ -1199,10 +1199,20 @@ export function createPlayer({
         }
 
         const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
-        const obstacleHalfSize = obstacle?.halfSize;
+        const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
+          ? Number(obstacle.halfSizeX)
+          : Number(obstacle?.halfSize);
+        const obstacleHalfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
+          ? Number(obstacle.halfSizeZ)
+          : Number(obstacle?.halfSize);
         const obstacleHeight = obstacle?.height;
         const obstacleBaseY = obstacle?.baseY ?? 0;
-        if (!obstaclePos || typeof obstacleHalfSize !== "number" || typeof obstacleHeight !== "number") {
+        if (
+          !obstaclePos
+          || !Number.isFinite(obstacleHalfSizeX)
+          || !Number.isFinite(obstacleHalfSizeZ)
+          || typeof obstacleHeight !== "number"
+        ) {
           continue;
         }
 
@@ -1210,11 +1220,12 @@ export function createPlayer({
         const insetRatio = Number.isFinite(obstacle?.topInsetFromRadius)
           ? obstacle.topInsetFromRadius
           : PLAYER_CONFIG.collision.towerTopInsetFromRadius;
-        const supportHalf = Math.max(0, obstacleHalfSize - PLAYER_COLLISION_RADIUS * insetRatio);
+        const supportHalfX = Math.max(0, obstacleHalfSizeX - PLAYER_COLLISION_RADIUS * insetRatio);
+        const supportHalfZ = Math.max(0, obstacleHalfSizeZ - PLAYER_COLLISION_RADIUS * insetRatio);
         const withinTopX = Math.abs(x - obstaclePos.x)
-          <= (supportHalf + SUPPORT_EDGE_EPSILON);
+          <= (supportHalfX + SUPPORT_EDGE_EPSILON);
         const withinTopZ = Math.abs(z - obstaclePos.z)
-          <= (supportHalf + SUPPORT_EDGE_EPSILON);
+          <= (supportHalfZ + SUPPORT_EDGE_EPSILON);
         const nearTop = feetY >= (topY - TOWER_TOP_SNAP_DOWN) && feetY <= (topY + TOWER_TOP_SNAP_UP);
         if (withinTopX && withinTopZ && nearTop) {
           supportY = Math.max(supportY, topY + eyeHeight);
@@ -1382,11 +1393,21 @@ export function createPlayer({
           }
 
           const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
-          const obstacleHalfSize = obstacle?.halfSize;
+          const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
+            ? Number(obstacle.halfSizeX)
+            : Number(obstacle?.halfSize);
+          const obstacleHalfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
+            ? Number(obstacle.halfSizeZ)
+            : Number(obstacle?.halfSize);
           const obstacleHeight = obstacle?.height;
           const obstacleBaseY = obstacle?.baseY ?? 0;
 
-          if (obstaclePos && typeof obstacleHalfSize === "number" && typeof obstacleHeight === "number") {
+          if (
+            obstaclePos
+            && Number.isFinite(obstacleHalfSizeX)
+            && Number.isFinite(obstacleHalfSizeZ)
+            && typeof obstacleHeight === "number"
+          ) {
             const playerFeetY = camera.position.y - eyeHeight;
             const playerHeadY = camera.position.y + PLAYER_HEAD_CLEARANCE;
             const obstacleTopY = obstacleBaseY + obstacleHeight;
@@ -1403,10 +1424,11 @@ export function createPlayer({
               continue;
             }
 
-            const expandedHalf = obstacleHalfSize + PLAYER_COLLISION_RADIUS;
+            const expandedHalfX = obstacleHalfSizeX + PLAYER_COLLISION_RADIUS;
+            const expandedHalfZ = obstacleHalfSizeZ + PLAYER_COLLISION_RADIUS;
             const localX = camera.position.x - obstaclePos.x;
             const localZ = camera.position.z - obstaclePos.z;
-            if (Math.abs(localX) >= expandedHalf || Math.abs(localZ) >= expandedHalf) {
+            if (Math.abs(localX) >= expandedHalfX || Math.abs(localZ) >= expandedHalfZ) {
               continue;
             }
 
@@ -1422,8 +1444,8 @@ export function createPlayer({
               continue;
             }
 
-            const penetrationX = expandedHalf - Math.abs(localX);
-            const penetrationZ = expandedHalf - Math.abs(localZ);
+            const penetrationX = expandedHalfX - Math.abs(localX);
+            const penetrationZ = expandedHalfZ - Math.abs(localZ);
             if (penetrationX < penetrationZ) {
               const dirX = localX >= 0 ? 1 : -1;
               camera.position.x += dirX * penetrationX;

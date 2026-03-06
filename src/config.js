@@ -84,7 +84,7 @@ export const GAME_CONFIG = {
     // Starting cash at game start (BTD6-style opening economy).
     startingCash: 50,
     // Tower types available before any unlock upgrades are chosen.
-    startingUnlockedTowers: ["laser"],
+    startingUnlockedTowers: ["gun"],
   },
 
   upgrades: [
@@ -519,7 +519,6 @@ export const GAME_CONFIG = {
 
     // Line-of-sight and self-intersection tuning.
     segmentEpsilon: 1e-6,
-    beamLengthEpsilon: 1e-5,
     selfBlockMinHalfSize: 0.25,
     selfBlockInset: 0.04,
     selfBlockBaseOffsetY: 0.04,
@@ -548,61 +547,61 @@ export const GAME_CONFIG = {
     },
 
     types: {
-      laser: {
-        // Cash required to place one laser tower. Typical range: 150-350.
+      gun: {
+        // Cash required to place one gun tower. Typical range: 150-350.
         cost: 40,
 
-        // Laser combat tuning.
-        // Max beam reach in world units. Typical range: 4-20.
+        // Gun combat tuning.
+        // Max firing reach in world units. Typical range: 4-20.
         range: 9,
         // Time between shots in seconds. Typical range: 0.1-2.0.
-        fireInterval: 0.95,
-        // AoE damage per hit. Typical range: 5-120.
-        beamDamage: 1,
-        // Beam hit radius in world units. Typical range: 0.1-2.0.
-        beamHitRadius: 0.55,
+        fireInterval: 0.48,
+        // Projectile hit damage. Typical range: 0.5-8.
+        projectileDamage: 1,
+        // Projectile speed in world units per second.
+        projectileSpeed: 24,
+        // Projectile max life in seconds.
+        projectileLifetime: 1.15,
+        // Projectile cube size in world units.
+        projectileSize: 0.22,
+        // Projectile hit radius in world units.
+        projectileHitRadius: 0.32,
+        // Turret yaw tracking speed in radians/sec.
+        turretTurnSpeed: 9.5,
 
-        // Laser collision/build footprint.
-        radius: 1.35,
-        halfSize: 1.1,
+        // Gun collision/build footprint.
+        // Footprint is fixed to 1x2 cells (depth on +Z/-Z axis) and non-rotatable.
+        footprintCellsX: 1,
+        footprintCellsZ: 2,
+        footprintInset: 0.06,
+        // Used for LOS and movement/projectile obstacle volume checks.
+        halfSizeX: 1.96,
+        halfSizeZ: 3.92,
         height: 2.2,
 
-        // Beam/muzzle FX geometry.
-        beamRadius: 0.055,
-        beamRadialSegments: 10,
-        muzzleRadius: 0.1,
-        muzzleSegments: 10,
-        beamColor: 0x7cfff5,
-        beamOpacity: 0.95,
-        muzzleColor: 0xb8fffa,
-        muzzleOpacity: 0.9,
-
-        // Tower body/ring dimensions.
-        bodySize: 2.2,
-        edgeSize: 2.22,
-        bodyCenterY: 1.1,
-        ringHalfExtent: 1.16,
-        ringThickness: 0.08,
-        // Laser emission corners around ring anchor.
-        cornerOffsets: [
-          [1, 1],
-          [1, -1],
-          [-1, -1],
-          [-1, 1],
-        ],
+        // Tower body/turret dimensions.
+        baseHeight: 1.0,
+        turretHeight: 0.75,
+        turretWidth: 1.25,
+        barrelLength: 1.25,
+        barrelHeight: 0.18,
+        barrelWidth: 0.22,
+        muzzleOffsetY: 0.18,
+        muzzleOffsetForward: 0.95,
 
         // Tower material defaults.
-        bodyRoughness: 0.58,
-        bodyMetalness: 0.35,
-        bodyEmissive: 0x02080d,
-        bodyEmissiveIntensity: 0.2,
-        edgeColor: 0x91d7ff,
-        edgeOpaqueOpacity: 0.5,
-        ringRoughness: 0.22,
-        ringMetalness: 0.65,
-        ringEmissiveIntensity: 0.4,
-        ringLightColor: 0x7cfff5,
-        ringLightDistance: 4.4,
+        baseRoughness: 0.56,
+        baseMetalness: 0.32,
+        turretRoughness: 0.46,
+        turretMetalness: 0.38,
+        baseEmissive: 0x071120,
+        baseEmissiveIntensity: 0.25,
+        turretEmissive: 0x0f2c52,
+        turretEmissiveIntensity: 0.32,
+        muzzleFlashDuration: 0.08,
+        muzzleFlashColor: 0x9fdcff,
+        muzzleFlashOpacity: 0.92,
+        muzzleFlashSize: 0.26,
 
         // Path highlight overlay.
         rangeHighlightValidColor: 0x7ffaff,
@@ -611,70 +610,25 @@ export const GAME_CONFIG = {
         rangeHighlightRenderOrder: 6,
 
         // Build preview palette.
-        previewBodyColor: 0x4d6f8f,
-        previewEdgeColor: 0x93ffff,
-        previewRingColor: 0x73ebe2,
-        previewRingGlow: 0x2ab8bd,
+        previewBaseColor: 0x4d6f8f,
+        previewTurretColor: 0x6ea6d9,
+        previewGlow: 0x78d9ff,
         previewOpacity: 0.55,
-        previewInvalidBodyColor: 0xa45a5a,
-        previewInvalidEdgeColor: 0xffb0b0,
-        previewInvalidRingColor: 0xe08d8d,
-        previewInvalidRingGlow: 0x9f3535,
+        previewInvalidBaseColor: 0xa45a5a,
+        previewInvalidTurretColor: 0xd88f8f,
+        previewInvalidGlow: 0x9f3535,
 
         // Final placed tower palette.
-        placedBodyColor: 0x445d79,
-        placedRingColor: 0x87f9f0,
-        placedRingGlow: 0x31bfc0,
+        placedBaseColor: 0x445d79,
+        placedTurretColor: 0x81b4e3,
+        placedGlow: 0x3aa8ff,
 
-        // Pulse behavior for beam + glow.
-        pulseDuration: 0.2,
-        pulseExponent: 0.35,
-        activeGlowIntensity: 2.2,
-        idleGlowIntensity: 0.35,
-        // Beam alpha baseline/boost and cap.
-        beamBaseOpacity: 0.72,
-        beamPulseOpacityBoost: 0.26,
-        beamPulseWidthBoost: 0.34,
-        beamMaxOpacity: 0.98,
-        // Time (seconds) to fade the beam when target is lost/dead.
-        beamFadeOutDuration: 0.08,
-        // Muzzle flash alpha baseline/boost and cap.
-        flashBaseOpacity: 0.45,
-        flashPulseOpacityBoost: 0.45,
-        flashMaxOpacity: 0.95,
-        flashBaseScale: 0.82,
-        flashPulseScaleBoost: 0.52,
-        // Extra ring/light response on pulse.
-        ringPulseBoost: 1.2,
-        flashLightBaseIntensity: 2.6,
-        flashLightPulseBoost: 2.2,
-
-        // Beam impact FX at enemy contact.
-        impactDuration: 0.2,
-        impactFlashRadius: 0.2,
-        impactFlashSegments: 10,
-        impactFlashColor: 0xb8fffa,
-        impactFlashOpacity: 0.9,
-        impactFlashExpand: 1.3,
-        impactRingInnerRadius: 0.08,
-        impactRingOuterRadius: 0.22,
-        impactRingSegments: 16,
-        impactRingColor: 0x8afffb,
-        impactRingOpacity: 0.85,
-        impactRingExpand: 1.9,
-        impactRingSpin: 9.5,
-        impactParticleCount: 12,
-        impactParticleSize: 0.07,
-        impactParticleOpacity: 0.95,
-        impactParticleLifeMin: 0.09,
-        impactParticleLifeMax: 0.2,
-        impactParticleSpeedMin: 2.8,
-        impactParticleSpeedMax: 6.8,
-        impactParticleDrag: 6.5,
-        impactParticleGravity: 10.0,
-        impactParticleSpread: 1.25,
-        impactPositionJitter: 0.06,
-        impactSurfaceInsetScale: 0.78,
+        // Projectile visual defaults.
+        projectileColor: 0x8fd4ff,
+        projectileEmissive: 0x2f94de,
+        projectileEmissiveIntensity: 0.72,
+        projectileRoughness: 0.25,
+        projectileMetalness: 0.18,
       },
 
       aoe: {

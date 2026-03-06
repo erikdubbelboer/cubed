@@ -168,6 +168,7 @@ export function createEnemySystem(scene, grid, options = {}) {
   const nodeIncoming = new Array(totalNodeCount);
   const spawnNodeIds = [];
   const canBlockCacheByNode = new Map();
+  const canBlockCacheByFootprint = new Map();
   let blockedRevision = 0;
   let variantBuildQueue = [];
   const pathPerfStats = {
@@ -513,6 +514,48 @@ export function createEnemySystem(scene, grid, options = {}) {
     return true;
   }
 
+  function rebuildDistanceFieldWithExtraBlockedNodes(targetDistanceField, extraBlockedNodeIds = null) {
+    const blockedSet = extraBlockedNodeIds instanceof Set
+      ? extraBlockedNodeIds
+      : new Set();
+    targetDistanceField.fill(-1);
+    if (
+      endNodeId < 0
+      || nodeExists[endNodeId] !== 1
+      || blockedByNode[endNodeId] === 1
+      || blockedSet.has(endNodeId)
+    ) {
+      return false;
+    }
+
+    let queueHead = 0;
+    let queueTail = 0;
+    bfsQueue[queueTail] = endNodeId;
+    queueTail += 1;
+    targetDistanceField[endNodeId] = 0;
+
+    while (queueHead < queueTail) {
+      const currentNodeId = bfsQueue[queueHead];
+      queueHead += 1;
+      const nextDistance = targetDistanceField[currentNodeId] + 1;
+      const incoming = nodeIncoming[currentNodeId];
+      for (let i = 0; i < incoming.length; i += 1) {
+        const previousNodeId = incoming[i];
+        if (targetDistanceField[previousNodeId] !== -1) {
+          continue;
+        }
+        if ((blockedByNode[previousNodeId] === 1 || blockedSet.has(previousNodeId)) && previousNodeId !== endNodeId) {
+          continue;
+        }
+        targetDistanceField[previousNodeId] = nextDistance;
+        bfsQueue[queueTail] = previousNodeId;
+        queueTail += 1;
+      }
+    }
+
+    return true;
+  }
+
   function areAllSpawnsReachable(distanceField) {
     for (const spawnNodeId of spawnNodeIds) {
       if (spawnNodeId < 0 || distanceField[spawnNodeId] < 0) {
@@ -842,24 +885,56 @@ export function createEnemySystem(scene, grid, options = {}) {
     }
   }
 
-  function canBlockCell(cellX, cellZ) {
+  function canBlockCells(cells) {
     const startMs = getNowMs();
     pathPerfStats.canBlockCalls += 1;
 
-    if (!isCellInsideLevel(cellX, cellZ) || isReservedEndpoint(cellX, cellZ)) {
+    if (!Array.isArray(cells) || cells.length === 0) {
       pathPerfStats.canBlockLastMs = getNowMs() - startMs;
       pathPerfStats.canBlockTotalMs += pathPerfStats.canBlockLastMs;
       return false;
     }
 
-    const candidateNodeId = nodeIdFromCell(cellX, cellZ);
-    if (candidateNodeId < 0 || nodeExists[candidateNodeId] !== 1 || blockedByNode[candidateNodeId] === 1) {
+    const nodeIds = [];
+    const nodeIdSet = new Set();
+    for (const cell of cells) {
+      const cellX = Number.parseInt(cell?.x, 10);
+      const cellZ = Number.parseInt(cell?.z, 10);
+      if (!Number.isInteger(cellX) || !Number.isInteger(cellZ)) {
+        pathPerfStats.canBlockLastMs = getNowMs() - startMs;
+        pathPerfStats.canBlockTotalMs += pathPerfStats.canBlockLastMs;
+        return false;
+      }
+      if (!isCellInsideLevel(cellX, cellZ) || isReservedEndpoint(cellX, cellZ)) {
+        pathPerfStats.canBlockLastMs = getNowMs() - startMs;
+        pathPerfStats.canBlockTotalMs += pathPerfStats.canBlockLastMs;
+        return false;
+      }
+      const candidateNodeId = nodeIdFromCell(cellX, cellZ);
+      if (candidateNodeId < 0 || nodeExists[candidateNodeId] !== 1 || blockedByNode[candidateNodeId] === 1) {
+        pathPerfStats.canBlockLastMs = getNowMs() - startMs;
+        pathPerfStats.canBlockTotalMs += pathPerfStats.canBlockLastMs;
+        return false;
+      }
+      if (nodeIdSet.has(candidateNodeId)) {
+        continue;
+      }
+      nodeIdSet.add(candidateNodeId);
+      nodeIds.push(candidateNodeId);
+    }
+
+    if (nodeIds.length === 0) {
       pathPerfStats.canBlockLastMs = getNowMs() - startMs;
       pathPerfStats.canBlockTotalMs += pathPerfStats.canBlockLastMs;
       return false;
     }
 
-    const cached = canBlockCacheByNode.get(candidateNodeId);
+    const cacheKey = nodeIds.length === 1
+      ? String(nodeIds[0])
+      : nodeIds.slice().sort((a, b) => a - b).join(",");
+    const cached = nodeIds.length === 1
+      ? canBlockCacheByNode.get(nodeIds[0])
+      : canBlockCacheByFootprint.get(cacheKey);
     if (typeof cached === "boolean") {
       pathPerfStats.canBlockCacheHits += 1;
       pathPerfStats.canBlockLastMs = getNowMs() - startMs;
@@ -867,12 +942,20 @@ export function createEnemySystem(scene, grid, options = {}) {
       return cached;
     }
 
-    const rebuilt = rebuildDistanceField(scratchDistanceToEnd, candidateNodeId);
+    const rebuilt = rebuildDistanceFieldWithExtraBlockedNodes(scratchDistanceToEnd, nodeIdSet);
     const canBlock = rebuilt && areAllSpawnsReachable(scratchDistanceToEnd);
-    canBlockCacheByNode.set(candidateNodeId, canBlock);
+    if (nodeIds.length === 1) {
+      canBlockCacheByNode.set(nodeIds[0], canBlock);
+    } else {
+      canBlockCacheByFootprint.set(cacheKey, canBlock);
+    }
     pathPerfStats.canBlockLastMs = getNowMs() - startMs;
     pathPerfStats.canBlockTotalMs += pathPerfStats.canBlockLastMs;
     return canBlock;
+  }
+
+  function canBlockCell(cellX, cellZ) {
+    return canBlockCells([{ x: cellX, z: cellZ }]);
   }
 
   function rerouteEnemy(enemy) {
@@ -936,6 +1019,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     applyBlockedState(nextBlocked.mask, nextBlocked.keys);
     blockedRevision += 1;
     canBlockCacheByNode.clear();
+    canBlockCacheByFootprint.clear();
 
     const rebuiltDistance = rebuildDistanceField(distanceToEnd);
     const reachable = rebuiltDistance && areAllSpawnsReachable(distanceToEnd);
@@ -950,6 +1034,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       variantBuildQueue = previousVariantQueue;
       blockedRevision = previousRevision;
       canBlockCacheByNode.clear();
+      canBlockCacheByFootprint.clear();
       pathPerfStats.setBlockedLastMs = getNowMs() - startMs;
       pathPerfStats.setBlockedTotalMs += pathPerfStats.setBlockedLastMs;
       return false;
@@ -2141,6 +2226,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     startWave,
     isWaveClear,
     upgradeSlowEnemies,
+    canBlockCells,
     canBlockCell,
     setBlockedCells,
     getBlockedCells,
