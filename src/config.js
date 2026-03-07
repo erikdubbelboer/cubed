@@ -1,3 +1,5 @@
+import TECH_TREE_DATA from "./techtree.json";
+
 export const GAME_CONFIG = {
   scene: {
     // Camera field-of-view in degrees. Typical range: 60-95.
@@ -85,8 +87,6 @@ export const GAME_CONFIG = {
     startingCash: 50,
     // Tower types available before any unlock upgrades are chosen.
     startingUnlockedTowers: ["gun"],
-    // Global cap for additional tower unlock upgrades per run.
-    maxTowerUnlocks: 5,
     // Kill-based XP leveling for upgrade picks.
     leveling: {
       // XP granted for each enemy kill.
@@ -141,114 +141,7 @@ export const GAME_CONFIG = {
     },
   },
 
-  upgrades: [
-    {
-      id: "tower_aoe_unlock",
-      label: "+AOE tower",
-      iconId: "tower_aoe_add",
-      maxCount: 1,
-      grants: { unlockTowerType: "aoe" },
-    },
-    {
-      id: "tower_slow_unlock",
-      label: "+Slow tower",
-      iconId: "tower_slow_add",
-      maxCount: 1,
-      grants: { unlockTowerType: "slow" },
-    },
-    {
-      id: "tower_laser_sniper_unlock",
-      label: "+Sniper",
-      iconId: "tower_laser_sniper_add",
-      maxCount: 1,
-      grants: { unlockTowerType: "laserSniper" },
-    },
-    {
-      id: "tower_mortar_unlock",
-      label: "+Mortar",
-      iconId: "tower_mortar_add",
-      maxCount: 1,
-      grants: { unlockTowerType: "mortar" },
-    },
-    {
-      id: "tower_tesla_unlock",
-      label: "+Tesla",
-      iconId: "tower_tesla_add",
-      maxCount: 1,
-      grants: { unlockTowerType: "tesla" },
-    },
-    {
-      id: "tower_spikes_unlock",
-      label: "+Spikes",
-      iconId: "tower_spikes_add",
-      maxCount: 1,
-      grants: { unlockTowerType: "spikes" },
-    },
-    {
-      id: "tower_plasma_unlock",
-      label: "+Plasma",
-      iconId: "tower_plasma_add",
-      maxCount: 1,
-      grants: { unlockTowerType: "plasma" },
-    },
-    {
-      id: "tower_buff_unlock",
-      label: "+Buff",
-      iconId: "tower_buff_add",
-      maxCount: 1,
-      grants: { unlockTowerType: "buff" },
-    },
-    {
-      id: "tower_damage",
-      label: "+1 tower dmg",
-      iconId: "tower_damage",
-      maxCount: null,
-      grants: { towerDamageAdd: 0.5 },
-    },
-    {
-      id: "player_damage",
-      label: "+1 player dmg",
-      iconId: "player_damage",
-      maxCount: null,
-      grants: { playerDamageAdd: 0.5 },
-    },
-    {
-      id: "enemy_slow",
-      label: "-20% enemy spd",
-      iconId: "enemy_slow",
-      maxCount: null,
-      grants: { enemySpeedMultiplier: 0.8 },
-    },
-    {
-      id: "tower_fire_rate",
-      label: "+tower fire",
-      iconId: "tower_fire_rate",
-      maxCount: null,
-      grants: { towerFireRateMultiplier: 0.75 },
-    },
-    {
-      id: "player_fire_rate",
-      label: "+fire rate",
-      iconId: "player_fire_rate",
-      maxCount: null,
-      grants: { playerFireRateMultiplier: 0.75 },
-    },
-    {
-      id: "player_jetpack_efficiency",
-      label: "+jetpack fuel",
-      iconId: "player_jetpack_efficiency",
-      maxCount: 1,
-      grants: { jetpackEfficiencyMultiplier: 2 },
-    },
-    {
-      id: "player_pickup_range",
-      label: "+pickup rng",
-      iconId: "player_pickup_range",
-      maxCount: null,
-      grants: { pickupRangeAdd: 0.5 },
-    },
-  ],
-
+  techTree: TECH_TREE_DATA,
   waves: {
     // First wave number shown to player. Typical value: 1.
     initialWave: 1,

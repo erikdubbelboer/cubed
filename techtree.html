@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tech Tree Editor</title>
+  <style>
+    :root {
+      --bg: #0e1622;
+      --panel: #152233;
+      --panel-2: #1a2c42;
+      --line: #3b5878;
+      --text: #dfefff;
+      --muted: #9db7d1;
+      --accent: #77d8ff;
+      --ok: #89f3b6;
+      --warn: #ffd18f;
+      --danger: #ff9e9e;
+      --node: #22405f;
+      --node-selected: #315f8a;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", sans-serif;
+    }
+
+    #app {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 0;
+    }
+
+    #sidebar {
+      background: linear-gradient(180deg, #172539 0%, #101a28 100%);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .section {
+      padding: 12px;
+      border-bottom: 1px solid rgba(132, 169, 204, 0.24);
+    }
+
+    .title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--accent);
+      margin-bottom: 10px;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
+      margin-top: 6px;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    button {
+      border: 1px solid rgba(140, 193, 237, 0.5);
+      background: #20344d;
+      color: #e8f6ff;
+      border-radius: 8px;
+      padding: 7px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #284262;
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    .input-grid {
+      display: grid;
+      gap: 8px;
+    }
+
+    label {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      display: grid;
+      gap: 4px;
+    }
+
+    input,
+    textarea,
+    select {
+      width: 100%;
+      border: 1px solid rgba(126, 167, 204, 0.48);
+      border-radius: 7px;
+      background: var(--panel-2);
+      color: var(--text);
+      font-size: 12px;
+      padding: 7px 8px;
+      font-family: "Segoe UI", sans-serif;
+    }
+
+    textarea {
+      min-height: 76px;
+      resize: vertical;
+      font-family: Consolas, Monaco, monospace;
+    }
+
+    .inline {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    #parents-list {
+      max-height: 136px;
+      overflow: auto;
+      border: 1px solid rgba(126, 167, 204, 0.35);
+      border-radius: 8px;
+      padding: 6px;
+      background: rgba(18, 32, 49, 0.9);
+      display: grid;
+      gap: 5px;
+    }
+
+    .parent-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    #export-output {
+      min-height: 130px;
+      white-space: pre;
+      overflow: auto;
+    }
+
+    #status {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 6px;
+      min-height: 18px;
+    }
+
+    #workspace-wrap {
+      position: relative;
+      overflow: hidden;
+      background: radial-gradient(circle at 30% 20%, #17293f 0%, #0b1420 65%);
+    }
+
+    #workspace-grid {
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(to right, rgba(109, 158, 207, 0.12) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(109, 158, 207, 0.12) 1px, transparent 1px);
+      background-size: 42px 42px;
+      pointer-events: none;
+    }
+
+    #workspace {
+      position: absolute;
+      inset: 0;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    #workspace.panning {
+      cursor: grabbing;
+    }
+
+    .node-card {
+      position: absolute;
+      width: 64px;
+      height: 64px;
+      min-height: 64px;
+      border-radius: 10px;
+      border: 1px solid rgba(126, 191, 242, 0.62);
+      background: var(--node);
+      color: #eaf6ff;
+      padding: 6px;
+      user-select: none;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 7px 22px rgba(0, 0, 0, 0.35);
+      cursor: move;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .node-card.selected {
+      background: var(--node-selected);
+      border-color: rgba(157, 234, 255, 0.96);
+      box-shadow: 0 0 0 2px rgba(157, 234, 255, 0.28), 0 9px 22px rgba(0, 0, 0, 0.42);
+    }
+
+    .node-title {
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.2;
+      margin-bottom: 4px;
+      word-break: break-word;
+    }
+
+    .node-sub {
+      font-size: 11px;
+      color: #c1daf0;
+      line-height: 1.3;
+      word-break: break-word;
+    }
+
+    .node-icon {
+      display: block;
+      pointer-events: none;
+    }
+
+    #connections {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      overflow: visible;
+    }
+
+    #top-strip {
+      position: absolute;
+      left: 12px;
+      top: 10px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(121, 178, 231, 0.4);
+      background: rgba(18, 32, 49, 0.88);
+      z-index: 6;
+      font-size: 12px;
+      color: var(--muted);
+      backdrop-filter: blur(4px);
+    }
+
+    #node-tooltip {
+      position: absolute;
+      left: 0;
+      top: 0;
+      max-width: 280px;
+      border: 1px solid rgba(140, 193, 237, 0.66);
+      border-radius: 10px;
+      background: rgba(8, 15, 24, 0.96);
+      color: #e8f6ff;
+      padding: 8px 10px;
+      z-index: 8;
+      pointer-events: none;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+      display: grid;
+      gap: 3px;
+    }
+
+    #node-tooltip.hidden {
+      display: none;
+    }
+
+    #node-tooltip-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #def5ff;
+      line-height: 1.3;
+      word-break: break-word;
+    }
+
+    #node-tooltip-meta {
+      font-size: 11px;
+      color: #9fd0f2;
+      line-height: 1.3;
+      word-break: break-word;
+    }
+
+    #node-tooltip-desc {
+      font-size: 11px;
+      color: #b8d6ec;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid rgba(136, 193, 240, 0.4);
+      border-radius: 999px;
+      padding: 4px 8px;
+      color: #d6edff;
+      background: rgba(37, 60, 87, 0.8);
+      font-size: 11px;
+      font-weight: 600;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="section">
+        <div class="title">Tech Tree Editor</div>
+        <div class="toolbar">
+          <button id="btn-reset-pan" type="button">Reset View</button>
+          <button id="btn-copy" type="button">Copy Export</button>
+          <button id="btn-download" type="button">Download JSON</button>
+        </div>
+        <div class="hint">Drag background to pan. Drag node cards to move layout. Click a node to edit it.</div>
+        <div id="status"></div>
+      </div>
+
+      <div class="section">
+        <div class="title">Node Inspector</div>
+        <div class="input-grid">
+          <label>Id
+            <input id="field-id" type="text" readonly />
+          </label>
+          <label>Label
+            <input id="field-label" type="text" />
+          </label>
+          <label>Description
+            <input id="field-description" type="text" />
+          </label>
+          <label>Icon Id
+            <input id="field-icon" type="text" />
+          </label>
+          <div class="inline">
+            <label>Cost
+              <input id="field-cost" type="number" min="0" step="1" />
+            </label>
+            <label>Starts Unlocked
+              <select id="field-starts-unlocked">
+                <option value="false">false</option>
+                <option value="true">true</option>
+              </select>
+            </label>
+          </div>
+          <div class="inline">
+            <label>Position X
+              <input id="field-pos-x" type="number" step="1" />
+            </label>
+            <label>Position Y
+              <input id="field-pos-y" type="number" step="1" />
+            </label>
+          </div>
+
+          <label>Parents
+            <div id="parents-list"></div>
+          </label>
+
+          <label>Grants (JSON)
+            <textarea id="field-grants"></textarea>
+          </label>
+        </div>
+      </div>
+
+      <div class="section" style="flex: 1; min-height: 0; display: grid;">
+        <div class="title">Export Payload</div>
+        <textarea id="export-output" readonly></textarea>
+      </div>
+    </aside>
+
+    <main id="workspace-wrap">
+      <div id="workspace-grid"></div>
+      <svg id="connections"></svg>
+      <div id="workspace"></div>
+      <div id="node-tooltip" class="hidden">
+        <div id="node-tooltip-title"></div>
+        <div id="node-tooltip-meta"></div>
+        <div id="node-tooltip-desc"></div>
+      </div>
+      <div id="top-strip">
+        <span class="pill" id="pill-root">Root: -</span>
+        <span class="pill" id="pill-count">Nodes: 0</span>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="/src/techtreeEditor.js"></script>
+</body>
+
+</html>

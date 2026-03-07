@@ -1,0 +1,1031 @@
+{
+  "rootNodeId": "root_gun_core",
+  "nodeWidth": 176,
+  "nodeHeight": 78,
+  "worldToScreenScale": 0.56,
+  "nodeDisplaySize": 64,
+  "panelPadding": 22,
+  "panBoundsPadding": 180,
+  "columns": {
+    "aoe": -840,
+    "slow": -620,
+    "sniper": -400,
+    "mortar": -180,
+    "gun": 0,
+    "tesla": 180,
+    "spikes": 400,
+    "plasma": 620,
+    "buff": 840
+  },
+  "rows": {
+    "r0": 0,
+    "r1": 210,
+    "r2": 430,
+    "r3": 650,
+    "r4": 870,
+    "r5": 1090,
+    "r6": 1310
+  },
+  "nodes": [
+    {
+      "id": "root_gun_core",
+      "label": "Gun Core",
+      "description": "Run start node",
+      "iconId": "tower_gun",
+      "parents": [],
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "cost": 0,
+      "startsUnlocked": true,
+      "grants": {}
+    },
+    {
+      "id": "unlock_aoe",
+      "label": "AOE Tower",
+      "description": "Unlock AOE tower",
+      "iconId": "tower_aoe",
+      "parents": [
+        "root_gun_core"
+      ],
+      "position": {
+        "x": -819.8270089285713,
+        "y": 5.891462053571473
+      },
+      "cost": 1,
+      "grants": {
+        "unlockTowerType": "aoe"
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "unlock_slow",
+      "label": "Slow Tower",
+      "description": "Unlock slow tower",
+      "iconId": "tower_slow",
+      "parents": [
+        "root_gun_core"
+      ],
+      "position": {
+        "x": -620,
+        "y": 210
+      },
+      "cost": 1,
+      "grants": {
+        "unlockTowerType": "slow"
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "unlock_laser_sniper",
+      "label": "Laser Sniper",
+      "description": "Unlock sniper tower",
+      "iconId": "tower_laser_sniper",
+      "parents": [
+        "root_gun_core"
+      ],
+      "position": {
+        "x": -400,
+        "y": 210
+      },
+      "cost": 1,
+      "grants": {
+        "unlockTowerType": "laserSniper"
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "unlock_mortar",
+      "label": "Mortar Tower",
+      "description": "Unlock mortar tower",
+      "iconId": "tower_mortar",
+      "parents": [
+        "root_gun_core"
+      ],
+      "position": {
+        "x": -312.89620535714306,
+        "y": -289.7837611607143
+      },
+      "cost": 1,
+      "grants": {
+        "unlockTowerType": "mortar"
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "unlock_tesla",
+      "label": "Tesla Tower",
+      "description": "Unlock tesla tower",
+      "iconId": "tower_tesla",
+      "parents": [
+        "root_gun_core"
+      ],
+      "position": {
+        "x": 180,
+        "y": 210
+      },
+      "cost": 1,
+      "grants": {
+        "unlockTowerType": "tesla"
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "unlock_spikes",
+      "label": "Spikes Tower",
+      "description": "Unlock spikes tower",
+      "iconId": "tower_spikes",
+      "parents": [
+        "root_gun_core"
+      ],
+      "position": {
+        "x": 400,
+        "y": 210
+      },
+      "cost": 1,
+      "grants": {
+        "unlockTowerType": "spikes"
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "unlock_plasma",
+      "label": "Plasma Tower",
+      "description": "Unlock plasma tower",
+      "iconId": "tower_plasma",
+      "parents": [
+        "root_gun_core"
+      ],
+      "position": {
+        "x": 620,
+        "y": 210
+      },
+      "cost": 1,
+      "grants": {
+        "unlockTowerType": "plasma"
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "unlock_buff",
+      "label": "Buff Tower",
+      "description": "Unlock buff tower",
+      "iconId": "tower_buff",
+      "parents": [
+        "root_gun_core"
+      ],
+      "position": {
+        "x": 840,
+        "y": 210
+      },
+      "cost": 1,
+      "grants": {
+        "unlockTowerType": "buff"
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "gun_damage_t1",
+      "label": "Gun Impact",
+      "description": "+35% gun tower damage",
+      "iconId": "tower_damage",
+      "parents": [
+        "root_gun_core"
+      ],
+      "position": {
+        "x": 258.18309294871784,
+        "y": -165.2504006410256
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "gun": {
+            "damageMultiplier": 1.35
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "gun_rate_t1",
+      "label": "Gun Loader",
+      "description": "Gun tower fires faster",
+      "iconId": "tower_fire_rate",
+      "parents": [
+        "gun_damage_t1"
+      ],
+      "position": {
+        "x": 0,
+        "y": 430
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "gun": {
+            "fireIntervalMultiplier": 0.82
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "gun_range_t1",
+      "label": "Gun Scope",
+      "description": "+2.5 gun tower range",
+      "iconId": "tower_gun",
+      "parents": [
+        "gun_rate_t1"
+      ],
+      "position": {
+        "x": 0,
+        "y": 650
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "gun": {
+            "rangeAdd": 2.5
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "gun_shrapnel_t1",
+      "label": "Shrapnel Rounds",
+      "description": "Gun shots pierce +1 enemy",
+      "iconId": "tower_gun",
+      "parents": [
+        "gun_range_t1"
+      ],
+      "position": {
+        "x": 0,
+        "y": 870
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "gun": {
+            "projectilePierceAdd": 1
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "player_machinegun_specialist",
+      "label": "Machinegun Specialist",
+      "description": "Boost player machinegun damage",
+      "iconId": "player_damage",
+      "parents": [
+        "gun_shrapnel_t1"
+      ],
+      "position": {
+        "x": 0,
+        "y": 1090
+      },
+      "cost": 1,
+      "grants": {
+        "player": {
+          "weaponDamageMultipliers": {
+            "machineGun": 1.25
+          },
+          "damageAdd": 0.15
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "aoe_damage_t1",
+      "label": "Pulse Core",
+      "description": "+30% AOE damage",
+      "iconId": "tower_damage",
+      "parents": [
+        "unlock_aoe"
+      ],
+      "position": {
+        "x": -840,
+        "y": 430
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "aoe": {
+            "damageMultiplier": 1.3
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "aoe_radius_t1",
+      "label": "Pulse Radius",
+      "description": "+1.4 AOE range",
+      "iconId": "tower_aoe",
+      "parents": [
+        "aoe_damage_t1"
+      ],
+      "position": {
+        "x": -840,
+        "y": 650
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "aoe": {
+            "rangeAdd": 1.4
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "aoe_rate_t1",
+      "label": "Pulse Cadence",
+      "description": "AOE pulses faster",
+      "iconId": "tower_fire_rate",
+      "parents": [
+        "aoe_radius_t1"
+      ],
+      "position": {
+        "x": -840,
+        "y": 870
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "aoe": {
+            "fireIntervalMultiplier": 0.84
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "player_blast_mastery",
+      "label": "Blast Mastery",
+      "description": "Player bazooka splash +25%",
+      "iconId": "player_damage",
+      "parents": [
+        "aoe_damage_t1"
+      ],
+      "position": {
+        "x": -840,
+        "y": 1090
+      },
+      "cost": 1,
+      "grants": {
+        "player": {
+          "weaponSplashRadiusMultipliers": {
+            "bazooka": 1.25
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "slow_strength_t1",
+      "label": "Cryo Lock",
+      "description": "Slow towers reduce speed more",
+      "iconId": "tower_slow",
+      "parents": [
+        "unlock_slow"
+      ],
+      "position": {
+        "x": -620,
+        "y": 430
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "slow": {
+            "slowMultiplierAdd": -0.08
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "slow_duration_t1",
+      "label": "Cryo Hold",
+      "description": "Slow effect lasts longer",
+      "iconId": "tower_slow",
+      "parents": [
+        "slow_strength_t1"
+      ],
+      "position": {
+        "x": -620,
+        "y": 650
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "slow": {
+            "slowDurationMultiplier": 1.4
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "slow_rate_t1",
+      "label": "Cryo Tempo",
+      "description": "Slow tower fires faster",
+      "iconId": "tower_fire_rate",
+      "parents": [
+        "slow_duration_t1"
+      ],
+      "position": {
+        "x": -620,
+        "y": 870
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "slow": {
+            "fireIntervalMultiplier": 0.85
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "player_skater_protocol",
+      "label": "Skater Protocol",
+      "description": "Player move speed +12%",
+      "iconId": "player_fire_rate",
+      "parents": [
+        "slow_strength_t1"
+      ],
+      "position": {
+        "x": -620,
+        "y": 1090
+      },
+      "cost": 1,
+      "grants": {
+        "player": {
+          "moveSpeedMultiplier": 1.12
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "sniper_pierce_t1",
+      "label": "Beam Pierce",
+      "description": "Sniper beam pierces +2",
+      "iconId": "tower_laser_sniper",
+      "parents": [
+        "unlock_laser_sniper"
+      ],
+      "position": {
+        "x": -400,
+        "y": 430
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "laserSniper": {
+            "laserPierceTargetsAdd": 2
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "sniper_damage_t1",
+      "label": "Beam Focus",
+      "description": "+40% sniper damage",
+      "iconId": "tower_damage",
+      "parents": [
+        "sniper_pierce_t1"
+      ],
+      "position": {
+        "x": -400,
+        "y": 650
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "laserSniper": {
+            "damageMultiplier": 1.4
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "sniper_rate_t1",
+      "label": "Beam Charge",
+      "description": "Sniper fires faster",
+      "iconId": "tower_fire_rate",
+      "parents": [
+        "sniper_damage_t1"
+      ],
+      "position": {
+        "x": -400,
+        "y": 870
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "laserSniper": {
+            "fireIntervalMultiplier": 0.78
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "player_sniper_mastery",
+      "label": "Sniper Mastery",
+      "description": "Player sniper damage +35%",
+      "iconId": "player_damage",
+      "parents": [
+        "sniper_pierce_t1"
+      ],
+      "position": {
+        "x": -400,
+        "y": 1090
+      },
+      "cost": 1,
+      "grants": {
+        "player": {
+          "weaponDamageMultipliers": {
+            "sniper": 1.35
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "mortar_radius_t1",
+      "label": "Shock Radius",
+      "description": "+1.2 mortar splash radius",
+      "iconId": "tower_mortar",
+      "parents": [
+        "unlock_mortar"
+      ],
+      "position": {
+        "x": -180,
+        "y": 430
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "mortar": {
+            "mortarSplashRadiusAdd": 1.2
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "mortar_damage_t1",
+      "label": "Heavy Shells",
+      "description": "+35% mortar damage",
+      "iconId": "tower_damage",
+      "parents": [
+        "mortar_radius_t1"
+      ],
+      "position": {
+        "x": -180,
+        "y": 650
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "mortar": {
+            "damageMultiplier": 1.35
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "mortar_rate_t1",
+      "label": "Quick Loader",
+      "description": "Mortar fires faster",
+      "iconId": "tower_fire_rate",
+      "parents": [
+        "mortar_damage_t1"
+      ],
+      "position": {
+        "x": -180,
+        "y": 870
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "mortar": {
+            "fireIntervalMultiplier": 0.82
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "player_bazooka_payload",
+      "label": "Payload Expert",
+      "description": "Player bazooka boost",
+      "iconId": "player_damage",
+      "parents": [
+        "mortar_radius_t1"
+      ],
+      "position": {
+        "x": -180,
+        "y": 1090
+      },
+      "cost": 1,
+      "grants": {
+        "player": {
+          "weaponDamageMultipliers": {
+            "bazooka": 1.25
+          },
+          "weaponSplashRadiusMultipliers": {
+            "bazooka": 1.2
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "tesla_chain_t1",
+      "label": "Arc Fork",
+      "description": "Tesla chains +2 targets",
+      "iconId": "tower_tesla",
+      "parents": [
+        "unlock_tesla"
+      ],
+      "position": {
+        "x": 180,
+        "y": 430
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "tesla": {
+            "teslaChainCountAdd": 2
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "tesla_damage_t1",
+      "label": "Arc Power",
+      "description": "+30% tesla damage",
+      "iconId": "tower_damage",
+      "parents": [
+        "tesla_chain_t1"
+      ],
+      "position": {
+        "x": 180,
+        "y": 650
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "tesla": {
+            "damageMultiplier": 1.3
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "tesla_rate_t1",
+      "label": "Arc Tempo",
+      "description": "Tesla fires faster",
+      "iconId": "tower_fire_rate",
+      "parents": [
+        "tesla_damage_t1"
+      ],
+      "position": {
+        "x": 180,
+        "y": 870
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "tesla": {
+            "fireIntervalMultiplier": 0.85
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "player_overclock",
+      "label": "Overclock",
+      "description": "Player fire rate boost",
+      "iconId": "player_fire_rate",
+      "parents": [
+        "tesla_chain_t1"
+      ],
+      "position": {
+        "x": 180,
+        "y": 1090
+      },
+      "cost": 1,
+      "grants": {
+        "player": {
+          "fireIntervalMultiplier": 0.82
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "spikes_cycle_t1",
+      "label": "Cycle Gears",
+      "description": "Spikes cycle faster",
+      "iconId": "tower_spikes",
+      "parents": [
+        "unlock_spikes"
+      ],
+      "position": {
+        "x": 400,
+        "y": 430
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "spikes": {
+            "spikesCycleIntervalMultiplier": 0.75
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "spikes_damage_t1",
+      "label": "Razor Teeth",
+      "description": "+45% spikes damage",
+      "iconId": "tower_damage",
+      "parents": [
+        "spikes_cycle_t1"
+      ],
+      "position": {
+        "x": 400,
+        "y": 650
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "spikes": {
+            "damageMultiplier": 1.45
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "spikes_active_t1",
+      "label": "Long Reach",
+      "description": "Spikes stay raised longer",
+      "iconId": "tower_spikes",
+      "parents": [
+        "spikes_damage_t1"
+      ],
+      "position": {
+        "x": 400,
+        "y": 870
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "spikes": {
+            "spikesActiveDurationMultiplier": 1.35
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "player_salvager",
+      "label": "Salvager",
+      "description": "Pickup range +1",
+      "iconId": "player_pickup_range",
+      "parents": [
+        "spikes_cycle_t1"
+      ],
+      "position": {
+        "x": 400,
+        "y": 1090
+      },
+      "cost": 1,
+      "grants": {
+        "player": {
+          "pickupRangeAdd": 1
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "plasma_damage_t1",
+      "label": "Overburn",
+      "description": "+45% plasma DPS",
+      "iconId": "tower_plasma",
+      "parents": [
+        "unlock_plasma"
+      ],
+      "position": {
+        "x": 620,
+        "y": 430
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "plasma": {
+            "damageMultiplier": 1.45
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "plasma_reach_t1",
+      "label": "Deep Flame",
+      "description": "Plasma depth +1 cell",
+      "iconId": "tower_plasma",
+      "parents": [
+        "plasma_damage_t1"
+      ],
+      "position": {
+        "x": 620,
+        "y": 650
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "plasma": {
+            "plasmaDepthCellsAdd": 1
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "plasma_width_t1",
+      "label": "Wide Flame",
+      "description": "Plasma side coverage +1",
+      "iconId": "tower_plasma",
+      "parents": [
+        "plasma_reach_t1"
+      ],
+      "position": {
+        "x": 620,
+        "y": 870
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "plasma": {
+            "plasmaSideCellsAdd": 1
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "player_heat_ammo",
+      "label": "Heat Ammo",
+      "description": "Player machinegun fires faster",
+      "iconId": "player_fire_rate",
+      "parents": [
+        "plasma_damage_t1"
+      ],
+      "position": {
+        "x": 620,
+        "y": 1090
+      },
+      "cost": 1,
+      "grants": {
+        "player": {
+          "weaponFireIntervalMultipliers": {
+            "machineGun": 0.85
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "buff_range_t1",
+      "label": "Aura Reach",
+      "description": "Buff aura range +2",
+      "iconId": "tower_buff",
+      "parents": [
+        "unlock_buff"
+      ],
+      "position": {
+        "x": 840,
+        "y": 430
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "buff": {
+            "buffRangeAdd": 2
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "buff_potency_t1",
+      "label": "Aura Potency",
+      "description": "Stronger buff bonuses",
+      "iconId": "tower_buff",
+      "parents": [
+        "buff_range_t1"
+      ],
+      "position": {
+        "x": 840,
+        "y": 650
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "buff": {
+            "buffDamageBonusPerTowerAdd": 0.15,
+            "buffFireRateBonusPerTowerAdd": 0.1
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "buff_network_t1",
+      "label": "Buff Network",
+      "description": "Buff towers buff each other",
+      "iconId": "tower_buff",
+      "parents": [
+        "buff_potency_t1"
+      ],
+      "position": {
+        "x": 840,
+        "y": 870
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "buff": {
+            "buffAffectsBuffTowers": true
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "player_jetpack_tuning",
+      "label": "Jetpack Tuning",
+      "description": "Jetpack efficiency x1.8",
+      "iconId": "player_jetpack_efficiency",
+      "parents": [
+        "buff_range_t1"
+      ],
+      "position": {
+        "x": 840,
+        "y": 1090
+      },
+      "cost": 1,
+      "grants": {
+        "player": {
+          "jetpackEfficiencyMultiplier": 1.8
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "volatile_chain_reaction_t1",
+      "label": "Chain Reaction",
+      "description": "Death explosion chance",
+      "iconId": "enemy_slow",
+      "parents": [
+        "mortar_damage_t1",
+        "spikes_damage_t1"
+      ],
+      "position": {
+        "x": 0,
+        "y": 1310
+      },
+      "cost": 1,
+      "grants": {
+        "enemy": {
+          "deathExplosionChanceAdd": 0.18,
+          "deathExplosionRadiusAdd": 1.2,
+          "deathExplosionDamageScaleAdd": 0.45
+        }
+      },
+      "startsUnlocked": false
+    }
+  ],
+  "edgeJoints": {
+    "root_gun_core->unlock_mortar": [
+      {
+        "x": -311.3420758928572,
+        "y": -1.9670758928571535
+      }
+    ]
+  }
+}

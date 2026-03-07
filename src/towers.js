@@ -553,6 +553,51 @@ export function createTowerSystem({
 
   let towerDamageMultiplier = 1;
   let towerFireRateMultiplier = 1;
+  const towerTechModifiersByType = new Map();
+  for (const type of TOWER_TYPE_ORDER) {
+    towerTechModifiersByType.set(type, {
+      damageMultiplier: 1,
+      fireIntervalMultiplier: 1,
+      rangeAdd: 0,
+      projectilePierce: 0,
+      laserPierceTargets: 0,
+      mortarSplashRadiusAdd: 0,
+      teslaChainCountAdd: 0,
+      spikesCycleIntervalMultiplier: 1,
+      spikesActiveDurationMultiplier: 1,
+      plasmaDepthCellsAdd: 0,
+      plasmaSideCellsAdd: 0,
+      slowMultiplierAdd: 0,
+      slowDurationMultiplier: 1,
+      buffRangeAdd: 0,
+      buffDamageBonusPerTowerAdd: 0,
+      buffFireRateBonusPerTowerAdd: 0,
+      buffAffectsBuffTowers: false,
+    });
+  }
+
+  function getTowerTechModifiers(type) {
+    const normalizedType = normalizeTowerType(type);
+    if (!normalizedType) {
+      return null;
+    }
+    return towerTechModifiersByType.get(normalizedType) ?? null;
+  }
+
+  function getTowerRangeForType(type) {
+    const spec = getTowerSpec(type);
+    if (!spec) {
+      return 0;
+    }
+    const modifiers = getTowerTechModifiers(type);
+    const rangeAdd = Number.isFinite(Number(modifiers?.rangeAdd))
+      ? Number(modifiers.rangeAdd)
+      : 0;
+    const buffRangeAdd = Number.isFinite(Number(modifiers?.buffRangeAdd))
+      ? Number(modifiers.buffRangeAdd)
+      : 0;
+    return Math.max(0.1, Number(spec.range) + rangeAdd + buffRangeAdd);
+  }
 
   function makeCellKey(cellX, cellZ) {
     return `${cellX},${cellZ}`;
@@ -850,6 +895,127 @@ export function createTowerSystem({
       return;
     }
     towerFireRateMultiplier *= rateMultiplier;
+  }
+
+  function applyTechGrants(grants = {}) {
+    let appliedAny = false;
+
+    if (typeof grants.unlockTowerType === "string") {
+      appliedAny = unlockTowerType(grants.unlockTowerType) || appliedAny;
+    }
+
+    const towerGrants = grants?.tower;
+    if (towerGrants && typeof towerGrants === "object") {
+      for (const [rawType, modifierPatch] of Object.entries(towerGrants)) {
+        const modifiers = getTowerTechModifiers(rawType);
+        if (!modifiers || !modifierPatch || typeof modifierPatch !== "object") {
+          continue;
+        }
+
+        const damageMultiplier = Number(modifierPatch.damageMultiplier);
+        if (Number.isFinite(damageMultiplier) && damageMultiplier > 0) {
+          modifiers.damageMultiplier *= damageMultiplier;
+          appliedAny = true;
+        }
+
+        const fireIntervalMultiplier = Number(modifierPatch.fireIntervalMultiplier);
+        if (Number.isFinite(fireIntervalMultiplier) && fireIntervalMultiplier > 0) {
+          modifiers.fireIntervalMultiplier *= fireIntervalMultiplier;
+          appliedAny = true;
+        }
+
+        const rangeAdd = Number(modifierPatch.rangeAdd);
+        if (Number.isFinite(rangeAdd) && rangeAdd !== 0) {
+          modifiers.rangeAdd += rangeAdd;
+          appliedAny = true;
+        }
+
+        const projectilePierceAdd = Math.floor(Number(modifierPatch.projectilePierceAdd));
+        if (Number.isFinite(projectilePierceAdd) && projectilePierceAdd !== 0) {
+          modifiers.projectilePierce += projectilePierceAdd;
+          appliedAny = true;
+        }
+
+        const laserPierceTargetsAdd = Math.floor(Number(modifierPatch.laserPierceTargetsAdd));
+        if (Number.isFinite(laserPierceTargetsAdd) && laserPierceTargetsAdd !== 0) {
+          modifiers.laserPierceTargets += laserPierceTargetsAdd;
+          appliedAny = true;
+        }
+
+        const mortarSplashRadiusAdd = Number(modifierPatch.mortarSplashRadiusAdd);
+        if (Number.isFinite(mortarSplashRadiusAdd) && mortarSplashRadiusAdd !== 0) {
+          modifiers.mortarSplashRadiusAdd += mortarSplashRadiusAdd;
+          appliedAny = true;
+        }
+
+        const teslaChainCountAdd = Math.floor(Number(modifierPatch.teslaChainCountAdd));
+        if (Number.isFinite(teslaChainCountAdd) && teslaChainCountAdd !== 0) {
+          modifiers.teslaChainCountAdd += teslaChainCountAdd;
+          appliedAny = true;
+        }
+
+        const spikesCycleIntervalMultiplier = Number(modifierPatch.spikesCycleIntervalMultiplier);
+        if (Number.isFinite(spikesCycleIntervalMultiplier) && spikesCycleIntervalMultiplier > 0) {
+          modifiers.spikesCycleIntervalMultiplier *= spikesCycleIntervalMultiplier;
+          appliedAny = true;
+        }
+
+        const spikesActiveDurationMultiplier = Number(modifierPatch.spikesActiveDurationMultiplier);
+        if (Number.isFinite(spikesActiveDurationMultiplier) && spikesActiveDurationMultiplier > 0) {
+          modifiers.spikesActiveDurationMultiplier *= spikesActiveDurationMultiplier;
+          appliedAny = true;
+        }
+
+        const plasmaDepthCellsAdd = Math.floor(Number(modifierPatch.plasmaDepthCellsAdd));
+        if (Number.isFinite(plasmaDepthCellsAdd) && plasmaDepthCellsAdd !== 0) {
+          modifiers.plasmaDepthCellsAdd += plasmaDepthCellsAdd;
+          appliedAny = true;
+        }
+
+        const plasmaSideCellsAdd = Math.floor(Number(modifierPatch.plasmaSideCellsAdd));
+        if (Number.isFinite(plasmaSideCellsAdd) && plasmaSideCellsAdd !== 0) {
+          modifiers.plasmaSideCellsAdd += plasmaSideCellsAdd;
+          appliedAny = true;
+        }
+
+        const slowMultiplierAdd = Number(modifierPatch.slowMultiplierAdd);
+        if (Number.isFinite(slowMultiplierAdd) && slowMultiplierAdd !== 0) {
+          modifiers.slowMultiplierAdd += slowMultiplierAdd;
+          appliedAny = true;
+        }
+
+        const slowDurationMultiplier = Number(modifierPatch.slowDurationMultiplier);
+        if (Number.isFinite(slowDurationMultiplier) && slowDurationMultiplier > 0) {
+          modifiers.slowDurationMultiplier *= slowDurationMultiplier;
+          appliedAny = true;
+        }
+
+        const buffRangeAdd = Number(modifierPatch.buffRangeAdd);
+        if (Number.isFinite(buffRangeAdd) && buffRangeAdd !== 0) {
+          modifiers.buffRangeAdd += buffRangeAdd;
+          appliedAny = true;
+        }
+
+        const buffDamageBonusPerTowerAdd = Number(modifierPatch.buffDamageBonusPerTowerAdd);
+        if (Number.isFinite(buffDamageBonusPerTowerAdd) && buffDamageBonusPerTowerAdd !== 0) {
+          modifiers.buffDamageBonusPerTowerAdd += buffDamageBonusPerTowerAdd;
+          appliedAny = true;
+        }
+
+        const buffFireRateBonusPerTowerAdd = Number(modifierPatch.buffFireRateBonusPerTowerAdd);
+        if (Number.isFinite(buffFireRateBonusPerTowerAdd) && buffFireRateBonusPerTowerAdd !== 0) {
+          modifiers.buffFireRateBonusPerTowerAdd += buffFireRateBonusPerTowerAdd;
+          appliedAny = true;
+        }
+
+        if (modifierPatch.buffAffectsBuffTowers === true) {
+          modifiers.buffAffectsBuffTowers = true;
+          appliedAny = true;
+        }
+      }
+    }
+
+    return appliedAny;
   }
 
   function applyShadowSettings(object) {
@@ -1984,9 +2150,10 @@ export function createTowerSystem({
       hidePathRangeHighlights();
       return;
     }
+    const effectiveRange = getTowerRangeForType(selectedTowerType);
 
     if (!towerSpec.usesLineOfSight) {
-      const rangeSq = towerSpec.range * towerSpec.range;
+      const rangeSq = effectiveRange * effectiveRange;
       for (const entry of pathRangeHighlights.entries) {
         entry.mesh.visible = origin.distanceToSquared(entry.center) <= rangeSq;
       }
@@ -1995,7 +2162,7 @@ export function createTowerSystem({
 
     const previewTowerProbe = {
       mesh: preview,
-      range: towerSpec.range,
+      range: effectiveRange,
       halfSize: towerSpec.halfSize,
       halfSizeX: towerSpec.halfSizeX,
       halfSizeZ: towerSpec.halfSizeZ,
@@ -2585,6 +2752,11 @@ export function createTowerSystem({
         ? [{ x: placement.cellX, z: placement.cellZ }]
         : []);
     const primaryCell = occupiedCells[0] ?? null;
+    const initialSpikesCycleInterval = Math.max(
+      0.05,
+      SPIKES_CYCLE_INTERVAL
+        * Math.max(0.05, getTowerModifierNumber("spikes", "spikesCycleIntervalMultiplier", 1))
+    );
 
     const entry = {
       mesh: towerMesh,
@@ -2615,7 +2787,7 @@ export function createTowerSystem({
       aoeEmissiveCharge: new THREE.Color(AOE_TOWER_CONFIG.emissiveCharge),
       gunMuzzleFlashTimer: 0,
       slowProcFlash: 0,
-      spikesCycleTimer: Math.random() * Math.max(0.01, SPIKES_CYCLE_INTERVAL),
+      spikesCycleTimer: Math.random() * initialSpikesCycleInterval,
       spikesActiveTimer: 0,
       spikesDidDamageThisCycle: false,
       plasmaClock: Math.random() * Math.PI * 2,
@@ -3267,7 +3439,7 @@ export function createTowerSystem({
   }
 
   function isPointInTowerRange(tower, targetPosition) {
-    const towerRange = tower.range ?? GUN_RANGE;
+    const towerRange = getTowerRangeForType(tower?.towerType) || (tower.range ?? GUN_RANGE);
     return tower.mesh.position.distanceToSquared(targetPosition) <= (towerRange * towerRange);
   }
 
@@ -3299,7 +3471,7 @@ export function createTowerSystem({
     if (!enemySystem) {
       return null;
     }
-    const towerRange = tower.range ?? GUN_RANGE;
+    const towerRange = getTowerRangeForType(tower?.towerType) || (tower.range ?? GUN_RANGE);
     const maxRangeSq = towerRange * towerRange;
     let bestTarget = null;
     let bestDistSq = maxRangeSq;
@@ -3495,7 +3667,7 @@ export function createTowerSystem({
   }
 
   function hasDamageableEnemyInRange(tower, enemySystem) {
-    const range = tower.range ?? AOE_RANGE;
+    const range = getTowerRangeForType(tower?.towerType) || (tower.range ?? AOE_RANGE);
     const rangeSq = range * range;
     for (const enemyMesh of getDamageableEnemyMeshes(enemySystem)) {
       if (!enemyMesh || !enemyMesh.visible) {
@@ -3512,20 +3684,36 @@ export function createTowerSystem({
     const localBuff = Number.isFinite(Number(tower?.buffDamageMultiplier))
       ? Number(tower.buffDamageMultiplier)
       : 1;
-    return towerDamageMultiplier * Math.max(0, localBuff);
+    const typeDamageMultiplier = Number.isFinite(Number(getTowerTechModifiers(tower?.towerType)?.damageMultiplier))
+      ? Number(getTowerTechModifiers(tower?.towerType)?.damageMultiplier)
+      : 1;
+    return towerDamageMultiplier * typeDamageMultiplier * Math.max(0, localBuff);
   }
 
   function getTowerFireIntervalScale(tower) {
     const localBuff = Number.isFinite(Number(tower?.buffFireRateIntervalFactor))
       ? Number(tower.buffFireRateIntervalFactor)
       : 1;
-    return towerFireRateMultiplier * Math.max(0.05, localBuff);
+    const typeFireIntervalMultiplier = Number.isFinite(Number(getTowerTechModifiers(tower?.towerType)?.fireIntervalMultiplier))
+      ? Number(getTowerTechModifiers(tower?.towerType)?.fireIntervalMultiplier)
+      : 1;
+    return towerFireRateMultiplier * typeFireIntervalMultiplier * Math.max(0.05, localBuff);
+  }
+
+  function getTowerModifierNumber(towerType, key, fallback = 0) {
+    const modifiers = getTowerTechModifiers(towerType);
+    const value = Number(modifiers?.[key]);
+    return Number.isFinite(value) ? value : fallback;
   }
 
   function updateBuffTowerAurasAndBonuses(deltaSeconds) {
-    const buffRangeSq = BUFF_RANGE * BUFF_RANGE;
-    const damageBonusPerTower = Number(BUFF_TOWER_CONFIG.damageBonusPerTower) || 0;
-    const fireRateBonusPerTower = Number(BUFF_TOWER_CONFIG.fireRateBonusPerTower) || 0;
+    const buffBaseDamageBonus = Number(BUFF_TOWER_CONFIG.damageBonusPerTower) || 0;
+    const buffBaseFireRateBonus = Number(BUFF_TOWER_CONFIG.fireRateBonusPerTower) || 0;
+    const buffRange = getTowerRangeForType("buff") || BUFF_RANGE;
+    const buffModifiers = getTowerTechModifiers("buff");
+    const damageBonusPerTower = buffBaseDamageBonus + (Number(buffModifiers?.buffDamageBonusPerTowerAdd) || 0);
+    const fireRateBonusPerTower = buffBaseFireRateBonus + (Number(buffModifiers?.buffFireRateBonusPerTowerAdd) || 0);
+    const buffAffectsBuffTowers = !!buffModifiers?.buffAffectsBuffTowers;
     const activeBuffTowers = towers.filter((tower) => tower?.isOperational && tower.towerType === "buff");
 
     for (const tower of towers) {
@@ -3550,12 +3738,15 @@ export function createTowerSystem({
     }
 
     for (const tower of towers) {
-      if (!tower?.isOperational || tower.towerType === "buff") {
+      if (!tower?.isOperational) {
+        continue;
+      }
+      if (!buffAffectsBuffTowers && tower.towerType === "buff") {
         continue;
       }
       let stackedCount = 0;
       for (const buffTower of activeBuffTowers) {
-        if (tower.mesh.position.distanceToSquared(buffTower.mesh.position) <= buffRangeSq) {
+        if (tower.mesh.position.distanceToSquared(buffTower.mesh.position) <= (buffRange * buffRange)) {
           stackedCount += 1;
         }
       }
@@ -3616,12 +3807,16 @@ export function createTowerSystem({
     projectileMesh.position.copy(tempVecA);
     scene.add(projectileMesh);
 
+    const gunModifiers = getTowerTechModifiers("gun");
+    const extraPierce = Math.max(0, Math.floor(Number(gunModifiers?.projectilePierce) || 0));
     gunProjectiles.push({
       mesh: projectileMesh,
       velocity: tempVecB.clone().multiplyScalar(GUN_PROJECTILE_SPEED),
       life: GUN_PROJECTILE_LIFETIME,
       damage: GUN_PROJECTILE_DAMAGE * getTowerDamageScale(tower),
       hitRadius: GUN_PROJECTILE_HIT_RADIUS,
+      remainingPierceHits: extraPierce,
+      hitEnemyUuids: new Set(),
     });
     spawnGunMuzzleFlash(tempVecA);
     tower.gunMuzzleFlashTimer = Math.max(0, Number(GUN_TOWER_CONFIG.muzzleFlashDuration) || 0.08);
@@ -3641,6 +3836,9 @@ export function createTowerSystem({
     let closestDistSq = Number.POSITIVE_INFINITY;
     for (const enemyMesh of damageableEnemies) {
       if (!enemyMesh || !enemyMesh.visible) {
+        continue;
+      }
+      if (projectile?.hitEnemyUuids?.has(enemyMesh.uuid)) {
         continue;
       }
       let intersects = false;
@@ -3677,10 +3875,17 @@ export function createTowerSystem({
 
       const hitEnemyMesh = getGunProjectileHit(projectile, enemySystem);
       if (hitEnemyMesh && typeof enemySystem.applyDamageToEnemyMesh === "function") {
-        enemySystem.applyDamageToEnemyMesh(hitEnemyMesh, projectile.damage);
-        destroyGunProjectile(projectile);
-        gunProjectiles.splice(i, 1);
-        continue;
+        const didApplyDamage = enemySystem.applyDamageToEnemyMesh(hitEnemyMesh, projectile.damage);
+        if (didApplyDamage) {
+          projectile.hitEnemyUuids?.add?.(hitEnemyMesh.uuid);
+        }
+        if ((Number(projectile.remainingPierceHits) || 0) > 0) {
+          projectile.remainingPierceHits -= 1;
+        } else {
+          destroyGunProjectile(projectile);
+          gunProjectiles.splice(i, 1);
+          continue;
+        }
       }
 
       if (projectile.life <= 0) {
@@ -3957,6 +4162,16 @@ export function createTowerSystem({
   function updateSlowTowerCombat(tower, deltaSeconds, enemySystem) {
     updateSlowTowerBobbing(tower, deltaSeconds);
     tower.cooldown = Math.max(0, tower.cooldown - deltaSeconds);
+    const slowModifiers = getTowerTechModifiers("slow");
+    const effectiveSlowMultiplier = THREE.MathUtils.clamp(
+      SLOW_MULTIPLIER + (Number(slowModifiers?.slowMultiplierAdd) || 0),
+      0.15,
+      0.98
+    );
+    const effectiveSlowDuration = Math.max(
+      0.05,
+      SLOW_DURATION * Math.max(0.1, Number(slowModifiers?.slowDurationMultiplier) || 1)
+    );
 
     const target = findTargetWithLineOfSight(tower, enemySystem, { skipSlowed: true });
     if (!target || !target.mesh || !target.mesh.visible || tower.cooldown > 0) {
@@ -3969,9 +4184,9 @@ export function createTowerSystem({
     if (typeof enemySystem.applyTemporarySlowInAabb === "function") {
       tempVecF.copy(fieldCenter);
       tempVecG.set(grid.cellSize * 0.5, grid.cellSize * 0.5, grid.cellSize * 0.5);
-      enemySystem.applyTemporarySlowInAabb(tempVecF, tempVecG, SLOW_MULTIPLIER, SLOW_DURATION);
+      enemySystem.applyTemporarySlowInAabb(tempVecF, tempVecG, effectiveSlowMultiplier, effectiveSlowDuration);
     } else if (typeof enemySystem.applyTemporarySlowToEnemyMesh === "function") {
-      enemySystem.applyTemporarySlowToEnemyMesh(target.mesh, SLOW_MULTIPLIER, SLOW_DURATION);
+      enemySystem.applyTemporarySlowToEnemyMesh(target.mesh, effectiveSlowMultiplier, effectiveSlowDuration);
     }
 
     tower.slowProcFlash = 1;
@@ -4023,7 +4238,7 @@ export function createTowerSystem({
       return;
     }
 
-    const pulseRange = tower.range ?? AOE_RANGE;
+    const pulseRange = getTowerRangeForType("aoe") || (tower.range ?? AOE_RANGE);
     const pulseDamage = AOE_PULSE_DAMAGE * getTowerDamageScale(tower);
     while (tower.chargeTimer >= chargeInterval) {
       tower.chargeTimer -= chargeInterval;
@@ -4125,16 +4340,62 @@ export function createTowerSystem({
     if (!target || !target.mesh || tower.cooldown > 0) {
       return;
     }
-    if (typeof enemySystem.applyDamageToEnemyMesh === "function") {
-      enemySystem.applyDamageToEnemyMesh(target.mesh, LASER_SNIPER_DAMAGE * getTowerDamageScale(tower));
-    }
     getLaserEmitterWorldPosition(tower, tempVecB);
-    spawnLaserBeam(tempVecB, target.aimPoint || target.position);
+    const sniperModifiers = getTowerTechModifiers("laserSniper");
+    const pierceTargets = Math.max(0, Math.floor(Number(sniperModifiers?.laserPierceTargets) || 0));
+    const maxHits = Math.max(1, 1 + pierceTargets);
+    const effectiveRange = getTowerRangeForType("laserSniper") || LASER_SNIPER_RANGE;
+
+    const primaryAimPoint = target.aimPoint ? target.aimPoint.clone() : target.position.clone();
+    tempVecI.copy(primaryAimPoint).sub(tempVecB);
+    if (tempVecI.lengthSq() <= TOWER_CONFIG.segmentEpsilon) {
+      return;
+    }
+    const beamDirection = tempVecI.normalize().clone();
+    const hitCandidates = [];
+    for (const enemyMesh of getDamageableEnemyMeshes(enemySystem)) {
+      getEnemyCollisionCenter(enemyMesh, tempVecD);
+      tempVecE.copy(tempVecD).sub(tempVecB);
+      const along = tempVecE.dot(beamDirection);
+      if (along < 0 || along > effectiveRange) {
+        continue;
+      }
+      const lateralSq = tempVecE.lengthSq() - (along * along);
+      const enemyContainmentRadius = getEnemyContainmentRadiusForTowerTargeting(enemyMesh);
+      const hitRadius = enemyContainmentRadius + (LASER_SNIPER_TOWER_CONFIG.beamWidth * 0.9);
+      if (lateralSq > (hitRadius * hitRadius)) {
+        continue;
+      }
+      if (!hasLineOfSightToPoint(tower, tempVecD)) {
+        continue;
+      }
+      hitCandidates.push({
+        mesh: enemyMesh,
+        aimPoint: tempVecD.clone(),
+        along,
+      });
+    }
+
+    hitCandidates.sort((a, b) => a.along - b.along);
+    const hitTargets = hitCandidates.length > 0
+      ? hitCandidates.slice(0, maxHits)
+      : [{ mesh: target.mesh, aimPoint: primaryAimPoint }];
+
+    if (typeof enemySystem.applyDamageToEnemyMesh === "function") {
+      const laserDamage = LASER_SNIPER_DAMAGE * getTowerDamageScale(tower);
+      for (const hitTarget of hitTargets) {
+        enemySystem.applyDamageToEnemyMesh(hitTarget.mesh, laserDamage);
+      }
+    }
+
+    const beamEnd = hitTargets[hitTargets.length - 1]?.aimPoint || primaryAimPoint;
+    spawnLaserBeam(tempVecB, beamEnd);
     tower.cooldown = LASER_SNIPER_FIRE_INTERVAL * getTowerFireIntervalScale(tower);
   }
 
   function findTargetInRangeNoLos(tower, enemySystem) {
-    const rangeSq = (tower.range ?? MORTAR_RANGE) ** 2;
+    const effectiveRange = getTowerRangeForType("mortar") || (tower.range ?? MORTAR_RANGE);
+    const rangeSq = effectiveRange ** 2;
     let best = null;
     let bestDistSq = rangeSq;
     for (const enemyMesh of getDamageableEnemyMeshes(enemySystem)) {
@@ -4264,7 +4525,10 @@ export function createTowerSystem({
       velocity: tempVecB.clone(),
       life: MORTAR_PROJECTILE_LIFETIME,
       splashDamage: MORTAR_SPLASH_DAMAGE * getTowerDamageScale(tower),
-      splashRadius: MORTAR_SPLASH_RADIUS,
+      splashRadius: Math.max(
+        0.1,
+        MORTAR_SPLASH_RADIUS + getTowerModifierNumber("mortar", "mortarSplashRadiusAdd", 0)
+      ),
       sourceTower: tower,
     });
     return true;
@@ -4457,8 +4721,10 @@ export function createTowerSystem({
     const candidates = getDamageableEnemyMeshes(enemySystem);
     const chainTargets = [primary.mesh];
     const targetSet = new Set([primary.mesh.uuid]);
+    const extraChainTargets = Math.max(0, Math.floor(getTowerModifierNumber("tesla", "teslaChainCountAdd", 0)));
+    const maxChainTargets = Math.max(1, TESLA_CHAIN_COUNT + extraChainTargets);
     let lastCenter = getEnemyCollisionCenter(primary.mesh, tempVecD).clone();
-    while (chainTargets.length < TESLA_CHAIN_COUNT) {
+    while (chainTargets.length < maxChainTargets) {
       let bestCandidate = null;
       let bestDistSq = TESLA_CHAIN_RANGE * TESLA_CHAIN_RANGE;
       for (const enemyMesh of candidates) {
@@ -4497,17 +4763,27 @@ export function createTowerSystem({
   }
 
   function updateSpikesCombat(tower, deltaSeconds, enemySystem) {
+    const cycleInterval = Math.max(
+      0.05,
+      SPIKES_CYCLE_INTERVAL
+        * Math.max(0.05, getTowerModifierNumber("spikes", "spikesCycleIntervalMultiplier", 1))
+    );
+    const activeDuration = Math.max(
+      0.02,
+      SPIKES_ACTIVE_DURATION
+        * Math.max(0.05, getTowerModifierNumber("spikes", "spikesActiveDurationMultiplier", 1))
+    );
     tower.spikesCycleTimer += Math.max(0, deltaSeconds);
-    if (tower.spikesCycleTimer >= SPIKES_CYCLE_INTERVAL) {
-      tower.spikesCycleTimer -= SPIKES_CYCLE_INTERVAL;
-      tower.spikesActiveTimer = SPIKES_ACTIVE_DURATION;
+    if (tower.spikesCycleTimer >= cycleInterval) {
+      tower.spikesCycleTimer -= cycleInterval;
+      tower.spikesActiveTimer = activeDuration;
       tower.spikesDidDamageThisCycle = false;
     }
 
     tower.spikesActiveTimer = Math.max(0, tower.spikesActiveTimer - deltaSeconds);
     let extension = 0.02;
     if (tower.spikesActiveTimer > 0) {
-      const activeT = 1 - (tower.spikesActiveTimer / Math.max(0.01, SPIKES_ACTIVE_DURATION));
+      const activeT = 1 - (tower.spikesActiveTimer / Math.max(0.01, activeDuration));
       extension = Math.max(0.02, Math.sin(activeT * Math.PI));
       if (!tower.spikesDidDamageThisCycle && enemySystem) {
         tempVecA.copy(tower.mesh.position);
@@ -4584,17 +4860,69 @@ export function createTowerSystem({
     }
   }
 
+  function getPlasmaTargetCellsForTower(tower) {
+    const wallCell = tower?.plasmaWallCell;
+    const direction = tower?.plasmaDirection;
+    if (
+      !Number.isInteger(wallCell?.x)
+      || !Number.isInteger(wallCell?.z)
+      || !Number.isInteger(direction?.x)
+      || !Number.isInteger(direction?.z)
+    ) {
+      return [];
+    }
+
+    const depthCells = Math.max(
+      1,
+      1 + Math.max(0, Math.floor(getTowerModifierNumber("plasma", "plasmaDepthCellsAdd", 0)))
+    );
+    const sideCells = Math.max(
+      0,
+      Math.floor(getTowerModifierNumber("plasma", "plasmaSideCellsAdd", 0))
+    );
+    const rightX = -direction.z;
+    const rightZ = direction.x;
+    const seen = new Set();
+    const cells = [];
+
+    for (let depth = 1; depth <= depthCells; depth += 1) {
+      const baseX = wallCell.x + (direction.x * depth);
+      const baseZ = wallCell.z + (direction.z * depth);
+      for (let side = -sideCells; side <= sideCells; side += 1) {
+        const cellX = baseX + (rightX * side);
+        const cellZ = baseZ + (rightZ * side);
+        if (!Number.isInteger(cellX) || !Number.isInteger(cellZ)) {
+          continue;
+        }
+        if (typeof grid?.isCellInsideLevel === "function" && !grid.isCellInsideLevel(cellX, cellZ)) {
+          continue;
+        }
+        const key = `${cellX},${cellZ}`;
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        cells.push({ x: cellX, z: cellZ });
+      }
+    }
+
+    return cells;
+  }
+
   function updatePlasmaCombat(tower, deltaSeconds, enemySystem) {
-    const targetCell = tower.plasmaTargetCell;
     const wallCell = tower.plasmaWallCell;
-    if (!Number.isInteger(targetCell?.x) || !Number.isInteger(targetCell?.z) || !Number.isInteger(wallCell?.y)) {
+    const targetCells = getPlasmaTargetCellsForTower(tower);
+    if (targetCells.length === 0 || !Number.isInteger(wallCell?.y)) {
       updatePlasmaVisualState(tower, deltaSeconds, 0.82);
       return;
     }
 
     const targetBaseY = getCellBaseY(wallCell.y);
-    const targetCenter = getCellCenter(targetCell.x, targetCell.z, targetBaseY + (gridCellSize * 0.5));
-    targetCenter.y = targetBaseY + (gridCellSize * 0.5);
+    const targetCenters = targetCells.map((targetCell) => {
+      const center = getCellCenter(targetCell.x, targetCell.z, targetBaseY + (gridCellSize * 0.5));
+      center.y = targetBaseY + (gridCellSize * 0.5);
+      return center;
+    });
 
     let hitAny = false;
     if (enemySystem) {
@@ -4605,16 +4933,29 @@ export function createTowerSystem({
         * getTowerDamageScale(tower)
         / Math.max(0.05, getTowerFireIntervalScale(tower));
       const damageable = getDamageableEnemyMeshes(enemySystem);
+      const damagedEnemyUuids = new Set();
       for (const enemyMesh of damageable) {
+        if (!enemyMesh || damagedEnemyUuids.has(enemyMesh.uuid)) {
+          continue;
+        }
         getEnemyCollisionCenter(enemyMesh, tempVecA);
-        if (
-          Math.abs(tempVecA.x - targetCenter.x) <= halfExtent
-          && Math.abs(tempVecA.y - targetCenter.y) <= halfExtent
-          && Math.abs(tempVecA.z - targetCenter.z) <= halfExtent
-        ) {
+        let insideAnyTargetCell = false;
+        for (const targetCenter of targetCenters) {
+          if (
+            Math.abs(tempVecA.x - targetCenter.x) <= halfExtent
+            && Math.abs(tempVecA.y - targetCenter.y) <= halfExtent
+            && Math.abs(tempVecA.z - targetCenter.z) <= halfExtent
+          ) {
+            insideAnyTargetCell = true;
+            break;
+          }
+        }
+        if (insideAnyTargetCell) {
           if (typeof enemySystem.applyDamageToEnemyMesh === "function" && frameDamage > 0) {
-            enemySystem.applyDamageToEnemyMesh(enemyMesh, frameDamage);
-            hitAny = true;
+            if (enemySystem.applyDamageToEnemyMesh(enemyMesh, frameDamage)) {
+              damagedEnemyUuids.add(enemyMesh.uuid);
+              hitAny = true;
+            }
           }
         }
       }
@@ -4899,6 +5240,7 @@ export function createTowerSystem({
     unlockTowerType,
     isTowerTypeUnlocked,
     getUnlockedTowerTypes,
+    applyTechGrants,
     upgradeTowerDamage,
     upgradeTowerFireRate,
     clearAllTowers,

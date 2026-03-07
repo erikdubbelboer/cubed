@@ -21,6 +21,7 @@ export function createPlayer({
   getMovementObstacles,
   movementBounds = null,
   getSurfaceYAtWorld = null,
+  onPickupRangeTechGrant = null,
 }) {
   const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
   const controls = new PointerLockControls(camera, domElement);
@@ -429,6 +430,10 @@ export function createPlayer({
 
   let playerDamageMultiplier = 1;
   let playerFireRateMultiplier = 1;
+  let playerMovementSpeedMultiplier = 1;
+  const weaponDamageMultiplierByType = new Map();
+  const weaponFireIntervalMultiplierByType = new Map();
+  const weaponSplashRadiusMultiplierByType = new Map();
 
   const hasMovementBounds = !!(
     movementBounds
@@ -496,13 +501,37 @@ export function createPlayer({
     return getWeaponConfig(type) ? type : defaultWeaponType;
   }
 
+  function getWeaponDamageMultiplier(type = selectedWeaponType) {
+    const localMultiplier = Number(weaponDamageMultiplierByType.get(type));
+    const safeLocalMultiplier = Number.isFinite(localMultiplier) && localMultiplier > 0
+      ? localMultiplier
+      : 1;
+    return Math.max(0, playerDamageMultiplier) * safeLocalMultiplier;
+  }
+
+  function getWeaponFireIntervalMultiplier(type = selectedWeaponType) {
+    const localMultiplier = Number(weaponFireIntervalMultiplierByType.get(type));
+    const safeLocalMultiplier = Number.isFinite(localMultiplier) && localMultiplier > 0
+      ? localMultiplier
+      : 1;
+    return Math.max(0.01, playerFireRateMultiplier * safeLocalMultiplier);
+  }
+
+  function getWeaponSplashRadiusMultiplier(type = selectedWeaponType) {
+    const localMultiplier = Number(weaponSplashRadiusMultiplierByType.get(type));
+    if (!Number.isFinite(localMultiplier) || localMultiplier <= 0) {
+      return 1;
+    }
+    return localMultiplier;
+  }
+
   function getWeaponFireInterval(type = selectedWeaponType) {
     const config = getWeaponConfig(type);
     const baseInterval = Number(config?.fireInterval);
     const safeInterval = Number.isFinite(baseInterval) && baseInterval > 0
       ? baseInterval
       : 0.1;
-    return Math.max(0.01, safeInterval * playerFireRateMultiplier);
+    return Math.max(0.01, safeInterval * getWeaponFireIntervalMultiplier(type));
   }
 
   function getWeaponCooldownProgress() {
@@ -539,6 +568,106 @@ export function createPlayer({
       return;
     }
     jetpackFuelEfficiencyMultiplier *= efficiencyMultiplier;
+  }
+
+  function applyTechGrants(grants = {}) {
+    const playerGrants = grants?.player && typeof grants.player === "object"
+      ? grants.player
+      : grants;
+    if (!playerGrants || typeof playerGrants !== "object") {
+      return false;
+    }
+
+    let appliedAny = false;
+
+    const damageAdd = Number(playerGrants.damageAdd);
+    if (Number.isFinite(damageAdd) && damageAdd !== 0) {
+      playerDamageMultiplier += damageAdd;
+      appliedAny = true;
+    }
+
+    const fireIntervalMultiplier = Number(playerGrants.fireIntervalMultiplier);
+    if (Number.isFinite(fireIntervalMultiplier) && fireIntervalMultiplier > 0) {
+      playerFireRateMultiplier *= fireIntervalMultiplier;
+      weaponCooldownRemaining = Math.max(0, weaponCooldownRemaining * fireIntervalMultiplier);
+      appliedAny = true;
+    }
+
+    const moveSpeedMultiplier = Number(playerGrants.moveSpeedMultiplier);
+    if (Number.isFinite(moveSpeedMultiplier) && moveSpeedMultiplier > 0) {
+      playerMovementSpeedMultiplier *= moveSpeedMultiplier;
+      appliedAny = true;
+    }
+
+    const jetpackEfficiencyMultiplier = Number(playerGrants.jetpackEfficiencyMultiplier);
+    if (Number.isFinite(jetpackEfficiencyMultiplier) && jetpackEfficiencyMultiplier > 0) {
+      jetpackFuelEfficiencyMultiplier *= jetpackEfficiencyMultiplier;
+      appliedAny = true;
+    }
+
+    const weaponDamageMultipliers = playerGrants.weaponDamageMultipliers;
+    if (weaponDamageMultipliers && typeof weaponDamageMultipliers === "object") {
+      for (const [weaponType, rawMultiplier] of Object.entries(weaponDamageMultipliers)) {
+        if (!getWeaponConfig(weaponType)) {
+          continue;
+        }
+        const multiplier = Number(rawMultiplier);
+        if (!Number.isFinite(multiplier) || multiplier <= 0) {
+          continue;
+        }
+        const previous = Number(weaponDamageMultiplierByType.get(weaponType));
+        const safePrevious = Number.isFinite(previous) && previous > 0 ? previous : 1;
+        weaponDamageMultiplierByType.set(weaponType, safePrevious * multiplier);
+        appliedAny = true;
+      }
+    }
+
+    const weaponFireIntervalMultipliers = playerGrants.weaponFireIntervalMultipliers;
+    if (weaponFireIntervalMultipliers && typeof weaponFireIntervalMultipliers === "object") {
+      for (const [weaponType, rawMultiplier] of Object.entries(weaponFireIntervalMultipliers)) {
+        if (!getWeaponConfig(weaponType)) {
+          continue;
+        }
+        const multiplier = Number(rawMultiplier);
+        if (!Number.isFinite(multiplier) || multiplier <= 0) {
+          continue;
+        }
+        const previous = Number(weaponFireIntervalMultiplierByType.get(weaponType));
+        const safePrevious = Number.isFinite(previous) && previous > 0 ? previous : 1;
+        weaponFireIntervalMultiplierByType.set(weaponType, safePrevious * multiplier);
+        weaponCooldownRemaining = Math.max(0, weaponCooldownRemaining * multiplier);
+        appliedAny = true;
+      }
+    }
+
+    const weaponSplashRadiusMultipliers = playerGrants.weaponSplashRadiusMultipliers;
+    if (weaponSplashRadiusMultipliers && typeof weaponSplashRadiusMultipliers === "object") {
+      for (const [weaponType, rawMultiplier] of Object.entries(weaponSplashRadiusMultipliers)) {
+        if (!getWeaponConfig(weaponType)) {
+          continue;
+        }
+        const multiplier = Number(rawMultiplier);
+        if (!Number.isFinite(multiplier) || multiplier <= 0) {
+          continue;
+        }
+        const previous = Number(weaponSplashRadiusMultiplierByType.get(weaponType));
+        const safePrevious = Number.isFinite(previous) && previous > 0 ? previous : 1;
+        weaponSplashRadiusMultiplierByType.set(weaponType, safePrevious * multiplier);
+        appliedAny = true;
+      }
+    }
+
+    const pickupRangeAdd = Number(playerGrants.pickupRangeAdd);
+    if (
+      Number.isFinite(pickupRangeAdd)
+      && pickupRangeAdd !== 0
+      && typeof onPickupRangeTechGrant === "function"
+    ) {
+      onPickupRangeTechGrant(pickupRangeAdd);
+      appliedAny = true;
+    }
+
+    return appliedAny;
   }
 
   function setMovementKey(code, isDown) {
@@ -881,10 +1010,10 @@ export function createPlayer({
       mesh: projectileMesh,
       velocity: projectileVelocity.clone(),
       life: Math.max(0.01, Number(config.projectileLifetime) || 0.5),
-      damage: Math.max(0, Number(config.damage) || 0) * playerDamageMultiplier,
+      damage: Math.max(0, Number(config.damage) || 0) * getWeaponDamageMultiplier(type),
       hitRadius: Math.max(0, Number(config.projectileHitRadius) || 0.1),
       gravity: Math.max(0, Number(config.projectileGravity) || 0),
-      splashRadius: Math.max(0, Number(config.splashRadius) || 0),
+      splashRadius: Math.max(0, Number(config.splashRadius) || 0) * getWeaponSplashRadiusMultiplier(type),
       explosionDuration: Math.max(0.01, Number(config.explosionDuration) || 0.22),
     });
 
@@ -1188,7 +1317,7 @@ export function createPlayer({
     ) {
       enemySystem.applyDamageToEnemyMesh(
         hitEnemyMesh,
-        Math.max(0, Number(config.damage) || 0) * playerDamageMultiplier
+        Math.max(0, Number(config.damage) || 0) * getWeaponDamageMultiplier("sniper")
       );
     }
 
@@ -1575,7 +1704,9 @@ export function createPlayer({
       const forwardAxis = (controls.isLocked ? keyboardForward : 0) + virtualState.forward;
       const strafeAxis = (controls.isLocked ? keyboardStrafe : 0) + virtualState.strafe;
       const length = Math.hypot(forwardAxis, strafeAxis);
-      const activeMoveSpeed = moveSpeed * (controls.isLocked && moveState.sprint ? sprintMultiplier : 1);
+      const activeMoveSpeed = moveSpeed
+        * playerMovementSpeedMultiplier
+        * (controls.isLocked && moveState.sprint ? sprintMultiplier : 1);
 
       if (length > 0) {
         controls.moveForward((forwardAxis / length) * activeMoveSpeed * deltaSeconds);
@@ -1915,6 +2046,10 @@ export function createPlayer({
 
     playerDamageMultiplier = 1;
     playerFireRateMultiplier = 1;
+    playerMovementSpeedMultiplier = 1;
+    weaponDamageMultiplierByType.clear();
+    weaponFireIntervalMultiplierByType.clear();
+    weaponSplashRadiusMultiplierByType.clear();
     selectedWeaponType = defaultWeaponType;
     primaryHeld = false;
     primaryReleasedSinceLastUpdate = false;
@@ -1947,6 +2082,7 @@ export function createPlayer({
     getPosition,
     getJetpackFuelRatio,
     getJetpackFuelPercent,
+    applyTechGrants,
     upgradePlayerDamage,
     upgradePlayerFireRate,
     upgradeJetpackFuelEfficiency,

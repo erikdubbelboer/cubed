@@ -33,6 +33,18 @@ const ROUTE_VARIANT_BUILD_BUDGET_MS = Math.max(0, Number(ENEMY_CONFIG.pathVarian
 const RAMP_ROLE_LOW = "low";
 const RAMP_ROLE_HIGH = "high";
 const ENEMY_SURFACE_HOVER_HEIGHT = Math.max(0, Number(ENEMY_CONFIG.hoverHeight) || 0);
+const ENEMY_DEATH_EXPLOSION_BASE_RADIUS = Math.max(
+  0,
+  Number(ENEMY_CONFIG.deathExplosionBaseRadius) || 1
+);
+const ENEMY_DEATH_EXPLOSION_BASE_DAMAGE_SCALE = Math.max(
+  0,
+  Number(ENEMY_CONFIG.deathExplosionBaseDamageScale) || 0
+);
+const ENEMY_DEATH_EXPLOSION_VISUAL_DURATION = Math.max(
+  0.05,
+  Number(ENEMY_CONFIG.deathExplosionVisualDuration) || 0.2
+);
 
 function getDirectionOnPlane(from, to) {
   const direction = to.clone().sub(from);
@@ -150,6 +162,9 @@ export function createEnemySystem(scene, grid, options = {}) {
   let spawnEventCursor = 0;
   let waveElapsedTime = 0;
   let enemySpeedMultiplier = 1;
+  let deathExplosionChance = 0;
+  let deathExplosionRadiusAdd = 0;
+  let deathExplosionDamageScaleAdd = 0;
   let enemySpawnSerial = 0;
   let spawnCellCursor = 0;
 
@@ -200,6 +215,16 @@ export function createEnemySystem(scene, grid, options = {}) {
   const tempFrontRampContact = new THREE.Vector3();
   const tempBackRampContact = new THREE.Vector3();
   const tempDefeatDropPosition = new THREE.Vector3();
+  const deathExplosionEffects = [];
+  const deathExplosionGeometry = new THREE.SphereGeometry(1, 14, 10);
+  const deathExplosionMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffb58a,
+    transparent: true,
+    opacity: 0.72,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  deathExplosionMaterial.toneMapped = false;
   const hasPerformanceNow = typeof globalThis.performance?.now === "function";
 
   function getNowMs() {
@@ -1383,6 +1408,78 @@ export function createEnemySystem(scene, grid, options = {}) {
     enemySpeedMultiplier *= speedMultiplier;
   }
 
+  function applyTechGrants(grants = {}) {
+    const enemyGrants = grants?.enemy && typeof grants.enemy === "object"
+      ? grants.enemy
+      : grants;
+    if (!enemyGrants || typeof enemyGrants !== "object") {
+      return false;
+    }
+
+    let appliedAny = false;
+    const deathExplosionChanceAdd = Number(enemyGrants.deathExplosionChanceAdd);
+    if (Number.isFinite(deathExplosionChanceAdd) && deathExplosionChanceAdd !== 0) {
+      deathExplosionChance = THREE.MathUtils.clamp(
+        deathExplosionChance + deathExplosionChanceAdd,
+        0,
+        1
+      );
+      appliedAny = true;
+    }
+
+    const deathExplosionRadiusAddGrant = Number(enemyGrants.deathExplosionRadiusAdd);
+    if (Number.isFinite(deathExplosionRadiusAddGrant) && deathExplosionRadiusAddGrant !== 0) {
+      deathExplosionRadiusAdd += deathExplosionRadiusAddGrant;
+      appliedAny = true;
+    }
+
+    const deathExplosionDamageScaleAddGrant = Number(enemyGrants.deathExplosionDamageScaleAdd);
+    if (Number.isFinite(deathExplosionDamageScaleAddGrant) && deathExplosionDamageScaleAddGrant !== 0) {
+      deathExplosionDamageScaleAdd += deathExplosionDamageScaleAddGrant;
+      appliedAny = true;
+    }
+
+    return appliedAny;
+  }
+
+  function spawnDeathExplosionEffect(position, radius) {
+    const mesh = new THREE.Mesh(deathExplosionGeometry, deathExplosionMaterial.clone());
+    mesh.material.toneMapped = false;
+    mesh.position.copy(position);
+    mesh.scale.setScalar(0.01);
+    scene.add(mesh);
+    deathExplosionEffects.push({
+      mesh,
+      life: ENEMY_DEATH_EXPLOSION_VISUAL_DURATION,
+      maxLife: ENEMY_DEATH_EXPLOSION_VISUAL_DURATION,
+      radius: Math.max(0.1, radius),
+    });
+  }
+
+  function triggerEnemyDeathExplosion(enemy) {
+    if (!enemy || enemy.deathExplosionProcessed) {
+      return;
+    }
+    enemy.deathExplosionProcessed = true;
+
+    if (deathExplosionChance <= 0 || Math.random() > deathExplosionChance) {
+      return;
+    }
+
+    const explosionRadius = Math.max(0.1, ENEMY_DEATH_EXPLOSION_BASE_RADIUS + deathExplosionRadiusAdd);
+    const damageScale = Math.max(0, ENEMY_DEATH_EXPLOSION_BASE_DAMAGE_SCALE + deathExplosionDamageScaleAdd);
+    if (explosionRadius <= 0 || damageScale <= 0) {
+      return;
+    }
+
+    const explosionCenter = getEnemyCollisionCenter(enemy, tempDefeatDropPosition).clone();
+    const explosionDamage = Math.max(0, Number(enemy.maxHealth) || 0) * damageScale;
+    if (explosionDamage > 0) {
+      applyDamageAtPoint(explosionCenter, explosionRadius, explosionDamage);
+    }
+    spawnDeathExplosionEffect(explosionCenter, explosionRadius);
+  }
+
   function buildSpawnEventsFromSegments(segments) {
     const events = [];
     let sequence = 0;
@@ -1600,6 +1697,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       routeCells: route.cells.map((cell) => cloneCell(cell)),
       travelWaypoints,
       spawnIndex,
+      deathExplosionProcessed: false,
     };
 
     setEnemyWorldPosition(enemy, enemy.pathCenter, enemy.pathForward);
@@ -1786,6 +1884,7 @@ export function createEnemySystem(scene, grid, options = {}) {
         }
       }
       startEnemyDissolve(enemy);
+      triggerEnemyDeathExplosion(enemy);
     }
   }
 
@@ -1925,6 +2024,29 @@ export function createEnemySystem(scene, grid, options = {}) {
     updateEnemyTransformFromRoute(enemy);
   }
 
+  function updateDeathExplosionEffects(deltaSeconds) {
+    for (let i = deathExplosionEffects.length - 1; i >= 0; i -= 1) {
+      const effect = deathExplosionEffects[i];
+      effect.life -= deltaSeconds;
+      if (effect.life <= 0) {
+        if (effect.mesh?.parent) {
+          effect.mesh.parent.remove(effect.mesh);
+        }
+        effect.mesh?.material?.dispose?.();
+        deathExplosionEffects.splice(i, 1);
+        continue;
+      }
+
+      const t = Math.max(0, effect.life / Math.max(0.01, effect.maxLife));
+      const growthT = 1 - t;
+      const scale = Math.max(0.01, effect.radius * (0.2 + (growthT * 0.8)));
+      effect.mesh.scale.setScalar(scale);
+      if (effect.mesh?.material) {
+        effect.mesh.material.opacity = 0.72 * t;
+      }
+    }
+  }
+
   function update(deltaSeconds, camera) {
     runVariantBuildStep();
 
@@ -1990,6 +2112,8 @@ export function createEnemySystem(scene, grid, options = {}) {
         enemy.healthBarRoot.lookAt(camera.position);
       }
     }
+
+    updateDeathExplosionEffects(deltaSeconds);
   }
 
   function applyDamageAtPoint(point, hitRadius, damage) {
@@ -2170,6 +2294,14 @@ export function createEnemySystem(scene, grid, options = {}) {
       disposeEnemyVisual(enemy);
     }
     activeEnemies.length = 0;
+    for (let i = deathExplosionEffects.length - 1; i >= 0; i -= 1) {
+      const effect = deathExplosionEffects[i];
+      if (effect?.mesh?.parent) {
+        effect.mesh.parent.remove(effect.mesh);
+      }
+      effect?.mesh?.material?.dispose?.();
+    }
+    deathExplosionEffects.length = 0;
     scheduledSpawns = [];
     spawnEventCursor = 0;
     waveElapsedTime = 0;
@@ -2178,6 +2310,8 @@ export function createEnemySystem(scene, grid, options = {}) {
 
   function dispose() {
     clearAll();
+    deathExplosionGeometry.dispose();
+    deathExplosionMaterial.dispose();
   }
 
   function spawnEnemyByIndex(type, spawnIndex = 0) {
@@ -2227,6 +2361,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     isPointNearEnemyMesh,
     startWave,
     isWaveClear,
+    applyTechGrants,
     upgradeSlowEnemies,
     canBlockCells,
     canBlockCell,

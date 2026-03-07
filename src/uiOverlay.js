@@ -790,7 +790,7 @@ function drawIconDefault(ctx, x, y, size) {
   drawTowerBaseIcon(ctx, x, y, size);
 }
 
-function drawIconById(ctx, iconId, x, y, size) {
+export function drawIconById(ctx, iconId, x, y, size) {
   switch (iconId) {
     case "tower_laser_add":
       drawIconTowerLaser(ctx, x, y, size);
@@ -977,9 +977,12 @@ export function createUiOverlay({
 
   const state = {
     menuOpen: false,
+    menuMode: "tech_tree",
     menuOptions: [],
-    menuTitle: "Upgrade Ready",
-    menuSubtitle: "Select an upgrade",
+    menuTitle: "Research Tree",
+    menuSubtitle: "",
+    techTreeView: null,
+    techTreeTooltip: null,
     hoveredMenuIndex: -1,
     menuCursorX: viewportWidth * 0.5,
     menuCursorY: viewportHeight * 0.5,
@@ -1013,6 +1016,8 @@ export function createUiOverlay({
   };
 
   let menuOptionRects = [];
+  let techTreeNodeRects = [];
+  let techTreePanelRect = null;
   let towerSlotRects = [];
   let hudButtonRects = [];
   let touchActionZones = [];
@@ -1057,6 +1062,9 @@ export function createUiOverlay({
     if (typeof partialState.menuOpen === "boolean") {
       state.menuOpen = partialState.menuOpen;
     }
+    if (typeof partialState.menuMode === "string") {
+      state.menuMode = partialState.menuMode;
+    }
     if (Array.isArray(partialState.menuOptions)) {
       state.menuOptions = partialState.menuOptions.slice(0, 3);
     }
@@ -1065,6 +1073,16 @@ export function createUiOverlay({
     }
     if (typeof partialState.menuSubtitle === "string") {
       state.menuSubtitle = partialState.menuSubtitle;
+    }
+    if (Object.prototype.hasOwnProperty.call(partialState, "techTreeView")) {
+      state.techTreeView = partialState.techTreeView && typeof partialState.techTreeView === "object"
+        ? partialState.techTreeView
+        : null;
+    }
+    if (Object.prototype.hasOwnProperty.call(partialState, "techTreeTooltip")) {
+      state.techTreeTooltip = partialState.techTreeTooltip && typeof partialState.techTreeTooltip === "object"
+        ? partialState.techTreeTooltip
+        : null;
     }
     if (typeof partialState.hoveredMenuIndex === "number") {
       state.hoveredMenuIndex = partialState.hoveredMenuIndex;
@@ -2141,7 +2159,7 @@ export function createUiOverlay({
     drawCtx.textBaseline = "alphabetic";
   }
 
-  function drawUpgradeMenu() {
+  function drawCardMenu() {
     menuOptionRects = [];
     if (!state.menuOpen) {
       return;
@@ -2306,6 +2324,358 @@ export function createUiOverlay({
     drawCtx.textBaseline = "alphabetic";
   }
 
+  function drawTechTreeMenu() {
+    menuOptionRects = [];
+    techTreeNodeRects = [];
+    techTreePanelRect = null;
+    if (!state.menuOpen) {
+      return;
+    }
+
+    drawCtx.fillStyle = "rgba(4, 8, 20, 0.86)";
+    drawCtx.fillRect(0, 0, viewportWidth, viewportHeight);
+
+    const isPortrait = state.showTouchControls && state.touchPortrait;
+    const panelWidth = isPortrait
+      ? clamp(viewportWidth * 0.96, 300, 560)
+      : clamp(viewportWidth * 0.9, 540, 1280);
+    const panelHeight = isPortrait
+      ? clamp(viewportHeight * 0.9, 420, 980)
+      : clamp(viewportHeight * 0.84, 420, 980);
+    const panelX = (viewportWidth - panelWidth) * 0.5;
+    const panelY = isPortrait
+      ? clamp(viewportHeight * 0.04, 8, Math.max(8, viewportHeight - panelHeight - 8))
+      : (viewportHeight - panelHeight) * 0.5;
+    const headerHeight = isPortrait
+      ? clamp(panelHeight * 0.13, 62, 104)
+      : clamp(panelHeight * 0.12, 58, 96);
+
+    techTreePanelRect = {
+      x: panelX,
+      y: panelY,
+      width: panelWidth,
+      height: panelHeight,
+    };
+
+    drawPanel(
+      drawCtx,
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+      clamp(panelWidth * 0.03, 10, 18),
+      "rgba(12, 20, 33, 0.97)",
+      "rgba(108, 168, 236, 0.9)",
+      1.6
+    );
+
+    const viewX = panelX + 10;
+    const viewY = panelY + headerHeight;
+    const viewWidth = panelWidth - 20;
+    const viewHeight = panelHeight - headerHeight - 10;
+
+    drawCtx.fillStyle = "rgba(220, 238, 255, 0.98)";
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "middle";
+    drawCtx.font = `700 ${clamp(panelHeight * 0.036, 16, 28)}px ${FONT_STACK}`;
+    drawCtx.fillText(state.menuTitle || "Research Tree", panelX + 16, panelY + headerHeight * 0.36);
+
+    drawCtx.fillStyle = "rgba(184, 214, 244, 0.95)";
+    drawCtx.font = `600 ${clamp(panelHeight * 0.022, 11, 18)}px ${FONT_STACK}`;
+    drawCtx.fillText(state.menuSubtitle || "", panelX + 16, panelY + headerHeight * 0.72);
+
+    const points = Math.max(0, Math.floor(Number(state.techTreeView?.points) || 0));
+    const pointsText = `${points} RP`;
+    drawCtx.font = `700 ${clamp(panelHeight * 0.03, 13, 22)}px ${FONT_STACK}`;
+    const pointsWidth = Math.max(56, drawCtx.measureText(pointsText).width + 22);
+    const pointsHeight = clamp(headerHeight * 0.44, 24, 38);
+    const pointsX = panelX + panelWidth - pointsWidth - 16;
+    const pointsY = panelY + headerHeight * 0.24;
+    drawPanel(
+      drawCtx,
+      pointsX,
+      pointsY,
+      pointsWidth,
+      pointsHeight,
+      clamp(pointsHeight * 0.3, 6, 10),
+      "rgba(17, 43, 29, 0.88)",
+      "rgba(124, 232, 168, 0.9)",
+      1.2
+    );
+    drawCtx.fillStyle = "rgba(168, 255, 198, 0.98)";
+    drawCtx.textAlign = "center";
+    drawCtx.fillText(pointsText, pointsX + pointsWidth * 0.5, pointsY + pointsHeight * 0.53);
+
+    const viewState = state.techTreeView && typeof state.techTreeView === "object"
+      ? state.techTreeView
+      : {};
+    const nodes = Array.isArray(viewState.nodes) ? viewState.nodes : [];
+    const edges = Array.isArray(viewState.edges) ? viewState.edges : [];
+    const panX = Number(viewState.panX) || 0;
+    const panY = Number(viewState.panY) || 0;
+    const worldToScreenScale = Number.isFinite(Number(viewState.worldToScreenScale))
+      ? Math.max(0.05, Number(viewState.worldToScreenScale))
+      : 0.56;
+    const nodeDisplaySize = Number.isFinite(Number(viewState.nodeDisplaySize))
+      ? Math.max(24, Number(viewState.nodeDisplaySize))
+      : 64;
+    const nodeWidth = nodeDisplaySize;
+    const nodeHeight = nodeDisplaySize;
+
+    const nodeCenters = new Map();
+    for (const node of nodes) {
+      const centerX = viewX + (viewWidth * 0.5) + panX + ((Number(node.x) || 0) * worldToScreenScale);
+      const centerY = viewY + (viewHeight * 0.5) + panY + ((Number(node.y) || 0) * worldToScreenScale);
+      nodeCenters.set(node.id, { x: centerX, y: centerY, node });
+    }
+
+    drawCtx.save();
+    drawCtx.beginPath();
+    drawCtx.rect(viewX, viewY, viewWidth, viewHeight);
+    drawCtx.clip();
+
+    for (const edge of edges) {
+      const from = nodeCenters.get(edge?.from);
+      const to = nodeCenters.get(edge?.to);
+      if (!from || !to) {
+        continue;
+      }
+      const pathPoints = [from];
+      if (Array.isArray(edge?.joints)) {
+        for (const joint of edge.joints) {
+          const worldX = Number(joint?.x);
+          const worldY = Number(joint?.y);
+          if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) {
+            continue;
+          }
+          pathPoints.push({
+            x: viewX + (viewWidth * 0.5) + panX + (worldX * worldToScreenScale),
+            y: viewY + (viewHeight * 0.5) + panY + (worldY * worldToScreenScale),
+          });
+        }
+      }
+      pathPoints.push(to);
+      const childNode = to.node;
+      const researched = !!childNode?.researched;
+      const unlockable = !!childNode?.unlockable;
+      drawCtx.strokeStyle = researched
+        ? "rgba(132, 255, 185, 0.92)"
+        : (unlockable ? "rgba(141, 214, 255, 0.9)" : "rgba(112, 132, 154, 0.52)");
+      drawCtx.lineWidth = researched ? 2.3 : 1.4;
+      drawCtx.beginPath();
+      drawCtx.moveTo(pathPoints[0].x, pathPoints[0].y);
+      for (let i = 1; i < pathPoints.length; i += 1) {
+        drawCtx.lineTo(pathPoints[i].x, pathPoints[i].y);
+      }
+      drawCtx.stroke();
+
+      if (pathPoints.length > 2) {
+        const jointRadius = researched ? 3.5 : 3;
+        const jointFill = researched
+          ? "rgba(170, 255, 204, 0.95)"
+          : (unlockable ? "rgba(183, 231, 255, 0.95)" : "rgba(142, 160, 180, 0.72)");
+        const jointStroke = researched
+          ? "rgba(68, 145, 102, 0.95)"
+          : (unlockable ? "rgba(91, 142, 176, 0.92)" : "rgba(83, 98, 116, 0.86)");
+        drawCtx.fillStyle = jointFill;
+        drawCtx.strokeStyle = jointStroke;
+        drawCtx.lineWidth = 1.15;
+        for (let i = 1; i < pathPoints.length - 1; i += 1) {
+          drawCtx.beginPath();
+          drawCtx.arc(pathPoints[i].x, pathPoints[i].y, jointRadius, 0, Math.PI * 2);
+          drawCtx.fill();
+          drawCtx.stroke();
+        }
+      }
+    }
+
+    for (const node of nodes) {
+      const center = nodeCenters.get(node.id);
+      if (!center) {
+        continue;
+      }
+      const x = center.x - (nodeWidth * 0.5);
+      const y = center.y - (nodeHeight * 0.5);
+      const researched = !!node.researched;
+      const unlockable = !!node.unlockable;
+      const revealed = researched || unlockable;
+      const fill = researched
+        ? "rgba(19, 64, 45, 0.96)"
+        : (unlockable ? "rgba(31, 60, 95, 0.95)" : "rgba(36, 44, 56, 0.9)");
+      const stroke = researched
+        ? "rgba(133, 255, 186, 0.95)"
+        : (unlockable ? "rgba(150, 220, 255, 0.92)" : "rgba(124, 139, 160, 0.5)");
+      drawPanel(
+        drawCtx,
+        x,
+        y,
+        nodeWidth,
+        nodeHeight,
+        clamp(nodeHeight * 0.16, 7, 12),
+        fill,
+        stroke,
+        researched || unlockable ? 1.5 : 1.1
+      );
+
+      if (!revealed) {
+        drawCtx.fillStyle = "rgba(205, 215, 230, 0.9)";
+        drawCtx.textAlign = "center";
+        drawCtx.textBaseline = "middle";
+        drawCtx.font = `700 ${clamp(nodeHeight * 0.46, 22, 34)}px ${FONT_STACK}`;
+        drawCtx.fillText("?", center.x, center.y + 1);
+      } else {
+        const iconSize = Math.max(14, nodeHeight - 12);
+        const iconX = x + ((nodeWidth - iconSize) * 0.5);
+        const iconY = y + ((nodeHeight - iconSize) * 0.5);
+        drawPanel(
+          drawCtx,
+          iconX,
+          iconY,
+          iconSize,
+          iconSize,
+          clamp(iconSize * 0.2, 6, 9),
+          "rgba(7, 16, 27, 0.7)",
+          "rgba(122, 182, 236, 0.8)",
+          1
+        );
+        drawIconById(drawCtx, node.iconId, iconX + 2, iconY + 2, iconSize - 4);
+      }
+
+      techTreeNodeRects.push({
+        id: node.id,
+        unlockable,
+        researched,
+        revealed,
+        label: typeof node.label === "string" ? node.label : "",
+        description: typeof node.description === "string" ? node.description : "",
+        cost: Math.max(0, Math.floor(Number(node.cost) || 0)),
+        x,
+        y,
+        width: nodeWidth,
+        height: nodeHeight,
+      });
+    }
+
+    drawCtx.restore();
+
+    const tooltip = state.techTreeTooltip;
+    if (tooltip && typeof tooltip === "object" && typeof tooltip.title === "string") {
+      const anchorX = clamp(Number(tooltip.x), viewX + 8, viewX + viewWidth - 8);
+      const anchorY = clamp(Number(tooltip.y), viewY + 8, viewY + viewHeight - 8);
+      const title = tooltip.title;
+      const description = typeof tooltip.description === "string" ? tooltip.description : "";
+      const status = typeof tooltip.status === "string" ? tooltip.status : "";
+
+      const tooltipPaddingX = 10;
+      const tooltipPaddingY = 9;
+      const lineGap = 4;
+      const titleFontSize = clamp(nodeHeight * 0.21, 12, 15);
+      const bodyFontSize = clamp(nodeHeight * 0.18, 10, 13);
+      const maxTooltipWidth = clamp(viewWidth * 0.55, 170, 320);
+
+      drawCtx.textAlign = "left";
+      drawCtx.textBaseline = "top";
+      drawCtx.font = `700 ${titleFontSize}px ${FONT_STACK}`;
+      const titleWidth = drawCtx.measureText(title).width;
+      drawCtx.font = `500 ${bodyFontSize}px ${FONT_STACK}`;
+      const descriptionWidth = description.length > 0 ? drawCtx.measureText(description).width : 0;
+      const statusWidth = status.length > 0 ? drawCtx.measureText(status).width : 0;
+
+      const contentWidth = Math.max(titleWidth, descriptionWidth, statusWidth);
+      const tooltipWidth = Math.min(maxTooltipWidth, Math.max(140, contentWidth + (tooltipPaddingX * 2)));
+      const tooltipHeight = Math.max(
+        56,
+        (tooltipPaddingY * 2)
+          + titleFontSize
+          + (description.length > 0 ? (lineGap + bodyFontSize) : 0)
+          + (status.length > 0 ? (lineGap + bodyFontSize) : 0)
+      );
+
+      const prefersLeft = anchorX > (panelX + panelWidth * 0.58);
+      let tooltipX = prefersLeft ? (anchorX - tooltipWidth - 14) : (anchorX + 14);
+      let tooltipY = anchorY - (tooltipHeight * 0.5);
+      tooltipX = clamp(tooltipX, viewX + 4, viewX + viewWidth - tooltipWidth - 4);
+      tooltipY = clamp(tooltipY, viewY + 4, viewY + viewHeight - tooltipHeight - 4);
+
+      drawPanel(
+        drawCtx,
+        tooltipX,
+        tooltipY,
+        tooltipWidth,
+        tooltipHeight,
+        8,
+        "rgba(9, 15, 26, 0.97)",
+        "rgba(139, 195, 244, 0.8)",
+        1.3
+      );
+
+      let lineY = tooltipY + tooltipPaddingY;
+      drawCtx.fillStyle = "rgba(238, 247, 255, 0.98)";
+      drawCtx.font = `700 ${titleFontSize}px ${FONT_STACK}`;
+      drawCtx.fillText(title, tooltipX + tooltipPaddingX, lineY);
+      lineY += titleFontSize;
+
+      if (description.length > 0) {
+        lineY += lineGap;
+        drawCtx.fillStyle = "rgba(182, 209, 233, 0.95)";
+        drawCtx.font = `500 ${bodyFontSize}px ${FONT_STACK}`;
+        const fittedDescription = fitLabelText(
+          drawCtx,
+          description,
+          tooltipWidth - (tooltipPaddingX * 2),
+          bodyFontSize,
+          9,
+          500
+        );
+        drawCtx.fillText(fittedDescription.text, tooltipX + tooltipPaddingX, lineY);
+        lineY += fittedDescription.fontSize;
+      }
+
+      if (status.length > 0) {
+        lineY += lineGap;
+        drawCtx.fillStyle = "rgba(166, 255, 205, 0.98)";
+        drawCtx.font = `600 ${bodyFontSize}px ${FONT_STACK}`;
+        const fittedStatus = fitLabelText(
+          drawCtx,
+          status,
+          tooltipWidth - (tooltipPaddingX * 2),
+          bodyFontSize,
+          9,
+          600
+        );
+        drawCtx.fillText(fittedStatus.text, tooltipX + tooltipPaddingX, lineY);
+      }
+    }
+
+    if (state.menuCursorVisible) {
+      drawCtx.beginPath();
+      drawCtx.arc(state.menuCursorX, state.menuCursorY, 8, 0, Math.PI * 2);
+      drawCtx.fillStyle = "rgba(255, 255, 255, 0.95)";
+      drawCtx.fill();
+      drawCtx.lineWidth = 2;
+      drawCtx.strokeStyle = "rgba(0, 0, 0, 0.9)";
+      drawCtx.stroke();
+    }
+
+    pushTouchBlockedRect(panelX, panelY, panelWidth, panelHeight);
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "alphabetic";
+  }
+
+  function drawMenuOverlay() {
+    menuOptionRects = [];
+    techTreeNodeRects = [];
+    techTreePanelRect = null;
+    if (!state.menuOpen) {
+      return;
+    }
+    if (state.menuMode === "weapon_select") {
+      drawCardMenu();
+      return;
+    }
+    drawTechTreeMenu();
+  }
+
   function draw() {
     if (!drawCtx) {
       return;
@@ -2326,7 +2696,7 @@ export function createUiOverlay({
     drawBuildModeHint();
     drawCrosshair();
     drawTouchControls();
-    drawUpgradeMenu();
+    drawMenuOverlay();
     touchControlLayout.blockedRects = touchBlockedRects.slice();
 
     texture.needsUpdate = true;
@@ -2348,11 +2718,64 @@ export function createUiOverlay({
   }
 
   function hitTestMenuOption(x, y) {
-    if (!state.menuOpen) {
+    if (!state.menuOpen || state.menuMode !== "weapon_select") {
       return -1;
     }
     const result = hitTestRectList(menuOptionRects, x, y, (rect) => rect.index);
     return result == null ? -1 : result;
+  }
+
+  function hitTestTechTreeNode(x, y) {
+    if (!state.menuOpen || state.menuMode === "weapon_select") {
+      return null;
+    }
+    const result = hitTestRectList(
+      techTreeNodeRects,
+      x,
+      y,
+      (rect) => (rect.unlockable ? rect.id : null)
+    );
+    return result == null ? null : result;
+  }
+
+  function hitTestTechTreeNodeInfo(x, y) {
+    if (!state.menuOpen || state.menuMode === "weapon_select") {
+      return null;
+    }
+    const result = hitTestRectList(
+      techTreeNodeRects,
+      x,
+      y,
+      (rect) => ({
+        id: rect.id,
+        unlockable: !!rect.unlockable,
+        researched: !!rect.researched,
+        revealed: !!rect.revealed,
+        label: rect.label,
+        description: rect.description,
+        cost: Math.max(0, Math.floor(Number(rect.cost) || 0)),
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      })
+    );
+    return result == null ? null : result;
+  }
+
+  function hitTestTechTreePanel(x, y) {
+    if (!state.menuOpen || state.menuMode === "weapon_select" || !techTreePanelRect) {
+      return null;
+    }
+    if (
+      x < techTreePanelRect.x
+      || x > techTreePanelRect.x + techTreePanelRect.width
+      || y < techTreePanelRect.y
+      || y > techTreePanelRect.y + techTreePanelRect.height
+    ) {
+      return null;
+    }
+    return { ...techTreePanelRect };
   }
 
   function hitTestTowerSlot(x, y) {
@@ -2414,6 +2837,9 @@ export function createUiOverlay({
     setState,
     draw,
     hitTestMenuOption,
+    hitTestTechTreeNode,
+    hitTestTechTreeNodeInfo,
+    hitTestTechTreePanel,
     hitTestTowerSlot,
     hitTestTouchAction,
     hitTestHudButton,
