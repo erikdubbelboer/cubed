@@ -241,20 +241,6 @@ export const GAME_CONFIG = {
       grants: { jetpackEfficiencyMultiplier: 2 },
     },
     {
-      id: "player_weapon_charge_capacity",
-      label: "x2 charges",
-      iconId: "player_weapon_charge_capacity",
-      maxCount: 1,
-      grants: { weaponMaxChargesMultiplier: 2 },
-    },
-    {
-      id: "player_weapon_pierce",
-      label: "+1 pierce",
-      iconId: "player_weapon_pierce",
-      maxCount: 1,
-      grants: { weaponPierceAdd: 1 },
-    },
-    {
       id: "player_pickup_range",
       label: "+pickup rng",
       iconId: "player_pickup_range",
@@ -1320,41 +1306,58 @@ export const GAME_CONFIG = {
       fireRateUpgradeMultiplier: 0.75,
     },
 
+    weaponSelection: {
+      options: [
+        { type: "machineGun", label: "Machine Gun", iconId: "weapon_machine_gun" },
+        { type: "sniper", label: "Sniper", iconId: "weapon_sniper" },
+        { type: "bazooka", label: "Bazooka", iconId: "weapon_bazooka" },
+      ],
+    },
+
+    weapons: {
+      machineGun: {
+        damage: 0.2,
+        fireInterval: 0.09,
+        projectileSize: 0.08,
+        projectileSpeed: 50,
+        projectileLifetime: 1.5,
+        projectileHitRadius: 0.22,
+        projectileGravity: 0,
+      },
+      sniper: {
+        damage: 6,
+        fireInterval: 1.25,
+        maxRange: 140,
+        zoomFov: 34,
+        zoomInSpeed: 10,
+        zoomOutSpeed: 8,
+        beamDuration: 0.08,
+        beamWidth: 0.09,
+      },
+      bazooka: {
+        damage: 5,
+        fireInterval: 1.8,
+        projectileSize: 0.22,
+        projectileSpeed: 24,
+        projectileLifetime: 2.2,
+        projectileHitRadius: 0.22,
+        projectileGravity: 0,
+        splashRadius: 2.7,
+        explosionDuration: 0.22,
+      },
+    },
+
     weapon: {
-      // Shots per second are derived from this cooldown.
-      baseFireCooldown: 3,
-      // Maximum burst charges before the weapon must recharge.
-      baseMaxCharges: 3,
-      // Charges available at the start of the level.
-      startingCharges: 1,
-      // Delay between burst shots while holding fire.
-      burstShotDelay: 0.4,
-      // Extra enemies a shot can pass through before despawning.
-      basePierce: 0,
-      // Projectile damage before upgrades.
-      projectileDamage: 0.5,
-      // Projectile cube size in world units. Typical range: 0.03-0.4.
-      projectileSize: 0.1,
-      // Projectile material palette.
+      // Shared projectile material palette.
       projectileColor: 0x74ffd2,
       projectileEmissive: 0x13a479,
       projectileEmissiveIntensity: 0.9,
       projectileRoughness: 0.2,
       projectileMetalness: 0.12,
-      // Projectile kinematics.
-      projectileSpeed: 45,
-      projectileLifetime: 2.4,
-      projectileGravity: 0,
-      // Hit radius for enemy AoE check.
-      projectileHitRadius: 0.36,
       // Spawn offset from barrel in world units.
       spawnForwardOffset: 0.2,
       // Tower hitbox padding for projectile collision. Typical range: 0-0.3.
       towerHitPadding: 0.06,
-      // Despawn bounds margins/limits.
-      despawnMargin: 4,
-      despawnMinY: -3,
-      despawnMaxY: 22,
     },
 
     projectileImpact: {

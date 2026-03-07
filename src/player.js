@@ -20,6 +20,7 @@ export function createPlayer({
   eyeHeight,
   getMovementObstacles,
   movementBounds = null,
+  getSurfaceYAtWorld = null,
 }) {
   const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
   const controls = new PointerLockControls(camera, domElement);
@@ -156,19 +157,6 @@ export function createPlayer({
   const reloadBarReadyColor = new THREE.Color(PLAYER_CONFIG.gun.reloadBarReadyColor);
   const reloadBarReloadColor = new THREE.Color(PLAYER_CONFIG.gun.reloadBarReloadColor);
   const reloadBarCurrentColor = new THREE.Color();
-  const chargeDotReadyColor = new THREE.Color(PLAYER_CONFIG.gun.reloadBarReadyColor);
-  const chargeDotChargingColor = new THREE.Color(PLAYER_CONFIG.gun.reloadBarReloadColor);
-  const chargeDotEmptyColor = new THREE.Color(PLAYER_CONFIG.gun.reloadBarTrackColor);
-  const chargeDotCurrentColor = new THREE.Color();
-  const chargeDotGeometry = new THREE.SphereGeometry(
-    Math.max(0.003, reloadBarHeight * 0.26),
-    10,
-    8
-  );
-  const chargeDotsGroup = new THREE.Group();
-  chargeDotsGroup.position.set(0, reloadBarHeight * 1.45, reloadBarDepth * 0.5);
-  reloadBarGroup.add(chargeDotsGroup);
-  let chargeDots = [];
 
   const gunBasePosition = new THREE.Vector3(
     PLAYER_CONFIG.gun.offsetX,
@@ -343,28 +331,75 @@ export function createPlayer({
   let hasInfiniteJetpackFuel = false;
   let jetpackFuelEfficiencyMultiplier = 1;
 
-  const projectileGeometry = new THREE.BoxGeometry(
-    PLAYER_CONFIG.weapon.projectileSize,
-    PLAYER_CONFIG.weapon.projectileSize,
-    PLAYER_CONFIG.weapon.projectileSize
-  );
-  const projectileMaterial = new THREE.MeshStandardMaterial({
-    color: PLAYER_CONFIG.weapon.projectileColor,
-    emissive: PLAYER_CONFIG.weapon.projectileEmissive,
-    emissiveIntensity: PLAYER_CONFIG.weapon.projectileEmissiveIntensity,
-    roughness: PLAYER_CONFIG.weapon.projectileRoughness,
-    metalness: PLAYER_CONFIG.weapon.projectileMetalness,
-  });
+  const sharedWeaponConfig = PLAYER_CONFIG.weapon ?? {};
+  const weaponConfigs = PLAYER_CONFIG.weapons ?? {};
+  const weaponSelectionOptions = Array.isArray(PLAYER_CONFIG.weaponSelection?.options)
+    ? PLAYER_CONFIG.weaponSelection.options
+    : [];
+  const defaultWeaponType = typeof weaponSelectionOptions[0]?.type === "string"
+    ? weaponSelectionOptions[0].type
+    : "machineGun";
+  const defaultProjectileVisual = {
+    color: sharedWeaponConfig.projectileColor,
+    emissive: sharedWeaponConfig.projectileEmissive,
+    emissiveIntensity: sharedWeaponConfig.projectileEmissiveIntensity,
+    roughness: sharedWeaponConfig.projectileRoughness,
+    metalness: sharedWeaponConfig.projectileMetalness,
+  };
+  const projectileVisualByWeapon = {
+    machineGun: defaultProjectileVisual,
+    bazooka: {
+      color: 0xffa565,
+      emissive: 0x66240d,
+      emissiveIntensity: 1.05,
+      roughness: 0.28,
+      metalness: 0.08,
+    },
+  };
+  const projectileMaterialByWeapon = new Map();
+  const gunVisualThemeByWeapon = {
+    machineGun: {
+      coreColor: PLAYER_CONFIG.gun.coreColor,
+      coreEmissive: PLAYER_CONFIG.gun.coreEmissive,
+      flashColor: PLAYER_CONFIG.gun.flashColor,
+      lightColor: PLAYER_CONFIG.gun.lightColor,
+      reloadReadyColor: PLAYER_CONFIG.gun.reloadBarReadyColor,
+      reloadReloadColor: PLAYER_CONFIG.gun.reloadBarReloadColor,
+    },
+    sniper: {
+      coreColor: 0x9bbfff,
+      coreEmissive: 0x2d518a,
+      flashColor: 0xc9e1ff,
+      lightColor: 0x9ec6ff,
+      reloadReadyColor: 0x8fc8ff,
+      reloadReloadColor: 0x2a5f8e,
+    },
+    bazooka: {
+      coreColor: 0xffa567,
+      coreEmissive: 0x7b2d0d,
+      flashColor: 0xffd1a8,
+      lightColor: 0xffb37a,
+      reloadReadyColor: 0xffb16f,
+      reloadReloadColor: 0x8f4622,
+    },
+  };
   const projectileVelocity = new THREE.Vector3();
   const projectileDirection = new THREE.Vector3();
   const projectileEnemyCollisionCenter = new THREE.Vector3();
+  const projectileSpawnWorldPos = new THREE.Vector3();
+  const projectileImpactWorldPos = new THREE.Vector3();
+  const sniperRayOrigin = new THREE.Vector3();
+  const sniperRayDirection = new THREE.Vector3();
+  const sniperRayPoint = new THREE.Vector3();
+  const sniperRaycaster = new THREE.Raycaster();
+  const sniperBeamStart = new THREE.Vector3();
+  const sniperBeamVector = new THREE.Vector3();
+  const yAxis = new THREE.Vector3(0, 1, 0);
   const projectiles = [];
   const projectileImpacts = [];
-  const projectileSpeed = PLAYER_CONFIG.weapon.projectileSpeed;
-  const projectileLifetime = PLAYER_CONFIG.weapon.projectileLifetime;
-  const projectileDamage = PLAYER_CONFIG.weapon.projectileDamage;
-  const projectileHitRadius = PLAYER_CONFIG.weapon.projectileHitRadius;
-  const projectileGravity = PLAYER_CONFIG.weapon.projectileGravity;
+  const sniperBeamEffects = [];
+  const bazookaExplosionEffects = [];
+  const projectileGeometryBySize = new Map();
   const projectileImpactDuration = PLAYER_CONFIG.projectileImpact.duration;
   const projectileImpactFlashGeometry = new THREE.SphereGeometry(
     PLAYER_CONFIG.projectileImpact.flashRadius,
@@ -376,20 +411,21 @@ export function createPlayer({
     PLAYER_CONFIG.projectileImpact.ringOuterRadius,
     PLAYER_CONFIG.projectileImpact.ringSegments
   );
+  const bazookaExplosionGeometry = new THREE.SphereGeometry(1, 14, 10);
   const projectileMaxDistanceFromPlayerSq = Math.pow((GAME_CONFIG.grid.cellSize * 20), 2);
-  const baseFireCooldown = Math.max(0.001, Number(PLAYER_CONFIG.weapon.baseFireCooldown) || 0.001);
-  const baseMaxCharges = Math.max(1, Math.floor(Number(PLAYER_CONFIG.weapon.baseMaxCharges) || 1));
-  const baseStartingCharges = Math.max(0, Math.floor(Number(PLAYER_CONFIG.weapon.startingCharges) || 1));
-  const baseBurstShotDelay = Math.max(0, Number(PLAYER_CONFIG.weapon.burstShotDelay) || 0);
-  const baseWeaponPierce = Math.max(0, Math.floor(Number(PLAYER_CONFIG.weapon.basePierce) || 0));
+  const towerHitPadding = Number.isFinite(Number(sharedWeaponConfig.towerHitPadding))
+    ? Math.max(0, Number(sharedWeaponConfig.towerHitPadding))
+    : 0.06;
+  const sniperRayStepDistance = 0.12;
+  const baseCameraFov = Number.isFinite(Number(camera.fov)) ? Number(camera.fov) : 75;
+  const defaultSniperZoomFov = 34;
+  const defaultSniperBeamColor = 0xaed8ff;
+  const defaultBazookaExplosionColor = 0xffbf85;
 
-  let currentFireCooldown = baseFireCooldown;
-  let maxWeaponCharges = baseMaxCharges;
-  let currentWeaponCharges = Math.min(maxWeaponCharges, baseStartingCharges);
-  let chargeReloadProgress = 0;
-  let shotDelayRemaining = 0;
-  let currentBurstShotDelay = Math.max(0, baseBurstShotDelay);
-  let weaponPierceCount = baseWeaponPierce;
+  let selectedWeaponType = defaultWeaponType;
+  let primaryHeld = false;
+  let weaponCooldownRemaining = 0;
+  let sniperZoomProgress = 0;
 
   let playerDamageMultiplier = 1;
   let playerFireRateMultiplier = 1;
@@ -410,6 +446,76 @@ export function createPlayer({
     }
     : null;
 
+  function getProjectileGeometry(size) {
+    const safeSize = Math.max(0.01, Number(size) || 0.1);
+    const key = safeSize.toFixed(4);
+    let geometry = projectileGeometryBySize.get(key);
+    if (!geometry) {
+      geometry = new THREE.BoxGeometry(safeSize, safeSize, safeSize);
+      projectileGeometryBySize.set(key, geometry);
+    }
+    return geometry;
+  }
+
+  function getProjectileMaterialForWeapon(type) {
+    const key = typeof type === "string" && type.length > 0
+      ? type
+      : "machineGun";
+    let material = projectileMaterialByWeapon.get(key);
+    if (material) {
+      return material;
+    }
+
+    const visual = projectileVisualByWeapon[key] ?? defaultProjectileVisual;
+    material = new THREE.MeshStandardMaterial({
+      color: visual.color,
+      emissive: visual.emissive,
+      emissiveIntensity: visual.emissiveIntensity,
+      roughness: visual.roughness,
+      metalness: visual.metalness,
+    });
+    projectileMaterialByWeapon.set(key, material);
+    return material;
+  }
+
+  function getWeaponConfig(type = selectedWeaponType) {
+    if (!type || typeof type !== "string") {
+      return null;
+    }
+    const config = weaponConfigs[type];
+    if (!config || typeof config !== "object") {
+      return null;
+    }
+    return config;
+  }
+
+  function normalizeWeaponType(type) {
+    if (typeof type !== "string") {
+      return defaultWeaponType;
+    }
+    return getWeaponConfig(type) ? type : defaultWeaponType;
+  }
+
+  function getWeaponFireInterval(type = selectedWeaponType) {
+    const config = getWeaponConfig(type);
+    const baseInterval = Number(config?.fireInterval);
+    const safeInterval = Number.isFinite(baseInterval) && baseInterval > 0
+      ? baseInterval
+      : 0.1;
+    return Math.max(0.01, safeInterval * playerFireRateMultiplier);
+  }
+
+  function getWeaponCooldownProgress() {
+    const interval = getWeaponFireInterval();
+    if (!Number.isFinite(interval) || interval <= 0) {
+      return 1;
+    }
+    if (weaponCooldownRemaining <= 0) {
+      return 1;
+    }
+    return Math.max(0, Math.min(1, 1 - (weaponCooldownRemaining / interval)));
+  }
+
   function upgradePlayerDamage(addAmount = PLAYER_CONFIG.upgrades.damageUpgradeAdd) {
     const amount = Number(addAmount);
     if (!Number.isFinite(amount)) {
@@ -423,22 +529,8 @@ export function createPlayer({
     if (!Number.isFinite(rateMultiplier) || rateMultiplier <= 0) {
       return;
     }
-
-    const previousFireCooldown = currentFireCooldown;
-    const previousBurstDelay = Math.max(0.0001, currentBurstShotDelay);
     playerFireRateMultiplier *= rateMultiplier;
-    currentFireCooldown = Math.max(0.001, baseFireCooldown * playerFireRateMultiplier);
-    currentBurstShotDelay = Math.max(0, baseBurstShotDelay * playerFireRateMultiplier);
-
-    if (currentWeaponCharges < maxWeaponCharges && previousFireCooldown > 0) {
-      const progressRatio = chargeReloadProgress / previousFireCooldown;
-      chargeReloadProgress = Math.max(0, Math.min(currentFireCooldown, progressRatio * currentFireCooldown));
-    }
-
-    if (shotDelayRemaining > 0) {
-      const shotDelayRatio = shotDelayRemaining / previousBurstDelay;
-      shotDelayRemaining = Math.max(0, Math.min(currentBurstShotDelay, shotDelayRatio * currentBurstShotDelay));
-    }
+    weaponCooldownRemaining = Math.max(0, weaponCooldownRemaining * rateMultiplier);
   }
 
   function upgradeJetpackFuelEfficiency(multiplier = 2) {
@@ -447,32 +539,6 @@ export function createPlayer({
       return;
     }
     jetpackFuelEfficiencyMultiplier *= efficiencyMultiplier;
-  }
-
-  function upgradeWeaponMaxCharges(multiplier = 2) {
-    const chargeMultiplier = Number(multiplier);
-    if (!Number.isFinite(chargeMultiplier) || chargeMultiplier <= 0) {
-      return;
-    }
-
-    const nextMaxCharges = Math.max(1, Math.round(maxWeaponCharges * chargeMultiplier));
-    if (nextMaxCharges === maxWeaponCharges) {
-      return;
-    }
-
-    maxWeaponCharges = nextMaxCharges;
-    currentWeaponCharges = maxWeaponCharges;
-    chargeReloadProgress = 0;
-    rebuildChargeDots();
-    updateReloadBar(1);
-  }
-
-  function upgradeWeaponPierce(addAmount = 1) {
-    const pierceAdd = Math.floor(Number(addAmount));
-    if (!Number.isFinite(pierceAdd) || pierceAdd <= 0) {
-      return;
-    }
-    weaponPierceCount += pierceAdd;
   }
 
   function setMovementKey(code, isDown) {
@@ -601,6 +667,10 @@ export function createPlayer({
   let isMenuMode = false;
   function setMenuMode(mode) {
     isMenuMode = mode;
+    if (isMenuMode) {
+      setPrimaryHeld(false);
+    }
+    primaryReleasedSinceLastUpdate = false;
   }
 
   // Filter tiny pointer-lock movement noise that can cause idle camera drift.
@@ -670,29 +740,6 @@ export function createPlayer({
     jetpackFuel = jetpackMaxFuel;
   }
 
-  function applyChargeDotLayout(mode = getWeaponHudLayoutMode()) {
-    const maxDotsPerRow = 3;
-    const dotStep = reloadBarHeight * 0.9;
-    const rows = Math.max(1, Math.ceil(maxWeaponCharges / maxDotsPerRow));
-    const rowOffsetBase = ((rows - 1) * dotStep) * 0.5;
-    const isMobileLayout = mode !== "desktop";
-
-    for (let i = 0; i < chargeDots.length; i += 1) {
-      const dot = chargeDots[i];
-      if (!dot) {
-        continue;
-      }
-      const col = i % maxDotsPerRow;
-      const row = Math.floor(i / maxDotsPerRow);
-      const colsInRow = Math.min(maxDotsPerRow, maxWeaponCharges - (row * maxDotsPerRow));
-      const x = isMobileLayout
-        ? -((col + 1) * dotStep)
-        : ((col * dotStep) - (((colsInRow - 1) * dotStep) * 0.5));
-      const y = rowOffsetBase - (row * dotStep);
-      dot.position.set(x, y, 0);
-    }
-  }
-
   function applyWeaponHudLayout() {
     const mode = getWeaponHudLayoutMode();
     const activeReloadOffset = getActiveReloadBarOffset(mode);
@@ -703,63 +750,7 @@ export function createPlayer({
     reloadBarTrack.scale.x = reloadBarLengthScale;
     reloadBarFrame.position.x = (-reloadBarWidth * (1 - reloadBarLengthScale)) * 0.5;
     reloadBarTrack.position.x = (-reloadBarFillWidth * (1 - reloadBarLengthScale)) * 0.5;
-    chargeDotsGroup.position.set(0, reloadBarHeight * 1.45, reloadBarDepth * 0.5);
-
-    if (lastWeaponHudLayoutMode !== mode) {
-      lastWeaponHudLayoutMode = mode;
-      applyChargeDotLayout(mode);
-    }
-  }
-
-  function rebuildChargeDots() {
-    for (const dot of chargeDots) {
-      chargeDotsGroup.remove(dot);
-      dot.material.dispose();
-    }
-    chargeDots = [];
-
-    for (let i = 0; i < maxWeaponCharges; i += 1) {
-      const dot = new THREE.Mesh(
-        chargeDotGeometry,
-        new THREE.MeshBasicMaterial({
-          color: PLAYER_CONFIG.gun.reloadBarTrackColor,
-          transparent: true,
-          opacity: 0.35,
-        })
-      );
-      dot.material.toneMapped = false;
-      chargeDotsGroup.add(dot);
-      chargeDots.push(dot);
-    }
-    applyChargeDotLayout();
-  }
-
-  function updateChargeDots(reloadProgress) {
-    if (chargeDots.length === 0) {
-      return;
-    }
-
-    const fullCharges = Math.floor(currentWeaponCharges);
-    const hasPartial = currentWeaponCharges < maxWeaponCharges;
-
-    for (let i = 0; i < chargeDots.length; i += 1) {
-      const dot = chargeDots[i];
-      if (i < fullCharges) {
-        dot.material.color.copy(chargeDotReadyColor);
-        dot.material.opacity = 1;
-      } else if (hasPartial && i === fullCharges) {
-        chargeDotCurrentColor.lerpColors(
-          chargeDotChargingColor,
-          chargeDotReadyColor,
-          Math.max(0, Math.min(1, reloadProgress))
-        );
-        dot.material.color.copy(chargeDotCurrentColor);
-        dot.material.opacity = 0.45 + (Math.max(0, Math.min(1, reloadProgress)) * 0.55);
-      } else {
-        dot.material.color.copy(chargeDotEmptyColor);
-        dot.material.opacity = 0.28;
-      }
-    }
+    lastWeaponHudLayoutMode = mode;
   }
 
   function updateReloadBar(progress) {
@@ -772,12 +763,11 @@ export function createPlayer({
     reloadBarCurrentColor.lerpColors(reloadBarReloadColor, reloadBarReadyColor, clampedProgress);
     reloadBarFillMaterial.color.copy(reloadBarCurrentColor);
     reloadBarFillMaterial.opacity = 0.45 + (clampedProgress * 0.55);
-    updateChargeDots(clampedProgress);
   }
 
   applyWeaponHudLayout();
-  rebuildChargeDots();
-  updateReloadBar(currentWeaponCharges >= maxWeaponCharges ? 1 : 0);
+  updateReloadBar(1);
+  applyWeaponVisualTheme(selectedWeaponType);
 
   function updateGunVisuals(deltaSeconds, movementSpeed) {
     applyWeaponHudLayout();
@@ -793,12 +783,7 @@ export function createPlayer({
     gunFlashMesh.scale.setScalar(1 + flashBoost * PLAYER_CONFIG.gun.flashScaleBoost);
     gunLight.intensity = flashBoost * PLAYER_CONFIG.gun.lightFlashBoost;
 
-    const reloadProgress = currentWeaponCharges >= maxWeaponCharges
-      ? 1
-      : (currentFireCooldown > 0
-        ? Math.max(0, Math.min(1, chargeReloadProgress / currentFireCooldown))
-        : 1);
-    updateReloadBar(reloadProgress);
+    updateReloadBar(getWeaponCooldownProgress());
 
     const speedRatio = Math.min(1, movementSpeed / gunBobSpeedForMax);
     const bobBlend = Math.min(1, deltaSeconds * gunBobSmoothing);
@@ -823,55 +808,399 @@ export function createPlayer({
     gunGroup.rotation.set(bobPitch, 0, bobRoll);
   }
 
-  function tryShoot() {
-    if (currentWeaponCharges <= 0 || shotDelayRemaining > 0) {
+  let primaryReleasedSinceLastUpdate = false;
+
+  function applyWeaponVisualTheme(type = selectedWeaponType) {
+    const theme = gunVisualThemeByWeapon[type] ?? gunVisualThemeByWeapon.machineGun;
+    if (!theme) {
+      return;
+    }
+    gunCoreMaterial.color.set(theme.coreColor);
+    gunCoreMaterial.emissive.set(theme.coreEmissive);
+    gunFlashMaterial.color.set(theme.flashColor);
+    gunLight.color.set(theme.lightColor);
+    reloadBarReadyColor.set(theme.reloadReadyColor);
+    reloadBarReloadColor.set(theme.reloadReloadColor);
+  }
+
+  function setWeaponType(type) {
+    selectedWeaponType = normalizeWeaponType(type);
+    primaryHeld = false;
+    primaryReleasedSinceLastUpdate = false;
+    weaponCooldownRemaining = 0;
+    if (selectedWeaponType !== "sniper") {
+      sniperZoomProgress = 0;
+    }
+    applyWeaponVisualTheme(selectedWeaponType);
+    updateReloadBar(getWeaponCooldownProgress());
+    return selectedWeaponType;
+  }
+
+  function getWeaponType() {
+    return selectedWeaponType;
+  }
+
+  function setPrimaryHeld(isHeld) {
+    const nextHeld = !!isHeld;
+    if (primaryHeld === nextHeld) {
+      return;
+    }
+    if (primaryHeld && !nextHeld) {
+      primaryReleasedSinceLastUpdate = true;
+    }
+    primaryHeld = nextHeld;
+  }
+
+  function spawnProjectileFromWeaponType(type) {
+    const config = getWeaponConfig(type);
+    if (!config) {
       return false;
     }
 
     camera.getWorldDirection(projectileDirection).normalize();
-    const spawnWorldPos = new THREE.Vector3();
-    gunBarrel.getWorldPosition(spawnWorldPos);
+    gunBarrel.getWorldPosition(projectileSpawnWorldPos);
+    projectileSpawnWorldPos.addScaledVector(
+      projectileDirection,
+      Number.isFinite(Number(sharedWeaponConfig.spawnForwardOffset))
+        ? Number(sharedWeaponConfig.spawnForwardOffset)
+        : 0.2
+    );
 
-    // Slight offset forward from the visual tip
-    spawnWorldPos.addScaledVector(projectileDirection, PLAYER_CONFIG.weapon.spawnForwardOffset);
-
-    const projectileMesh = new THREE.Mesh(projectileGeometry, projectileMaterial);
-    projectileMesh.position.copy(spawnWorldPos);
+    const projectileMesh = new THREE.Mesh(
+      getProjectileGeometry(config.projectileSize),
+      getProjectileMaterialForWeapon(type)
+    );
+    projectileMesh.position.copy(projectileSpawnWorldPos);
     scene.add(projectileMesh);
 
-    projectileVelocity.copy(projectileDirection).multiplyScalar(projectileSpeed);
+    projectileVelocity.copy(projectileDirection).multiplyScalar(
+      Math.max(0.01, Number(config.projectileSpeed) || 10)
+    );
     projectiles.push({
+      kind: type,
       mesh: projectileMesh,
       velocity: projectileVelocity.clone(),
-      life: projectileLifetime,
-      damage: projectileDamage * playerDamageMultiplier,
-      remainingPierceHits: weaponPierceCount,
-      hitEnemyMeshIds: new Set(),
+      life: Math.max(0.01, Number(config.projectileLifetime) || 0.5),
+      damage: Math.max(0, Number(config.damage) || 0) * playerDamageMultiplier,
+      hitRadius: Math.max(0, Number(config.projectileHitRadius) || 0.1),
+      gravity: Math.max(0, Number(config.projectileGravity) || 0),
+      splashRadius: Math.max(0, Number(config.splashRadius) || 0),
+      explosionDuration: Math.max(0.01, Number(config.explosionDuration) || 0.22),
     });
 
     gunFlashTimer = gunFlashDuration;
-    currentWeaponCharges = Math.max(0, currentWeaponCharges - 1);
-    shotDelayRemaining = currentBurstShotDelay;
-    updateReloadBar(currentWeaponCharges >= maxWeaponCharges ? 1 : 0);
     return true;
   }
 
-  function updateWeaponChargeRecharge(deltaSeconds) {
-    if (currentWeaponCharges >= maxWeaponCharges) {
-      chargeReloadProgress = 0;
-      return;
+  function fireMachineGun() {
+    if (weaponCooldownRemaining > 0) {
+      return false;
+    }
+    if (!spawnProjectileFromWeaponType("machineGun")) {
+      return false;
+    }
+    weaponCooldownRemaining = getWeaponFireInterval("machineGun");
+    return true;
+  }
+
+  function fireBazooka() {
+    if (weaponCooldownRemaining > 0) {
+      return false;
+    }
+    if (!spawnProjectileFromWeaponType("bazooka")) {
+      return false;
+    }
+    weaponCooldownRemaining = getWeaponFireInterval("bazooka");
+    return true;
+  }
+
+  function getCombatObstacles() {
+    return typeof getMovementObstacles === "function"
+      ? (Array.isArray(getMovementObstacles()) ? getMovementObstacles() : [])
+      : [];
+  }
+
+  function getSurfaceCollisionYAtWorld(worldX, worldZ) {
+    if (typeof getSurfaceYAtWorld !== "function") {
+      return null;
+    }
+    const surfaceY = Number(getSurfaceYAtWorld(worldX, worldZ));
+    return Number.isFinite(surfaceY) ? surfaceY : null;
+  }
+
+  function pointHitsRampObstacle(position, obstacle, padding) {
+    const obstaclePos = obstacle?.position ?? obstacle?.mesh?.position;
+    const obstacleBaseY = Number(obstacle?.baseY ?? 0);
+    const obstacleHeight = Number(obstacle?.height);
+    const obstacleDirection = obstacle?.direction;
+    const obstacleHalfSizeX = Number(obstacle?.halfSizeX ?? obstacle?.halfSize);
+    const obstacleHalfSizeZ = Number(obstacle?.halfSizeZ ?? obstacle?.halfSize);
+
+    if (
+      !obstaclePos
+      || !Number.isFinite(obstacleBaseY)
+      || !Number.isFinite(obstacleHeight)
+      || obstacleHeight <= 0
+      || !obstacleDirection
+      || !Number.isFinite(obstacleHalfSizeX)
+      || !Number.isFinite(obstacleHalfSizeZ)
+    ) {
+      return false;
     }
 
-    chargeReloadProgress += Math.max(0, deltaSeconds);
-    while (chargeReloadProgress >= currentFireCooldown && currentWeaponCharges < maxWeaponCharges) {
-      chargeReloadProgress -= currentFireCooldown;
-      currentWeaponCharges += 1;
+    const dirXRaw = Number(obstacleDirection.x);
+    const dirZRaw = Number(obstacleDirection.z);
+    const dirLength = Math.hypot(dirXRaw, dirZRaw);
+    if (dirLength <= MIN_COLLISION_DISTANCE_SQ) {
+      return false;
     }
 
-    if (currentWeaponCharges >= maxWeaponCharges) {
-      currentWeaponCharges = maxWeaponCharges;
-      chargeReloadProgress = 0;
+    const dirX = dirXRaw / dirLength;
+    const dirZ = dirZRaw / dirLength;
+    const rightX = -dirZ;
+    const rightZ = dirX;
+    const rampRunsMostlyAlongX = Math.abs(dirX) >= Math.abs(dirZ);
+    const rampAlongHalf = rampRunsMostlyAlongX ? obstacleHalfSizeX : obstacleHalfSizeZ;
+    const rampAcrossHalf = rampRunsMostlyAlongX ? obstacleHalfSizeZ : obstacleHalfSizeX;
+    if (
+      !Number.isFinite(rampAlongHalf)
+      || !Number.isFinite(rampAcrossHalf)
+      || rampAlongHalf <= 0
+      || rampAcrossHalf <= 0
+    ) {
+      return false;
     }
+
+    const lowCenterX = obstaclePos.x - (dirX * rampAlongHalf * 0.5);
+    const lowCenterZ = obstaclePos.z - (dirZ * rampAlongHalf * 0.5);
+    const deltaX = position.x - lowCenterX;
+    const deltaZ = position.z - lowCenterZ;
+    const along = (deltaX * dirX) + (deltaZ * dirZ);
+    const across = (deltaX * rightX) + (deltaZ * rightZ);
+    const alongMin = -rampAcrossHalf;
+    const alongMax = rampAlongHalf + rampAcrossHalf;
+
+    if (along < (alongMin - padding) || along > (alongMax + padding)) {
+      return false;
+    }
+    if (Math.abs(across) > (rampAcrossHalf + padding)) {
+      return false;
+    }
+
+    const alongT = THREE.MathUtils.clamp(
+      (along - alongMin) / Math.max(1e-6, alongMax - alongMin),
+      0,
+      1
+    );
+    const rampSurfaceY = obstacleBaseY + (obstacleHeight * alongT);
+    return position.y >= (obstacleBaseY - padding) && position.y <= (rampSurfaceY + padding);
+  }
+
+  function pointHitsObstacle(position, obstacles, padding = towerHitPadding) {
+    for (const obstacle of obstacles) {
+      if (obstacle?.kind === "ramp") {
+        if (pointHitsRampObstacle(position, obstacle, padding)) {
+          return true;
+        }
+        continue;
+      }
+
+      const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
+      const halfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
+        ? Number(obstacle.halfSizeX)
+        : Number(obstacle?.halfSize);
+      const halfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
+        ? Number(obstacle.halfSizeZ)
+        : Number(obstacle?.halfSize);
+      const height = obstacle?.height;
+      const baseY = obstacle?.baseY ?? 0;
+      if (
+        !obstaclePos
+        || !Number.isFinite(halfSizeX)
+        || !Number.isFinite(halfSizeZ)
+        || typeof height !== "number"
+      ) {
+        continue;
+      }
+
+      const minX = obstaclePos.x - halfSizeX - padding;
+      const maxX = obstaclePos.x + halfSizeX + padding;
+      const minY = baseY - padding;
+      const maxY = baseY + height + padding;
+      const minZ = obstaclePos.z - halfSizeZ - padding;
+      const maxZ = obstaclePos.z + halfSizeZ + padding;
+
+      if (
+        position.x >= minX
+        && position.x <= maxX
+        && position.y >= minY
+        && position.y <= maxY
+        && position.z >= minZ
+        && position.z <= maxZ
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function spawnSniperBeamEffect(startPosition, endPosition, config) {
+    sniperBeamVector.copy(endPosition).sub(startPosition);
+    const length = Math.max(0.01, sniperBeamVector.length());
+    const beamWidth = Math.max(0.02, Number(config?.beamWidth) || 0.09);
+    const beamDuration = Math.max(0.01, Number(config?.beamDuration) || 0.08);
+
+    const beamGeometry = new THREE.CylinderGeometry(
+      beamWidth * 0.5,
+      beamWidth * 0.5,
+      length,
+      8,
+      1,
+      true
+    );
+    const beamMaterial = new THREE.MeshBasicMaterial({
+      color: Number.isFinite(Number(config?.beamColor))
+        ? Number(config.beamColor)
+        : defaultSniperBeamColor,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    beamMaterial.toneMapped = false;
+    const beamMesh = new THREE.Mesh(beamGeometry, beamMaterial);
+    beamMesh.position.copy(startPosition).addScaledVector(sniperBeamVector, 0.5);
+    beamMesh.quaternion.setFromUnitVectors(yAxis, sniperBeamVector.normalize());
+    scene.add(beamMesh);
+    sniperBeamEffects.push({
+      mesh: beamMesh,
+      material: beamMaterial,
+      life: beamDuration,
+      maxLife: beamDuration,
+    });
+  }
+
+  function spawnBazookaExplosion(position, splashRadius, durationSeconds) {
+    const explosionMaterial = new THREE.MeshBasicMaterial({
+      color: defaultBazookaExplosionColor,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    explosionMaterial.toneMapped = false;
+    const explosionMesh = new THREE.Mesh(bazookaExplosionGeometry, explosionMaterial);
+    explosionMesh.position.copy(position);
+    scene.add(explosionMesh);
+    bazookaExplosionEffects.push({
+      mesh: explosionMesh,
+      material: explosionMaterial,
+      life: durationSeconds,
+      maxLife: durationSeconds,
+      splashRadius: Math.max(0.1, splashRadius),
+    });
+  }
+
+  function getSniperBlockerDistance(obstacles, maxRange) {
+    for (let distance = 0; distance <= maxRange; distance += sniperRayStepDistance) {
+      sniperRayPoint.copy(sniperRayOrigin).addScaledVector(sniperRayDirection, distance);
+      if (pointHitsObstacle(sniperRayPoint, obstacles, towerHitPadding)) {
+        return distance;
+      }
+    }
+    return maxRange;
+  }
+
+  function isEnemyBodyRaycastHit(intersection, enemyMesh) {
+    const hitObject = intersection?.object;
+    if (!hitObject || hitObject.isMesh !== true) {
+      return false;
+    }
+    if (hitObject.geometry?.type !== "BoxGeometry") {
+      return false;
+    }
+    return hitObject.parent?.parent === enemyMesh;
+  }
+
+  function findSniperRaycastTarget(enemies, maxDistance) {
+    sniperRaycaster.near = 0;
+    sniperRaycaster.far = Math.max(0.01, maxDistance);
+    sniperRaycaster.set(sniperRayOrigin, sniperRayDirection);
+
+    let bestEnemyMesh = null;
+    let bestDistance = maxDistance;
+
+    for (const enemyMesh of enemies) {
+      if (!enemyMesh) {
+        continue;
+      }
+      enemyMesh.updateWorldMatrix(true, true);
+      const intersections = sniperRaycaster.intersectObject(enemyMesh, true);
+      if (!Array.isArray(intersections) || intersections.length === 0) {
+        continue;
+      }
+      for (const intersection of intersections) {
+        if (!isEnemyBodyRaycastHit(intersection, enemyMesh)) {
+          continue;
+        }
+        const distance = Number(intersection.distance);
+        if (!Number.isFinite(distance) || distance < 0 || distance > maxDistance) {
+          break;
+        }
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestEnemyMesh = enemyMesh;
+        }
+        break;
+      }
+    }
+
+    return {
+      enemyMesh: bestEnemyMesh,
+      distance: bestDistance,
+    };
+  }
+
+  function fireSniper(enemySystem) {
+    const config = getWeaponConfig("sniper");
+    if (!config || weaponCooldownRemaining > 0) {
+      return false;
+    }
+
+    camera.getWorldPosition(sniperRayOrigin);
+    camera.getWorldDirection(sniperRayDirection).normalize();
+    const maxRange = Math.max(0.1, Number(config.maxRange) || 140);
+    const obstacles = getCombatObstacles();
+    const enemies = enemySystem && typeof enemySystem.getDamageableEnemies === "function"
+      ? enemySystem.getDamageableEnemies()
+      : [];
+    const blockerDistance = getSniperBlockerDistance(obstacles, maxRange);
+    const raycastHit = findSniperRaycastTarget(enemies, blockerDistance);
+    const hitEnemyMesh = raycastHit.enemyMesh;
+    const hitDistance = Number.isFinite(raycastHit.distance)
+      ? Math.min(blockerDistance, Math.max(0.01, raycastHit.distance))
+      : blockerDistance;
+
+    if (
+      hitEnemyMesh
+      && enemySystem
+      && typeof enemySystem.applyDamageToEnemyMesh === "function"
+    ) {
+      enemySystem.applyDamageToEnemyMesh(
+        hitEnemyMesh,
+        Math.max(0, Number(config.damage) || 0) * playerDamageMultiplier
+      );
+    }
+
+    gunBarrel.getWorldPosition(sniperBeamStart);
+    projectileImpactWorldPos.copy(sniperRayOrigin).addScaledVector(
+      sniperRayDirection,
+      Math.max(0.01, hitDistance)
+    );
+    spawnSniperBeamEffect(sniperBeamStart, projectileImpactWorldPos, config);
+    gunFlashTimer = gunFlashDuration;
+    weaponCooldownRemaining = getWeaponFireInterval("sniper");
+    return true;
   }
 
   function removeProjectile(index) {
@@ -937,222 +1266,219 @@ export function createPlayer({
     }
   }
 
+  function updateSniperBeamEffects(deltaSeconds) {
+    for (let i = sniperBeamEffects.length - 1; i >= 0; i -= 1) {
+      const beamEffect = sniperBeamEffects[i];
+      beamEffect.life -= deltaSeconds;
+      const t = Math.max(0, beamEffect.life / beamEffect.maxLife);
+      beamEffect.material.opacity = 0.9 * t;
+      if (beamEffect.life <= 0) {
+        scene.remove(beamEffect.mesh);
+        beamEffect.mesh.geometry.dispose();
+        beamEffect.material.dispose();
+        sniperBeamEffects.splice(i, 1);
+      }
+    }
+  }
+
+  function updateBazookaExplosionEffects(deltaSeconds) {
+    for (let i = bazookaExplosionEffects.length - 1; i >= 0; i -= 1) {
+      const explosion = bazookaExplosionEffects[i];
+      explosion.life -= deltaSeconds;
+      const t = Math.max(0, explosion.life / explosion.maxLife);
+      const invT = 1 - t;
+      const scale = explosion.splashRadius * (0.2 + invT * 0.8);
+      explosion.mesh.scale.setScalar(Math.max(0.01, scale));
+      explosion.material.opacity = 0.72 * t;
+      if (explosion.life <= 0) {
+        scene.remove(explosion.mesh);
+        explosion.material.dispose();
+        bazookaExplosionEffects.splice(i, 1);
+      }
+    }
+  }
+
+  function findProjectileEnemyHit(projectile, enemySystem, enemies) {
+    if (!enemySystem || !Array.isArray(enemies) || enemies.length === 0) {
+      return null;
+    }
+
+    let closestEnemyMesh = null;
+    let closestDistSq = Number.POSITIVE_INFINITY;
+
+    for (const enemyMesh of enemies) {
+      if (!enemyMesh || !enemyMesh.position) {
+        continue;
+      }
+
+      const hitRadius = Math.max(0, Number(projectile.hitRadius) || 0);
+      const enemyRadius = Number(enemyMesh.userData?.hitSphereRadius);
+      const enemyHalfSize = Number(enemyMesh.userData?.bodyHalfSize);
+      const collisionRadius = Number.isFinite(enemyHalfSize)
+        ? enemyHalfSize
+        : (Number.isFinite(enemyRadius) ? enemyRadius : 0);
+      projectileEnemyCollisionCenter.copy(enemyMesh.position);
+      const centerOffsetY = enemyMesh.userData?.bodyCenterOffsetY;
+      if (typeof centerOffsetY === "number") {
+        projectileEnemyCollisionCenter.y += centerOffsetY;
+      }
+      const maxHitDistance = collisionRadius + hitRadius;
+      const distSq = projectileEnemyCollisionCenter.distanceToSquared(projectile.mesh.position);
+      let intersects = false;
+      if (typeof enemySystem.isPointNearEnemyMesh === "function") {
+        intersects = enemySystem.isPointNearEnemyMesh(
+          enemyMesh,
+          projectile.mesh.position,
+          hitRadius
+        );
+      } else {
+        intersects = distSq <= maxHitDistance * maxHitDistance;
+      }
+      if (!intersects) {
+        continue;
+      }
+
+      if (distSq < closestDistSq) {
+        closestDistSq = distSq;
+        closestEnemyMesh = enemyMesh;
+      }
+    }
+
+    return closestEnemyMesh;
+  }
+
   function updateProjectiles(deltaSeconds, enemySystem) {
-    const obstacles = typeof getMovementObstacles === "function"
-      ? (Array.isArray(getMovementObstacles()) ? getMovementObstacles() : [])
+    const obstacles = getCombatObstacles();
+    const enemies = enemySystem && typeof enemySystem.getDamageableEnemies === "function"
+      ? enemySystem.getDamageableEnemies()
       : [];
-
-    function projectileHitsRampObstacle(position, obstacle, padding) {
-      const obstaclePos = obstacle?.position ?? obstacle?.mesh?.position;
-      const obstacleBaseY = Number(obstacle?.baseY ?? 0);
-      const obstacleHeight = Number(obstacle?.height);
-      const obstacleDirection = obstacle?.direction;
-      const obstacleHalfSizeX = Number(obstacle?.halfSizeX ?? obstacle?.halfSize);
-      const obstacleHalfSizeZ = Number(obstacle?.halfSizeZ ?? obstacle?.halfSize);
-
-      if (
-        !obstaclePos
-        || !Number.isFinite(obstacleBaseY)
-        || !Number.isFinite(obstacleHeight)
-        || obstacleHeight <= 0
-        || !obstacleDirection
-        || !Number.isFinite(obstacleHalfSizeX)
-        || !Number.isFinite(obstacleHalfSizeZ)
-      ) {
-        return false;
-      }
-
-      const dirXRaw = Number(obstacleDirection.x);
-      const dirZRaw = Number(obstacleDirection.z);
-      const dirLength = Math.hypot(dirXRaw, dirZRaw);
-      if (dirLength <= MIN_COLLISION_DISTANCE_SQ) {
-        return false;
-      }
-
-      const dirX = dirXRaw / dirLength;
-      const dirZ = dirZRaw / dirLength;
-      const rightX = -dirZ;
-      const rightZ = dirX;
-      const rampRunsMostlyAlongX = Math.abs(dirX) >= Math.abs(dirZ);
-      const rampAlongHalf = rampRunsMostlyAlongX ? obstacleHalfSizeX : obstacleHalfSizeZ;
-      const rampAcrossHalf = rampRunsMostlyAlongX ? obstacleHalfSizeZ : obstacleHalfSizeX;
-      if (
-        !Number.isFinite(rampAlongHalf)
-        || !Number.isFinite(rampAcrossHalf)
-        || rampAlongHalf <= 0
-        || rampAcrossHalf <= 0
-      ) {
-        return false;
-      }
-
-      const lowCenterX = obstaclePos.x - (dirX * rampAlongHalf * 0.5);
-      const lowCenterZ = obstaclePos.z - (dirZ * rampAlongHalf * 0.5);
-      const deltaX = position.x - lowCenterX;
-      const deltaZ = position.z - lowCenterZ;
-      const along = (deltaX * dirX) + (deltaZ * dirZ);
-      const across = (deltaX * rightX) + (deltaZ * rightZ);
-      const alongMin = -rampAcrossHalf;
-      const alongMax = rampAlongHalf + rampAcrossHalf;
-
-      if (along < (alongMin - padding) || along > (alongMax + padding)) {
-        return false;
-      }
-      if (Math.abs(across) > (rampAcrossHalf + padding)) {
-        return false;
-      }
-
-      const alongT = THREE.MathUtils.clamp(
-        (along - alongMin) / Math.max(1e-6, alongMax - alongMin),
-        0,
-        1
-      );
-      const rampSurfaceY = obstacleBaseY + (obstacleHeight * alongT);
-      return position.y >= (obstacleBaseY - padding) && position.y <= (rampSurfaceY + padding);
-    }
-
-    function projectileHitsTower(position) {
-      const towerHitPadding = PLAYER_CONFIG.weapon.towerHitPadding;
-      for (const obstacle of obstacles) {
-        if (obstacle?.kind === "ramp") {
-          if (projectileHitsRampObstacle(position, obstacle, towerHitPadding)) {
-            return true;
-          }
-          continue;
-        }
-
-        const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
-        const halfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
-          ? Number(obstacle.halfSizeX)
-          : Number(obstacle?.halfSize);
-        const halfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
-          ? Number(obstacle.halfSizeZ)
-          : Number(obstacle?.halfSize);
-        const height = obstacle?.height;
-        const baseY = obstacle?.baseY ?? 0;
-        if (
-          !obstaclePos
-          || !Number.isFinite(halfSizeX)
-          || !Number.isFinite(halfSizeZ)
-          || typeof height !== "number"
-        ) {
-          continue;
-        }
-
-        const minX = obstaclePos.x - halfSizeX - towerHitPadding;
-        const maxX = obstaclePos.x + halfSizeX + towerHitPadding;
-        const minY = baseY - towerHitPadding;
-        const maxY = baseY + height + towerHitPadding;
-        const minZ = obstaclePos.z - halfSizeZ - towerHitPadding;
-        const maxZ = obstaclePos.z + halfSizeZ + towerHitPadding;
-
-        if (
-          position.x >= minX &&
-          position.x <= maxX &&
-          position.y >= minY &&
-          position.y <= maxY &&
-          position.z >= minZ &&
-          position.z <= maxZ
-        ) {
-          return true;
-        }
-      }
-      return false;
-    }
-
-    function getProjectileEnemyHit(projectile) {
-      if (!enemySystem || typeof enemySystem.getDamageableEnemies !== "function") {
-        return null;
-      }
-
-      const enemies = enemySystem.getDamageableEnemies();
-      if (!Array.isArray(enemies) || enemies.length === 0) {
-        return null;
-      }
-
-      let closestEnemyMesh = null;
-      let closestDistSq = Number.POSITIVE_INFINITY;
-
-      for (const enemyMesh of enemies) {
-        if (!enemyMesh || !enemyMesh.position) {
-          continue;
-        }
-        if (projectile.hitEnemyMeshIds.has(enemyMesh.uuid)) {
-          continue;
-        }
-
-        const enemyRadius = Number(enemyMesh.userData?.hitSphereRadius);
-        const enemyHalfSize = Number(enemyMesh.userData?.bodyHalfSize);
-        const collisionRadius = Number.isFinite(enemyHalfSize)
-          ? enemyHalfSize
-          : (Number.isFinite(enemyRadius) ? enemyRadius : 0);
-        projectileEnemyCollisionCenter.copy(enemyMesh.position);
-        const centerOffsetY = enemyMesh.userData?.bodyCenterOffsetY;
-        if (typeof centerOffsetY === "number") {
-          projectileEnemyCollisionCenter.y += centerOffsetY;
-        }
-        const maxHitDistance = collisionRadius + projectileHitRadius;
-        const distSq = projectileEnemyCollisionCenter.distanceToSquared(projectile.mesh.position);
-        let intersects = false;
-        if (typeof enemySystem.isPointNearEnemyMesh === "function") {
-          intersects = enemySystem.isPointNearEnemyMesh(
-            enemyMesh,
-            projectile.mesh.position,
-            projectileHitRadius
-          );
-        } else {
-          intersects = distSq <= maxHitDistance * maxHitDistance;
-        }
-        if (!intersects) {
-          continue;
-        }
-
-        if (distSq < closestDistSq) {
-          closestDistSq = distSq;
-          closestEnemyMesh = enemyMesh;
-        }
-      }
-
-      return closestEnemyMesh;
-    }
 
     for (let i = projectiles.length - 1; i >= 0; i -= 1) {
       const projectile = projectiles[i];
-      projectile.velocity.y -= projectileGravity * deltaSeconds;
+      projectile.velocity.y -= Math.max(0, Number(projectile.gravity) || 0) * deltaSeconds;
       projectile.mesh.position.addScaledVector(projectile.velocity, deltaSeconds);
       projectile.life -= deltaSeconds;
 
-      const hitEnemyMesh = getProjectileEnemyHit(projectile);
-      let hitEnemy = false;
-      if (
-        hitEnemyMesh
-        && enemySystem
-        && typeof enemySystem.applyDamageToEnemyMesh === "function"
-      ) {
-        hitEnemy = enemySystem.applyDamageToEnemyMesh(hitEnemyMesh, projectile.damage);
-      }
-
-      if (hitEnemy && hitEnemyMesh) {
-        projectile.hitEnemyMeshIds.add(hitEnemyMesh.uuid);
-        spawnProjectileImpact(projectile.mesh.position);
-        if (projectile.remainingPierceHits > 0) {
-          projectile.remainingPierceHits -= 1;
-        } else {
-          removeProjectile(i);
-          continue;
-        }
-      }
-
+      const hitEnemyMesh = findProjectileEnemyHit(projectile, enemySystem, enemies);
+      const hitObstacle = pointHitsObstacle(projectile.mesh.position, obstacles, towerHitPadding);
+      const surfaceY = getSurfaceCollisionYAtWorld(projectile.mesh.position.x, projectile.mesh.position.z);
+      const hitGround = Number.isFinite(surfaceY) && projectile.mesh.position.y <= surfaceY;
       const tooFarFromPlayer =
         projectile.mesh.position.distanceToSquared(camera.position) > projectileMaxDistanceFromPlayerSq;
 
-      const hitTower = projectileHitsTower(projectile.mesh.position);
-
-      if (hitTower || projectile.life <= 0 || tooFarFromPlayer) {
-        if (hitTower) {
-          spawnProjectileImpact(projectile.mesh.position);
+      if (projectile.kind === "bazooka") {
+        const shouldExplode = !!hitEnemyMesh || hitObstacle || hitGround || projectile.life <= 0;
+        if (shouldExplode) {
+          projectileImpactWorldPos.copy(projectile.mesh.position);
+          if (hitGround && Number.isFinite(surfaceY)) {
+            projectileImpactWorldPos.y = surfaceY;
+          }
+          spawnProjectileImpact(projectileImpactWorldPos);
+          spawnBazookaExplosion(
+            projectileImpactWorldPos,
+            Math.max(0.1, Number(projectile.splashRadius) || 0.1),
+            Math.max(0.01, Number(projectile.explosionDuration) || 0.22)
+          );
+          if (enemySystem && typeof enemySystem.applyDamageAtPoint === "function") {
+            enemySystem.applyDamageAtPoint(
+              projectileImpactWorldPos,
+              Math.max(0, Number(projectile.splashRadius) || 0),
+              Math.max(0, Number(projectile.damage) || 0)
+            );
+          }
+          removeProjectile(i);
+          continue;
         }
+        if (tooFarFromPlayer) {
+          removeProjectile(i);
+        }
+        continue;
+      }
+
+      if (hitGround) {
+        projectileImpactWorldPos.copy(projectile.mesh.position);
+        if (Number.isFinite(surfaceY)) {
+          projectileImpactWorldPos.y = surfaceY;
+        }
+        spawnProjectileImpact(projectileImpactWorldPos);
+        removeProjectile(i);
+        continue;
+      }
+
+      if (hitEnemyMesh) {
+        if (
+          enemySystem
+          && typeof enemySystem.applyDamageToEnemyMesh === "function"
+        ) {
+          enemySystem.applyDamageToEnemyMesh(hitEnemyMesh, Math.max(0, Number(projectile.damage) || 0));
+        }
+        spawnProjectileImpact(projectile.mesh.position);
+        removeProjectile(i);
+        continue;
+      }
+
+      if (hitObstacle) {
+        spawnProjectileImpact(projectile.mesh.position);
+        removeProjectile(i);
+        continue;
+      }
+
+      if (projectile.life <= 0 || tooFarFromPlayer) {
         removeProjectile(i);
       }
+    }
+  }
+
+  function updateSniperZoom(deltaSeconds) {
+    const sniperConfig = getWeaponConfig("sniper");
+    if (!sniperConfig) {
+      if (Math.abs(camera.fov - baseCameraFov) > 1e-4) {
+        camera.fov = baseCameraFov;
+        camera.updateProjectionMatrix();
+      }
+      return;
+    }
+
+    const zoomInSpeed = Math.max(0.1, Number(sniperConfig.zoomInSpeed) || 10);
+    const zoomOutSpeed = Math.max(0.1, Number(sniperConfig.zoomOutSpeed) || 8);
+    const shouldZoomIn = selectedWeaponType === "sniper" && primaryHeld && !isMenuMode;
+    const delta = shouldZoomIn ? (zoomInSpeed * deltaSeconds) : (-zoomOutSpeed * deltaSeconds);
+    sniperZoomProgress = Math.max(0, Math.min(1, sniperZoomProgress + delta));
+
+    const targetZoomFov = Math.max(1, Number(sniperConfig.zoomFov) || defaultSniperZoomFov);
+    const targetFov = THREE.MathUtils.lerp(baseCameraFov, targetZoomFov, sniperZoomProgress);
+    if (Math.abs(camera.fov - targetFov) > 1e-4) {
+      camera.fov = targetFov;
+      camera.updateProjectionMatrix();
+    }
+  }
+
+  function updateWeaponFiring(deltaSeconds, enemySystem) {
+    weaponCooldownRemaining = Math.max(0, weaponCooldownRemaining - Math.max(0, deltaSeconds));
+
+    if (selectedWeaponType === "sniper") {
+      if (primaryReleasedSinceLastUpdate && !isMenuMode) {
+        fireSniper(enemySystem);
+      }
+      primaryReleasedSinceLastUpdate = false;
+      return;
+    }
+
+    primaryReleasedSinceLastUpdate = false;
+    if (!primaryHeld || isMenuMode) {
+      return;
+    }
+
+    if (weaponCooldownRemaining > 0) {
+      return;
+    }
+
+    if (selectedWeaponType === "machineGun") {
+      fireMachineGun();
+      return;
+    }
+    if (selectedWeaponType === "bazooka") {
+      fireBazooka();
     }
   }
 
@@ -1514,17 +1840,19 @@ export function createPlayer({
   }
 
   function update(deltaSeconds, enemySystem) {
-    shotDelayRemaining = Math.max(0, shotDelayRemaining - Math.max(0, deltaSeconds));
     updateLook();
     movementStartPosition.copy(camera.position);
     updateMovement(deltaSeconds);
-    updateWeaponChargeRecharge(deltaSeconds);
+    updateWeaponFiring(deltaSeconds, enemySystem);
+    updateSniperZoom(deltaSeconds);
     const movementSpeed = deltaSeconds > 0
       ? movementStartPosition.distanceTo(camera.position) / deltaSeconds
       : 0;
     updateGunVisuals(deltaSeconds, movementSpeed);
     updateProjectiles(deltaSeconds, enemySystem);
     updateProjectileImpacts(deltaSeconds);
+    updateSniperBeamEffects(deltaSeconds);
+    updateBazookaExplosionEffects(deltaSeconds);
   }
 
   function resetMovement() {
@@ -1555,11 +1883,29 @@ export function createPlayer({
       impact?.ring?.material?.dispose?.();
     }
     projectileImpacts.length = 0;
+
+    for (const beamEffect of sniperBeamEffects) {
+      if (beamEffect?.mesh?.parent) {
+        scene.remove(beamEffect.mesh);
+      }
+      beamEffect?.mesh?.geometry?.dispose?.();
+      beamEffect?.material?.dispose?.();
+    }
+    sniperBeamEffects.length = 0;
+
+    for (const explosion of bazookaExplosionEffects) {
+      if (explosion?.mesh?.parent) {
+        scene.remove(explosion.mesh);
+      }
+      explosion?.material?.dispose?.();
+    }
+    bazookaExplosionEffects.length = 0;
   }
 
   function resetRunState() {
     resetMovement();
     setMenuMode(false);
+    setPrimaryHeld(false);
 
     verticalVelocity = 0;
     gunFlashTimer = 0;
@@ -1569,17 +1915,17 @@ export function createPlayer({
 
     playerDamageMultiplier = 1;
     playerFireRateMultiplier = 1;
-    currentFireCooldown = baseFireCooldown;
-    currentBurstShotDelay = Math.max(0, baseBurstShotDelay);
-    maxWeaponCharges = baseMaxCharges;
-    currentWeaponCharges = Math.min(maxWeaponCharges, baseStartingCharges);
-    chargeReloadProgress = 0;
-    shotDelayRemaining = 0;
-    weaponPierceCount = baseWeaponPierce;
+    selectedWeaponType = defaultWeaponType;
+    primaryHeld = false;
+    primaryReleasedSinceLastUpdate = false;
+    weaponCooldownRemaining = 0;
+    sniperZoomProgress = 0;
+    camera.fov = baseCameraFov;
+    camera.updateProjectionMatrix();
 
     clearActiveProjectilesAndImpacts();
-    rebuildChargeDots();
-    updateReloadBar(currentWeaponCharges >= maxWeaponCharges ? 1 : 0);
+    applyWeaponVisualTheme(selectedWeaponType);
+    updateReloadBar(1);
   }
 
   function getPosition() {
@@ -1590,7 +1936,9 @@ export function createPlayer({
     controls,
     update,
     jump,
-    tryShoot,
+    setPrimaryHeld,
+    setWeaponType,
+    getWeaponType,
     addLookInput,
     setVirtualMove,
     setJumpHeld,
@@ -1602,8 +1950,6 @@ export function createPlayer({
     upgradePlayerDamage,
     upgradePlayerFireRate,
     upgradeJetpackFuelEfficiency,
-    upgradeWeaponMaxCharges,
-    upgradeWeaponPierce,
     setMenuMode,
     disableJetpackFuelConsumption,
   };

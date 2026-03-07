@@ -725,6 +725,67 @@ function drawIconEditorPlayerSpawn(ctx, x, y, size) {
   ctx.fillRect(x + size * 0.47, y + size * 0.53, size * 0.06, size * 0.17);
 }
 
+function drawIconWeaponMachineGun(ctx, x, y, size) {
+  drawPanel(
+    ctx,
+    x + size * 0.2,
+    y + size * 0.42,
+    size * 0.52,
+    size * 0.2,
+    size * 0.06,
+    "rgba(137, 230, 255, 0.92)",
+    "rgba(198, 244, 255, 0.95)",
+    Math.max(1.2, size * 0.04)
+  );
+  ctx.fillStyle = "rgba(104, 200, 255, 0.9)";
+  ctx.fillRect(x + size * 0.69, y + size * 0.46, size * 0.16, size * 0.11);
+  ctx.fillRect(x + size * 0.29, y + size * 0.6, size * 0.13, size * 0.2);
+}
+
+function drawIconWeaponSniper(ctx, x, y, size) {
+  ctx.strokeStyle = "rgba(174, 223, 255, 0.96)";
+  ctx.lineWidth = Math.max(1.4, size * 0.045);
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.16, y + size * 0.56);
+  ctx.lineTo(x + size * 0.8, y + size * 0.42);
+  ctx.stroke();
+  drawPanel(
+    ctx,
+    x + size * 0.36,
+    y + size * 0.35,
+    size * 0.16,
+    size * 0.1,
+    size * 0.04,
+    "rgba(144, 210, 255, 0.9)",
+    "rgba(203, 241, 255, 0.95)",
+    Math.max(1.1, size * 0.04)
+  );
+  ctx.strokeStyle = "rgba(139, 255, 234, 0.9)";
+  ctx.lineWidth = Math.max(1.1, size * 0.035);
+  ctx.beginPath();
+  ctx.arc(x + size * 0.79, y + size * 0.43, size * 0.16, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function drawIconWeaponBazooka(ctx, x, y, size) {
+  drawPanel(
+    ctx,
+    x + size * 0.17,
+    y + size * 0.45,
+    size * 0.5,
+    size * 0.2,
+    size * 0.06,
+    "rgba(255, 192, 132, 0.92)",
+    "rgba(255, 229, 194, 0.95)",
+    Math.max(1.2, size * 0.04)
+  );
+  ctx.fillStyle = "rgba(255, 166, 111, 0.92)";
+  ctx.fillRect(x + size * 0.65, y + size * 0.49, size * 0.18, size * 0.12);
+  ctx.beginPath();
+  ctx.arc(x + size * 0.8, y + size * 0.28, size * 0.08, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawIconDefault(ctx, x, y, size) {
   drawTowerBaseIcon(ctx, x, y, size);
 }
@@ -824,6 +885,15 @@ function drawIconById(ctx, iconId, x, y, size) {
     case "player_pickup_range":
       drawIconPickupRange(ctx, x, y, size);
       return;
+    case "weapon_machine_gun":
+      drawIconWeaponMachineGun(ctx, x, y, size);
+      return;
+    case "weapon_sniper":
+      drawIconWeaponSniper(ctx, x, y, size);
+      return;
+    case "weapon_bazooka":
+      drawIconWeaponBazooka(ctx, x, y, size);
+      return;
     case "editor_eraser":
       drawIconEditorEraser(ctx, x, y, size);
       return;
@@ -908,6 +978,8 @@ export function createUiOverlay({
   const state = {
     menuOpen: false,
     menuOptions: [],
+    menuTitle: "Upgrade Ready",
+    menuSubtitle: "Select an upgrade",
     hoveredMenuIndex: -1,
     menuCursorX: viewportWidth * 0.5,
     menuCursorY: viewportHeight * 0.5,
@@ -987,6 +1059,12 @@ export function createUiOverlay({
     }
     if (Array.isArray(partialState.menuOptions)) {
       state.menuOptions = partialState.menuOptions.slice(0, 3);
+    }
+    if (typeof partialState.menuTitle === "string") {
+      state.menuTitle = partialState.menuTitle;
+    }
+    if (typeof partialState.menuSubtitle === "string") {
+      state.menuSubtitle = partialState.menuSubtitle;
     }
     if (typeof partialState.hoveredMenuIndex === "number") {
       state.hoveredMenuIndex = partialState.hoveredMenuIndex;
@@ -2136,11 +2214,11 @@ export function createUiOverlay({
     drawCtx.textAlign = "center";
     drawCtx.textBaseline = "top";
     drawCtx.font = `700 ${clamp(panelWidth * 0.08, 21, 30)}px ${FONT_STACK}`;
-    drawCtx.fillText("Upgrade Ready", panelX + panelWidth * 0.5, panelY + panelPadding);
+    drawCtx.fillText(state.menuTitle || "Upgrade Ready", panelX + panelWidth * 0.5, panelY + panelPadding);
     drawCtx.font = `500 ${clamp(panelWidth * 0.04, 12, 16)}px ${FONT_STACK}`;
     drawCtx.fillStyle = "rgba(228, 240, 255, 0.82)";
     drawCtx.fillText(
-      "Select an upgrade",
+      state.menuSubtitle || "Select an upgrade",
       panelX + panelWidth * 0.5,
       panelY + panelPadding + clamp(panelWidth * 0.1, 30, 40)
     );

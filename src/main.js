@@ -14,9 +14,34 @@ const MOBILE_UI_CONFIG = UI_CONFIG.mobile ?? {};
 const WAVE_CONFIG = GAME_CONFIG.waves;
 const ECONOMY_CONFIG = GAME_CONFIG.economy ?? {};
 const ENEMY_CONFIG = GAME_CONFIG.enemies ?? {};
+const PLAYER_CONFIG = GAME_CONFIG.player ?? {};
 const ENEMY_TYPES = ENEMY_CONFIG.types ?? {};
 const CONFIGURED_ROUNDS = Array.isArray(WAVE_CONFIG.rounds) ? WAVE_CONFIG.rounds : [];
 const UPGRADE_DEFINITIONS = Array.isArray(GAME_CONFIG.upgrades) ? GAME_CONFIG.upgrades : [];
+const DEFAULT_RUN_WEAPON_OPTIONS = [
+  { type: "machineGun", label: "Machine Gun", iconId: "weapon_machine_gun" },
+  { type: "sniper", label: "Sniper", iconId: "weapon_sniper" },
+  { type: "bazooka", label: "Bazooka", iconId: "weapon_bazooka" },
+];
+const RUN_WEAPON_OPTIONS = Array.isArray(PLAYER_CONFIG.weaponSelection?.options)
+  ? PLAYER_CONFIG.weaponSelection.options
+    .filter((option) => option && typeof option.type === "string" && option.type.length > 0)
+    .map((option) => ({
+      type: option.type,
+      label: typeof option.label === "string" && option.label.length > 0
+        ? option.label
+        : option.type,
+      iconId: typeof option.iconId === "string" && option.iconId.length > 0
+        ? option.iconId
+        : "weapon_machine_gun",
+    }))
+  : DEFAULT_RUN_WEAPON_OPTIONS.slice();
+const MENU_MODE_UPGRADE = "upgrade";
+const MENU_MODE_WEAPON_SELECT = "weapon_select";
+const UPGRADE_MENU_TITLE = "Upgrade Ready";
+const UPGRADE_MENU_SUBTITLE = "Select an upgrade";
+const WEAPON_MENU_TITLE = "Choose Your Weapon";
+const WEAPON_MENU_SUBTITLE = "Pick one for this run";
 const TOWER_UNLOCK_UPGRADE_IDS = UPGRADE_DEFINITIONS
   .filter(
     (definition) => typeof definition?.id === "string"
@@ -1018,6 +1043,9 @@ function updateMoneyDrops(deltaSeconds) {
 }
 
 function handlePrimaryAction() {
+  if (!player) {
+    return;
+  }
   if (waveState === "EDITOR") {
     const didMutateLevel = levelEditor?.applyPrimaryAction?.();
     if (didMutateLevel) {
@@ -1028,11 +1056,10 @@ function handlePrimaryAction() {
   if (towerSystem?.isBuildMode()) {
     const didPlaceTower = towerSystem.placeSelectedTower();
     if (didPlaceTower) {
-      isPrimaryDown = false;
+      setPrimaryDownState(false);
     }
     return;
   }
-  player.tryShoot();
 }
 
 function handleHudButtonAction(buttonId) {
@@ -1067,6 +1094,10 @@ let vCursorX = viewportWidth / 2;
 let vCursorY = viewportHeight / 2;
 let hoveredUpgradeIndex = -1;
 let currentUpgradeOptions = [];
+let currentWeaponOptions = [];
+let currentMenuMode = MENU_MODE_UPGRADE;
+let currentMenuTitle = UPGRADE_MENU_TITLE;
+let currentMenuSubtitle = UPGRADE_MENU_SUBTITLE;
 let menuAdvancesWaveOnChoice = true;
 let menuResumeWaveState = "PLAYING";
 let menuConsumesPendingLevelUp = false;
@@ -1100,6 +1131,19 @@ const mobileInput = {
   suppressPrimaryFireUntilRelease: false,
 };
 const upgradeCountsById = new Map();
+
+function setPrimaryDownState(isDown) {
+  isPrimaryDown = !!isDown;
+  if (player && typeof player.setPrimaryHeld === "function") {
+    player.setPrimaryHeld(isPrimaryDown);
+  }
+}
+
+function getActiveMenuOptions() {
+  return currentMenuMode === MENU_MODE_WEAPON_SELECT
+    ? currentWeaponOptions
+    : currentUpgradeOptions;
+}
 
 function updateMenuHoverFromVirtualCursor() {
   if (waveState !== "MENU") {
@@ -1205,16 +1249,6 @@ function applyUpgradeGrants(grants = {}) {
     appliedAny = true;
   }
 
-  if (typeof grants.weaponMaxChargesMultiplier === "number" && player) {
-    player.upgradeWeaponMaxCharges(grants.weaponMaxChargesMultiplier);
-    appliedAny = true;
-  }
-
-  if (typeof grants.weaponPierceAdd === "number" && player) {
-    player.upgradeWeaponPierce(grants.weaponPierceAdd);
-    appliedAny = true;
-  }
-
   if (typeof grants.pickupRangeAdd === "number") {
     upgradeMoneyPickupRange(grants.pickupRangeAdd);
     appliedAny = true;
@@ -1301,8 +1335,13 @@ function addExperience(amount) {
 
 function finishUpgradeMenuChoice() {
   currentUpgradeOptions = [];
+  currentWeaponOptions = [];
   hoveredUpgradeIndex = -1;
+  currentMenuMode = MENU_MODE_UPGRADE;
+  currentMenuTitle = UPGRADE_MENU_TITLE;
+  currentMenuSubtitle = UPGRADE_MENU_SUBTITLE;
   player.setMenuMode(false);
+  setPrimaryDownState(false);
   resetMobileInputState();
   if (menuAdvancesWaveOnChoice) {
     startBuildPhase(currentWave + 1);
@@ -1333,6 +1372,72 @@ function applyUpgradeChoice(index) {
   }
   finishUpgradeMenuChoice();
   return true;
+}
+
+function showWeaponSelectionMenu() {
+  if (!player) {
+    return false;
+  }
+
+  const menuOptions = (RUN_WEAPON_OPTIONS.length > 0 ? RUN_WEAPON_OPTIONS : DEFAULT_RUN_WEAPON_OPTIONS)
+    .slice(0, 3)
+    .map((option) => ({
+      ...option,
+      apply: () => {
+        player.setWeaponType(option.type);
+      },
+    }));
+
+  if (menuOptions.length === 0) {
+    return false;
+  }
+
+  currentUpgradeOptions = [];
+  currentWeaponOptions = menuOptions;
+  currentMenuMode = MENU_MODE_WEAPON_SELECT;
+  currentMenuTitle = WEAPON_MENU_TITLE;
+  currentMenuSubtitle = WEAPON_MENU_SUBTITLE;
+  hoveredUpgradeIndex = -1;
+  setPrimaryDownState(false);
+  waveState = "MENU";
+  player.setMenuMode(true);
+  resetMobileInputState();
+  vCursorX = viewportWidth * 0.5;
+  vCursorY = viewportHeight * 0.5;
+  updateMenuHoverFromVirtualCursor();
+  return true;
+}
+
+function finishWeaponSelectionChoice() {
+  currentWeaponOptions = [];
+  hoveredUpgradeIndex = -1;
+  currentMenuMode = MENU_MODE_UPGRADE;
+  currentMenuTitle = UPGRADE_MENU_TITLE;
+  currentMenuSubtitle = UPGRADE_MENU_SUBTITLE;
+  player.setMenuMode(false);
+  setPrimaryDownState(false);
+  resetMobileInputState();
+  startBuildPhase(WAVE_CONFIG.initialWave);
+}
+
+function applyWeaponChoice(index) {
+  if (index < 0 || index >= currentWeaponOptions.length) {
+    return false;
+  }
+  const selectedOption = currentWeaponOptions[index];
+  if (!selectedOption || typeof selectedOption.apply !== "function") {
+    return false;
+  }
+  selectedOption.apply();
+  finishWeaponSelectionChoice();
+  return true;
+}
+
+function applyMenuChoice(index) {
+  if (currentMenuMode === MENU_MODE_WEAPON_SELECT) {
+    return applyWeaponChoice(index);
+  }
+  return applyUpgradeChoice(index);
 }
 
 function getCanvasPointerPosition(event) {
@@ -1683,7 +1788,7 @@ function resetMobileInputState() {
   mobileInput.previousPrimaryPressed = false;
   mobileInput.pendingBuildConfirm = false;
   mobileInput.suppressPrimaryFireUntilRelease = false;
-  isPrimaryDown = false;
+  setPrimaryDownState(false);
   if (player) {
     player.setVirtualMove(0, 0);
     if (typeof player.setJumpHeld === "function") {
@@ -1702,6 +1807,7 @@ function releaseMobileButtonPointer(pointerId) {
     if (action === "primary") {
       mobileInput.pendingBuildConfirm = false;
       mobileInput.suppressPrimaryFireUntilRelease = false;
+      setPrimaryDownState(false);
     }
     if (action === "jump" && player && typeof player.setJumpHeld === "function") {
       player.setJumpHeld(false);
@@ -1749,7 +1855,7 @@ function applyMobileGameplayInput() {
     if (typeof player.setJumpHeld === "function") {
       player.setJumpHeld(false);
     }
-    isPrimaryDown = false;
+    setPrimaryDownState(false);
     mobileInput.previousPrimaryPressed = false;
     return;
   }
@@ -1761,7 +1867,7 @@ function applyMobileGameplayInput() {
 
   const primaryPressed = !!mobileInput.pressedButtons.primary;
   if (towerSystem.isBuildMode()) {
-    isPrimaryDown = false;
+    setPrimaryDownState(false);
     if (
       mobileInput.pendingBuildConfirm
       || (primaryPressed && !mobileInput.previousPrimaryPressed)
@@ -1770,9 +1876,11 @@ function applyMobileGameplayInput() {
       mobileInput.pendingBuildConfirm = false;
     }
   } else {
-    isPrimaryDown = mobileInput.suppressPrimaryFireUntilRelease
-      ? false
-      : primaryPressed;
+    setPrimaryDownState(
+      mobileInput.suppressPrimaryFireUntilRelease
+        ? false
+        : primaryPressed
+    );
     mobileInput.pendingBuildConfirm = false;
   }
   mobileInput.previousPrimaryPressed = primaryPressed;
@@ -1859,11 +1967,11 @@ if (!isTouchDevice) {
         return;
       }
       if (player.controls.isLocked) {
-        applyUpgradeChoice(uiOverlay.hitTestMenuOption(vCursorX, vCursorY));
+        applyMenuChoice(uiOverlay.hitTestMenuOption(vCursorX, vCursorY));
         return;
       }
       const pointer = getCanvasPointerPosition(event);
-      applyUpgradeChoice(uiOverlay.hitTestMenuOption(pointer.x, pointer.y));
+      applyMenuChoice(uiOverlay.hitTestMenuOption(pointer.x, pointer.y));
       return;
     }
 
@@ -1896,12 +2004,12 @@ if (!isTouchDevice) {
       return;
     }
 
-    isPrimaryDown = true;
+    setPrimaryDownState(true);
   }, true);
 
   document.addEventListener("mouseup", (event) => {
     if (event.button === 0) {
-      isPrimaryDown = false;
+      setPrimaryDownState(false);
     }
   });
 }
@@ -1942,7 +2050,7 @@ if (isTouchDevice) {
     if (waveState === "MENU") {
       const pickedIndex = uiOverlay.hitTestMenuOption(pointer.x, pointer.y);
       if (pickedIndex >= 0) {
-        applyUpgradeChoice(pickedIndex);
+        applyMenuChoice(pickedIndex);
       }
       event.preventDefault();
       return;
@@ -1977,7 +2085,7 @@ if (isTouchDevice) {
           mobileInput.suppressPrimaryFireUntilRelease = true;
         } else {
           mobileInput.suppressPrimaryFireUntilRelease = false;
-          handlePrimaryAction();
+          setPrimaryDownState(true);
         }
       }
       if (touchedAction === "jump" && player && typeof player.setJumpHeld === "function") {
@@ -2103,11 +2211,13 @@ window.addEventListener("keydown", (event) => {
 
   if (event.code === "KeyK" && !event.repeat) {
     if (waveState === "MENU") {
-      showUpgradeMenu({
-        advanceWaveOnChoice: menuAdvancesWaveOnChoice,
-        resumeWaveState: menuResumeWaveState,
-        consumePendingLevelUp: menuConsumesPendingLevelUp,
-      });
+      if (currentMenuMode === MENU_MODE_UPGRADE) {
+        showUpgradeMenu({
+          advanceWaveOnChoice: menuAdvancesWaveOnChoice,
+          resumeWaveState: menuResumeWaveState,
+          consumePendingLevelUp: menuConsumesPendingLevelUp,
+        });
+      }
       return;
     }
     const resumeWaveState = normalizeMenuResumeWaveState(waveState);
@@ -2141,7 +2251,7 @@ window.addEventListener("keydown", (event) => {
   if (waveState === "MENU") {
     if (event.code === "Digit1" || event.code === "Digit2" || event.code === "Digit3") {
       const optionIndex = Number(event.code.slice(-1)) - 1;
-      applyUpgradeChoice(optionIndex);
+      applyMenuChoice(optionIndex);
     }
     return;
   }
@@ -2191,6 +2301,10 @@ function resetRunStateForNewLevel() {
   queuedWaveNumber = null;
   buildPhaseRemainingSeconds = 0;
   currentUpgradeOptions = [];
+  currentWeaponOptions = [];
+  currentMenuMode = MENU_MODE_UPGRADE;
+  currentMenuTitle = UPGRADE_MENU_TITLE;
+  currentMenuSubtitle = UPGRADE_MENU_SUBTITLE;
   hoveredUpgradeIndex = -1;
   menuAdvancesWaveOnChoice = true;
   menuResumeWaveState = "PLAYING";
@@ -2201,7 +2315,7 @@ function resetRunStateForNewLevel() {
   pendingLevelUpMenus = 0;
   levelingUpgradesExhausted = false;
   upgradeCountsById.clear();
-  isPrimaryDown = false;
+  setPrimaryDownState(false);
   gameSpeedMultiplier = GAME_SPEED_NORMAL;
   clearMoneyDrops();
 }
@@ -2324,6 +2438,10 @@ function enterEditorMode() {
   if (waveState === "MENU") {
     player.setMenuMode(false);
     currentUpgradeOptions = [];
+    currentWeaponOptions = [];
+    currentMenuMode = MENU_MODE_UPGRADE;
+    currentMenuTitle = UPGRADE_MENU_TITLE;
+    currentMenuSubtitle = UPGRADE_MENU_SUBTITLE;
     hoveredUpgradeIndex = -1;
   }
   if (towerSystem?.isBuildMode()) {
@@ -2397,7 +2515,7 @@ function exitEditorMode() {
 
   resetRunStateForNewLevel();
   placeCameraAtPlayerSpawn(grid);
-  startBuildPhase(WAVE_CONFIG.initialWave);
+  showWeaponSelectionMenu();
   return true;
 }
 
@@ -2430,6 +2548,7 @@ function getWaveSegmentsForWave(wave) {
 }
 
 function startBuildPhase(nextWave) {
+  setPrimaryDownState(false);
   queuedWaveNumber = Math.max(1, Math.floor(Number(nextWave) || (currentWave + 1)));
   buildPhaseRemainingSeconds = BUILD_PHASE_DURATION_SECONDS;
   waveState = "BUILD";
@@ -2457,6 +2576,7 @@ function startWave(wave) {
   if (!enemySystem) {
     return;
   }
+  setPrimaryDownState(false);
   currentWave = wave;
   waveState = "PLAYING";
   queuedWaveNumber = null;
@@ -2491,8 +2611,13 @@ function showUpgradeMenu(options = {}) {
   menuAdvancesWaveOnChoice = advanceWaveOnChoice;
   menuResumeWaveState = normalizeMenuResumeWaveState(resumeWaveState);
   menuConsumesPendingLevelUp = !!consumePendingLevelUp;
+  currentMenuMode = MENU_MODE_UPGRADE;
+  currentMenuTitle = UPGRADE_MENU_TITLE;
+  currentMenuSubtitle = UPGRADE_MENU_SUBTITLE;
+  currentWeaponOptions = [];
 
   player.setMenuMode(true);
+  setPrimaryDownState(false);
   resetMobileInputState();
   vCursorX = viewportWidth * 0.5;
   vCursorY = viewportHeight * 0.5;
@@ -2564,9 +2689,6 @@ function animate() {
 
     if (isGameplayWaveState(waveState)) {
       applyMobileGameplayInput();
-      if (isPrimaryDown) {
-        handlePrimaryAction();
-      }
       player.update(simulationDeltaSeconds, enemySystem);
       enemySystem?.update?.(simulationDeltaSeconds, camera);
       towerSystem?.update?.(simulationDeltaSeconds, enemySystem);
@@ -2623,14 +2745,17 @@ function animate() {
   );
   const showTouchControls = isTouchDevice || forceTouchControls;
   const touchPortrait = viewportIsPortrait;
+  const activeMenuOptions = getActiveMenuOptions();
 
   uiOverlay.setState({
     showCrosshair: waveState !== "MENU",
     menuOpen: waveState === "MENU",
-    menuOptions: currentUpgradeOptions.map((upgrade) => ({
-      label: upgrade.label,
-      iconId: upgrade.iconId,
+    menuOptions: activeMenuOptions.map((option) => ({
+      label: option.label,
+      iconId: option.iconId,
     })),
+    menuTitle: currentMenuTitle,
+    menuSubtitle: currentMenuSubtitle,
     hoveredMenuIndex: hoveredUpgradeIndex,
     menuCursorX: vCursorX,
     menuCursorY: vCursorY,
@@ -2676,6 +2801,12 @@ function initGame() {
     domElement: renderer.domElement,
     eyeHeight: grid.eyeHeight,
     movementBounds: grid.levelBounds ?? grid.moveBounds,
+    getSurfaceYAtWorld: (worldX, worldZ) => {
+      if (typeof grid?.getBuildSurfaceYAtWorld === "function") {
+        return grid.getBuildSurfaceYAtWorld(worldX, worldZ);
+      }
+      return Number(grid?.tileTopY) || 0;
+    },
     getMovementObstacles: () => {
       const terrainObstacles = Array.isArray(grid.heightObstacles) ? grid.heightObstacles : [];
       const rampObstacles = Array.isArray(grid.rampObstacles) ? grid.rampObstacles : [];
@@ -2753,7 +2884,7 @@ function initGame() {
     return typeof grid?.getLevelObjects === "function" ? grid.getLevelObjects() : [];
   };
 
-  startBuildPhase(WAVE_CONFIG.initialWave);
+  showWeaponSelectionMenu();
   reportPokiGameLoadingFinished();
   animate();
 }
