@@ -10,8 +10,25 @@
 ### Economy System Contract
 - Money is owned in `main.js` (`playerMoney`), initialized from `GAME_CONFIG.economy.startingCash`.
 - Tower placement spending is delegated to `towers.js` through callbacks passed into `createTowerSystem({ getCurrentMoney, spendMoney, refundMoney })`.
-- Enemy kill rewards are emitted from `enemies.js` only on real death (inside `applyDamage` when health reaches 0), via `onEnemyDefeated(cashReward, enemyType)`.
+- Enemy kill rewards are emitted from `enemies.js` only on real death (inside `applyDamage` when health reaches 0), via `onEnemyDefeated(cashReward, enemyType, dropPosition)`.
 - Enemies that simply reach path end are removed but do not grant money.
+
+### Money Drop Pickup Economy (Latest)
+- Enemy death cash is no longer granted instantly; `main.js` now spawns collectible money-cube drops at the provided enemy `dropPosition`.
+- Drop denomination rules:
+  - every reward point initially spawns as one `$1` cube
+  - settle-time merge combines nearby equal-value settled cubes:
+    - `10 x $1 -> 1 x $10`
+    - `10 x $10 -> 1 x $100`
+  - merge is now two-stage visualized:
+    - selected source cubes first move toward their shared merge center
+    - only after all selected sources arrive is the single higher-value cube spawned
+  - merge cap is `$100` (no `$1000+` tiers)
+- Pickup flow now has two stages:
+  - entering pickup range (horizontal/XZ) starts coin homing toward player feet.
+  - money is granted only once a coin reaches the feet target (`pickupArrivalDistance` threshold), not immediately on range entry.
+- Economy pickup tuning lives in `GAME_CONFIG.economy.pickups` (range, physics, homing speed/arrival threshold, merge radius, merge-converge speed/arrival threshold, denomination colors).
+- New repeatable upgrade grant `grants.pickupRangeAdd` increases money-cube pickup radius.
 
 ### Tower Unlock + Purchase Rules
 - Tower availability is unlock-based, not stock-based.

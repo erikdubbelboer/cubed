@@ -59,6 +59,93 @@ const BUILD_PREVIEW_ARROW_RADIUS_FROM_CELL = 0.07;
 const BUILD_PREVIEW_ARROW_VERTICAL_JITTER = 0.06;
 const FPS_SAMPLE_WINDOW_SECONDS = 0.35;
 const EDITOR_TOOL_ROTATE_INTERVAL_MS = 200;
+const ECONOMY_PICKUP_CONFIG = ECONOMY_CONFIG.pickups ?? {};
+const MONEY_DROP_DENOMINATIONS = [1, 10, 100];
+const MONEY_DROP_MERGE_TARGET_BY_VALUE = new Map([
+  [1, 10],
+  [10, 100],
+]);
+const DEFAULT_MONEY_PICKUP_BASE_RANGE = 1.35;
+const MONEY_PICKUP_BASE_RANGE = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.basePickupRange))
+  ? Math.max(0.05, Number(ECONOMY_PICKUP_CONFIG.basePickupRange))
+  : DEFAULT_MONEY_PICKUP_BASE_RANGE;
+const DEFAULT_MONEY_PICKUP_UPGRADE_ADD = 0.5;
+const MONEY_PICKUP_UPGRADE_ADD = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.pickupRangeUpgradeAdd))
+  ? Number(ECONOMY_PICKUP_CONFIG.pickupRangeUpgradeAdd)
+  : DEFAULT_MONEY_PICKUP_UPGRADE_ADD;
+const MONEY_DROP_SIZE = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.cubeSize))
+  ? Math.max(0.05, Number(ECONOMY_PICKUP_CONFIG.cubeSize))
+  : 0.26;
+const MONEY_DROP_HALF_SIZE = MONEY_DROP_SIZE * 0.5;
+const MONEY_DROP_SPAWN_SPREAD = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.spawnSpread))
+  ? Math.max(0, Number(ECONOMY_PICKUP_CONFIG.spawnSpread))
+  : 0.45;
+const MONEY_DROP_SPAWN_HEIGHT_OFFSET = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.spawnHeightOffset))
+  ? Number(ECONOMY_PICKUP_CONFIG.spawnHeightOffset)
+  : 0.38;
+const MONEY_DROP_RANDOM_HORIZONTAL_SPEED = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.randomHorizontalSpeed))
+  ? Math.max(0, Number(ECONOMY_PICKUP_CONFIG.randomHorizontalSpeed))
+  : 1.05;
+const MONEY_DROP_INITIAL_UPWARD_SPEED = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.spawnUpwardSpeed))
+  ? Number(ECONOMY_PICKUP_CONFIG.spawnUpwardSpeed)
+  : 1.5;
+const MONEY_DROP_GRAVITY = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.gravity))
+  ? Math.max(0, Number(ECONOMY_PICKUP_CONFIG.gravity))
+  : 16;
+const MONEY_DROP_HORIZONTAL_DAMPING = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.horizontalDamping))
+  ? clamp(Number(ECONOMY_PICKUP_CONFIG.horizontalDamping), 0, 1)
+  : 0.9;
+const MONEY_DROP_MERGE_RADIUS = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.mergeRadius))
+  ? Math.max(0.01, Number(ECONOMY_PICKUP_CONFIG.mergeRadius))
+  : 0.75;
+const MONEY_DROP_MERGE_RADIUS_SQ = MONEY_DROP_MERGE_RADIUS * MONEY_DROP_MERGE_RADIUS;
+const MONEY_DROP_MERGE_CONVERGE_SPEED = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.mergeConvergeSpeed))
+  ? Math.max(0.01, Number(ECONOMY_PICKUP_CONFIG.mergeConvergeSpeed))
+  : 7.5;
+const MONEY_DROP_MERGE_CONVERGE_ARRIVAL_DISTANCE = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.mergeConvergeArrivalDistance))
+  ? Math.max(0.01, Number(ECONOMY_PICKUP_CONFIG.mergeConvergeArrivalDistance))
+  : 0.06;
+const MONEY_DROP_MERGE_CONVERGE_ARRIVAL_DISTANCE_SQ = MONEY_DROP_MERGE_CONVERGE_ARRIVAL_DISTANCE * MONEY_DROP_MERGE_CONVERGE_ARRIVAL_DISTANCE;
+const MONEY_DROP_HOMING_SPEED = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.homingSpeed))
+  ? Math.max(0.01, Number(ECONOMY_PICKUP_CONFIG.homingSpeed))
+  : 9;
+const MONEY_DROP_PICKUP_ARRIVAL_DISTANCE = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.pickupArrivalDistance))
+  ? Math.max(0.01, Number(ECONOMY_PICKUP_CONFIG.pickupArrivalDistance))
+  : 0.18;
+const MONEY_DROP_PICKUP_ARRIVAL_DISTANCE_SQ = MONEY_DROP_PICKUP_ARRIVAL_DISTANCE * MONEY_DROP_PICKUP_ARRIVAL_DISTANCE;
+const MONEY_DROP_ROUGHNESS = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.roughness))
+  ? clamp(Number(ECONOMY_PICKUP_CONFIG.roughness), 0, 1)
+  : 0.38;
+const MONEY_DROP_METALNESS = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.metalness))
+  ? clamp(Number(ECONOMY_PICKUP_CONFIG.metalness), 0, 1)
+  : 0.08;
+const MONEY_DROP_EMISSIVE_INTENSITY = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.emissiveIntensity))
+  ? Math.max(0, Number(ECONOMY_PICKUP_CONFIG.emissiveIntensity))
+  : 0.62;
+const pickupValueColors = ECONOMY_PICKUP_CONFIG.valueColors ?? {};
+const pickupValueEmissives = ECONOMY_PICKUP_CONFIG.valueEmissives ?? {};
+const MONEY_DROP_COLOR_BY_VALUE = {
+  1: Number.isFinite(Number(pickupValueColors.value1))
+    ? Number(pickupValueColors.value1)
+    : 0x61ff8e,
+  10: Number.isFinite(Number(pickupValueColors.value10))
+    ? Number(pickupValueColors.value10)
+    : 0x39c35b,
+  100: Number.isFinite(Number(pickupValueColors.value100))
+    ? Number(pickupValueColors.value100)
+    : 0x1f8637,
+};
+const MONEY_DROP_EMISSIVE_BY_VALUE = {
+  1: Number.isFinite(Number(pickupValueEmissives.value1))
+    ? Number(pickupValueEmissives.value1)
+    : 0x1f6d37,
+  10: Number.isFinite(Number(pickupValueEmissives.value10))
+    ? Number(pickupValueEmissives.value10)
+    : 0x16512a,
+  100: Number.isFinite(Number(pickupValueEmissives.value100))
+    ? Number(pickupValueEmissives.value100)
+    : 0x10371e,
+};
 
 function normalizeCardinalRotation(rawRotation = 0) {
   const numericRotation = Number(rawRotation);
@@ -265,6 +352,28 @@ const buildPhasePathPreviewArrowGeometry = new THREE.ConeGeometry(1, 1, 4);
 buildPhasePathPreviewArrowGeometry.rotateX(Math.PI * 0.5);
 const buildPhasePathPreviewArrowForwardAxis = new THREE.Vector3(0, 0, 1);
 const buildPhasePathPreviewTrails = [];
+const moneyDropGroup = new THREE.Group();
+moneyDropGroup.name = "MoneyDropGroup";
+scene.add(moneyDropGroup);
+const moneyDropGeometry = new THREE.BoxGeometry(MONEY_DROP_SIZE, MONEY_DROP_SIZE, MONEY_DROP_SIZE);
+const moneyDropMaterialsByValue = new Map(
+  MONEY_DROP_DENOMINATIONS.map((value) => {
+    const material = new THREE.MeshStandardMaterial({
+      color: MONEY_DROP_COLOR_BY_VALUE[value],
+      emissive: MONEY_DROP_EMISSIVE_BY_VALUE[value],
+      emissiveIntensity: MONEY_DROP_EMISSIVE_INTENSITY,
+      roughness: MONEY_DROP_ROUGHNESS,
+      metalness: MONEY_DROP_METALNESS,
+    });
+    return [value, material];
+  })
+);
+const activeMoneyDrops = [];
+const activeMoneyDropMergeJobs = [];
+const moneyDropMergeScratch = [];
+const moneyDropTempFeetPosition = new THREE.Vector3();
+let nextMoneyDropMergeJobId = 1;
+let moneyPickupRangeBonus = 0;
 
 let player;
 let enemySystem;
@@ -442,6 +551,445 @@ function trySpendMoney(amount) {
   }
   playerMoney -= value;
   return true;
+}
+
+function getMoneyDropSurfaceYAtWorld(worldX, worldZ) {
+  if (typeof grid?.getBuildSurfaceYAtWorld === "function") {
+    const surfaceY = Number(grid.getBuildSurfaceYAtWorld(worldX, worldZ));
+    if (Number.isFinite(surfaceY)) {
+      return surfaceY;
+    }
+  }
+  const fallbackY = Number(grid?.tileTopY);
+  return Number.isFinite(fallbackY) ? fallbackY : 0;
+}
+
+function getEffectiveMoneyPickupRange() {
+  return Math.max(0.05, MONEY_PICKUP_BASE_RANGE + moneyPickupRangeBonus);
+}
+
+function upgradeMoneyPickupRange(addAmount = MONEY_PICKUP_UPGRADE_ADD) {
+  const safeAdd = Number(addAmount);
+  if (!Number.isFinite(safeAdd) || safeAdd <= 0) {
+    return getEffectiveMoneyPickupRange();
+  }
+  moneyPickupRangeBonus += safeAdd;
+  return getEffectiveMoneyPickupRange();
+}
+
+function removeMoneyDropEntry(dropEntry) {
+  if (!dropEntry || dropEntry.removed) {
+    return;
+  }
+  dropEntry.removed = true;
+  dropEntry.mergeJobId = null;
+  if (dropEntry.mesh?.parent) {
+    dropEntry.mesh.parent.remove(dropEntry.mesh);
+  }
+  const dropIndex = activeMoneyDrops.indexOf(dropEntry);
+  if (dropIndex >= 0) {
+    activeMoneyDrops.splice(dropIndex, 1);
+  }
+}
+
+function createMoneyDropEntry(value, x, y, z, options = {}) {
+  const normalizedValue = Math.max(1, Math.floor(Number(value) || 1));
+  const material = moneyDropMaterialsByValue.get(normalizedValue);
+  if (!material) {
+    return null;
+  }
+
+  const mesh = new THREE.Mesh(moneyDropGeometry, material);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.position.set(x, y, z);
+  moneyDropGroup.add(mesh);
+
+  const entry = {
+    value: normalizedValue,
+    mesh,
+    velocity: new THREE.Vector3(0, 0, 0),
+    settled: options.settled === true,
+    homing: options.homing === true,
+    mergeJobId: null,
+    removed: false,
+  };
+
+  if (entry.homing) {
+    entry.settled = false;
+    entry.velocity.set(0, 0, 0);
+  } else if (entry.settled) {
+    const surfaceY = getMoneyDropSurfaceYAtWorld(x, z);
+    entry.mesh.position.y = surfaceY + MONEY_DROP_HALF_SIZE;
+  } else {
+    const launchAngle = Math.random() * Math.PI * 2;
+    const launchSpeed = randomBetween(MONEY_DROP_RANDOM_HORIZONTAL_SPEED * 0.4, MONEY_DROP_RANDOM_HORIZONTAL_SPEED);
+    entry.velocity.x = Math.cos(launchAngle) * launchSpeed;
+    entry.velocity.z = Math.sin(launchAngle) * launchSpeed;
+    entry.velocity.y = MONEY_DROP_INITIAL_UPWARD_SPEED + randomBetween(0, MONEY_DROP_INITIAL_UPWARD_SPEED * 0.55);
+  }
+
+  activeMoneyDrops.push(entry);
+  return entry;
+}
+
+function clearMoneyDrops() {
+  for (let i = activeMoneyDrops.length - 1; i >= 0; i -= 1) {
+    const dropEntry = activeMoneyDrops[i];
+    dropEntry.removed = true;
+    dropEntry.mergeJobId = null;
+    if (dropEntry.mesh?.parent) {
+      dropEntry.mesh.parent.remove(dropEntry.mesh);
+    }
+  }
+  activeMoneyDrops.length = 0;
+  activeMoneyDropMergeJobs.length = 0;
+  nextMoneyDropMergeJobId = 1;
+}
+
+function spawnMoneyDrops(cashReward, dropPosition) {
+  const rewardValue = Math.max(0, Math.floor(Number(cashReward) || 0));
+  if (rewardValue <= 0) {
+    return;
+  }
+
+  const fallbackPosition = player?.getPosition?.() ?? camera.position;
+  const baseX = Number.isFinite(Number(dropPosition?.x))
+    ? Number(dropPosition.x)
+    : (Number(fallbackPosition?.x) || 0);
+  const baseZ = Number.isFinite(Number(dropPosition?.z))
+    ? Number(dropPosition.z)
+    : (Number(fallbackPosition?.z) || 0);
+  const baseSurfaceY = getMoneyDropSurfaceYAtWorld(baseX, baseZ);
+  const dropSourceY = Number.isFinite(Number(dropPosition?.y))
+    ? Number(dropPosition.y)
+    : (baseSurfaceY + MONEY_DROP_HALF_SIZE);
+  const minSpawnY = baseSurfaceY + MONEY_DROP_HALF_SIZE;
+
+  for (let i = 0; i < rewardValue; i += 1) {
+    const spreadDistance = Math.random() * MONEY_DROP_SPAWN_SPREAD;
+    const spreadAngle = Math.random() * Math.PI * 2;
+    const dropX = baseX + (Math.cos(spreadAngle) * spreadDistance);
+    const dropZ = baseZ + (Math.sin(spreadAngle) * spreadDistance);
+    const dropY = Math.max(
+      minSpawnY,
+      dropSourceY + MONEY_DROP_SPAWN_HEIGHT_OFFSET + randomBetween(0, MONEY_DROP_SIZE * 0.5)
+    );
+    createMoneyDropEntry(1, dropX, dropY, dropZ);
+  }
+}
+
+function findSettledMergeCandidateNear(worldX, worldZ, value, maxDistance = MONEY_DROP_MERGE_RADIUS * 2.2) {
+  const maxDistanceSq = Math.max(0.0001, maxDistance * maxDistance);
+  let bestCandidate = null;
+  let bestDistanceSq = Number.POSITIVE_INFINITY;
+  for (const candidate of activeMoneyDrops) {
+    if (
+      !candidate
+      || candidate.removed
+      || !candidate.settled
+      || candidate.homing
+      || candidate.mergeJobId !== null
+      || candidate.value !== value
+    ) {
+      continue;
+    }
+    const dx = candidate.mesh.position.x - worldX;
+    const dz = candidate.mesh.position.z - worldZ;
+    const distSq = (dx * dx) + (dz * dz);
+    if (distSq > maxDistanceSq || distSq >= bestDistanceSq) {
+      continue;
+    }
+    bestDistanceSq = distSq;
+    bestCandidate = candidate;
+  }
+  return bestCandidate;
+}
+
+function queueMoneyDropMergeJob(sourceDrops, targetValue, centerX, centerY, centerZ, sourceValue) {
+  if (!Array.isArray(sourceDrops) || sourceDrops.length !== 10) {
+    return null;
+  }
+  const mergeJob = {
+    id: nextMoneyDropMergeJobId++,
+    sourceDrops,
+    sourceValue,
+    targetValue,
+    center: new THREE.Vector3(centerX, centerY, centerZ),
+  };
+  for (const sourceDrop of sourceDrops) {
+    sourceDrop.mergeJobId = mergeJob.id;
+    sourceDrop.homing = false;
+    sourceDrop.settled = false;
+    sourceDrop.velocity.set(0, 0, 0);
+  }
+  activeMoneyDropMergeJobs.push(mergeJob);
+  return mergeJob;
+}
+
+function tryMergeFromSettledMoneyDrop(seedDrop) {
+  if (
+    !seedDrop
+    || seedDrop.removed
+    || !seedDrop.settled
+    || seedDrop.homing
+    || seedDrop.mergeJobId !== null
+  ) {
+    return;
+  }
+
+  const nextValue = MONEY_DROP_MERGE_TARGET_BY_VALUE.get(seedDrop.value);
+  if (!nextValue) {
+    return;
+  }
+
+  moneyDropMergeScratch.length = 0;
+  for (const candidate of activeMoneyDrops) {
+    if (
+      !candidate
+      || candidate.removed
+      || !candidate.settled
+      || candidate.homing
+      || candidate.mergeJobId !== null
+      || candidate.value !== seedDrop.value
+    ) {
+      continue;
+    }
+    const dx = candidate.mesh.position.x - seedDrop.mesh.position.x;
+    const dz = candidate.mesh.position.z - seedDrop.mesh.position.z;
+    const distSq = (dx * dx) + (dz * dz);
+    if (distSq <= MONEY_DROP_MERGE_RADIUS_SQ) {
+      moneyDropMergeScratch.push({ drop: candidate, distSq });
+    }
+  }
+  if (moneyDropMergeScratch.length < 10) {
+    return;
+  }
+
+  moneyDropMergeScratch.sort((a, b) => a.distSq - b.distSq);
+  const sourceDrops = [];
+  let sumX = 0;
+  let sumY = 0;
+  let sumZ = 0;
+  for (let i = 0; i < 10; i += 1) {
+    const sourceDrop = moneyDropMergeScratch[i].drop;
+    sourceDrops.push(sourceDrop);
+    sumX += sourceDrop.mesh.position.x;
+    sumY += sourceDrop.mesh.position.y;
+    sumZ += sourceDrop.mesh.position.z;
+  }
+
+  queueMoneyDropMergeJob(
+    sourceDrops,
+    nextValue,
+    sumX / 10,
+    sumY / 10,
+    sumZ / 10,
+    seedDrop.value
+  );
+}
+
+function updateMoneyDropMergeJobs(deltaSeconds) {
+  if (activeMoneyDropMergeJobs.length === 0) {
+    return;
+  }
+  const safeDelta = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
+  const moveStep = MONEY_DROP_MERGE_CONVERGE_SPEED * safeDelta;
+
+  for (let i = activeMoneyDropMergeJobs.length - 1; i >= 0; i -= 1) {
+    const mergeJob = activeMoneyDropMergeJobs[i];
+    if (!mergeJob || !Array.isArray(mergeJob.sourceDrops) || mergeJob.sourceDrops.length === 0) {
+      activeMoneyDropMergeJobs.splice(i, 1);
+      continue;
+    }
+
+    let allArrived = true;
+    for (const sourceDrop of mergeJob.sourceDrops) {
+      if (!sourceDrop || sourceDrop.removed) {
+        continue;
+      }
+
+      const dx = mergeJob.center.x - sourceDrop.mesh.position.x;
+      const dy = mergeJob.center.y - sourceDrop.mesh.position.y;
+      const dz = mergeJob.center.z - sourceDrop.mesh.position.z;
+      const distSq = (dx * dx) + (dy * dy) + (dz * dz);
+      if (distSq <= MONEY_DROP_MERGE_CONVERGE_ARRIVAL_DISTANCE_SQ) {
+        sourceDrop.mesh.position.copy(mergeJob.center);
+        continue;
+      }
+      allArrived = false;
+      if (moveStep <= 0) {
+        continue;
+      }
+
+      const dist = Math.sqrt(distSq);
+      if (dist <= 1e-6) {
+        sourceDrop.mesh.position.copy(mergeJob.center);
+        continue;
+      }
+      const moveAmount = Math.min(dist, moveStep);
+      const moveScale = moveAmount / dist;
+      sourceDrop.mesh.position.x += dx * moveScale;
+      sourceDrop.mesh.position.y += dy * moveScale;
+      sourceDrop.mesh.position.z += dz * moveScale;
+    }
+
+    if (!allArrived) {
+      continue;
+    }
+
+    activeMoneyDropMergeJobs.splice(i, 1);
+    for (const sourceDrop of mergeJob.sourceDrops) {
+      if (!sourceDrop || sourceDrop.removed) {
+        continue;
+      }
+      sourceDrop.mergeJobId = null;
+      removeMoneyDropEntry(sourceDrop);
+    }
+
+    const mergedSurfaceY = getMoneyDropSurfaceYAtWorld(mergeJob.center.x, mergeJob.center.z);
+    const mergedDrop = createMoneyDropEntry(
+      mergeJob.targetValue,
+      mergeJob.center.x,
+      mergedSurfaceY + MONEY_DROP_HALF_SIZE,
+      mergeJob.center.z,
+      { settled: true }
+    );
+    if (mergedDrop) {
+      tryMergeFromSettledMoneyDrop(mergedDrop);
+    }
+
+    const nearbyCandidate = findSettledMergeCandidateNear(
+      mergeJob.center.x,
+      mergeJob.center.z,
+      mergeJob.sourceValue
+    );
+    if (nearbyCandidate) {
+      tryMergeFromSettledMoneyDrop(nearbyCandidate);
+    }
+  }
+}
+
+function getPlayerFeetPosition(outPosition) {
+  const playerPosition = player?.getPosition?.();
+  if (!playerPosition || !outPosition) {
+    return false;
+  }
+  const eyeHeight = Number.isFinite(Number(grid?.eyeHeight))
+    ? Number(grid.eyeHeight)
+    : 1.7;
+  outPosition.set(playerPosition.x, playerPosition.y - eyeHeight, playerPosition.z);
+  return true;
+}
+
+function updateMoneyDropHomingAndCollection(deltaSeconds) {
+  if (!getPlayerFeetPosition(moneyDropTempFeetPosition)) {
+    return;
+  }
+  const pickupRange = getEffectiveMoneyPickupRange();
+  const pickupRangeSq = pickupRange * pickupRange;
+  const safeDelta = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
+  const homingStep = MONEY_DROP_HOMING_SPEED * safeDelta;
+  let collectedValue = 0;
+
+  for (let i = activeMoneyDrops.length - 1; i >= 0; i -= 1) {
+    const dropEntry = activeMoneyDrops[i];
+    if (!dropEntry || dropEntry.removed || dropEntry.mergeJobId !== null) {
+      continue;
+    }
+
+    const toFeetX = moneyDropTempFeetPosition.x - dropEntry.mesh.position.x;
+    const toFeetY = moneyDropTempFeetPosition.y - dropEntry.mesh.position.y;
+    const toFeetZ = moneyDropTempFeetPosition.z - dropEntry.mesh.position.z;
+    const horizontalDistanceSq = (toFeetX * toFeetX) + (toFeetZ * toFeetZ);
+
+    if (!dropEntry.homing && horizontalDistanceSq <= pickupRangeSq) {
+      dropEntry.homing = true;
+      dropEntry.settled = false;
+      dropEntry.velocity.set(0, 0, 0);
+    }
+    if (!dropEntry.homing) {
+      continue;
+    }
+
+    const distanceSq = horizontalDistanceSq + (toFeetY * toFeetY);
+    if (distanceSq <= MONEY_DROP_PICKUP_ARRIVAL_DISTANCE_SQ) {
+      collectedValue += Math.max(0, dropEntry.value || 0);
+      removeMoneyDropEntry(dropEntry);
+      continue;
+    }
+
+    if (homingStep <= 0) {
+      continue;
+    }
+
+    const distance = Math.sqrt(distanceSq);
+    if (distance <= 1e-6) {
+      collectedValue += Math.max(0, dropEntry.value || 0);
+      removeMoneyDropEntry(dropEntry);
+      continue;
+    }
+    const moveAmount = Math.min(distance, homingStep);
+    const moveScale = moveAmount / distance;
+    dropEntry.mesh.position.x += toFeetX * moveScale;
+    dropEntry.mesh.position.y += toFeetY * moveScale;
+    dropEntry.mesh.position.z += toFeetZ * moveScale;
+  }
+
+  if (collectedValue > 0) {
+    addMoney(collectedValue);
+  }
+}
+
+function updateMoneyDrops(deltaSeconds) {
+  if (activeMoneyDrops.length === 0) {
+    return;
+  }
+
+  const safeDelta = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
+  const newlySettled = [];
+
+  if (safeDelta > 0) {
+    const damping = Math.pow(MONEY_DROP_HORIZONTAL_DAMPING, safeDelta * 60);
+    for (const dropEntry of activeMoneyDrops) {
+      if (
+        !dropEntry
+        || dropEntry.removed
+        || dropEntry.settled
+        || dropEntry.homing
+        || dropEntry.mergeJobId !== null
+      ) {
+        continue;
+      }
+
+      dropEntry.velocity.y -= MONEY_DROP_GRAVITY * safeDelta;
+      dropEntry.velocity.x *= damping;
+      dropEntry.velocity.z *= damping;
+
+      dropEntry.mesh.position.x += dropEntry.velocity.x * safeDelta;
+      dropEntry.mesh.position.y += dropEntry.velocity.y * safeDelta;
+      dropEntry.mesh.position.z += dropEntry.velocity.z * safeDelta;
+
+      const surfaceY = getMoneyDropSurfaceYAtWorld(dropEntry.mesh.position.x, dropEntry.mesh.position.z);
+      const minCenterY = surfaceY + MONEY_DROP_HALF_SIZE;
+      if (dropEntry.mesh.position.y <= minCenterY) {
+        dropEntry.mesh.position.y = minCenterY;
+        dropEntry.velocity.set(0, 0, 0);
+        dropEntry.settled = true;
+        newlySettled.push(dropEntry);
+      }
+    }
+  }
+
+  for (const settledDrop of newlySettled) {
+    if (!settledDrop || settledDrop.removed || !settledDrop.settled) {
+      continue;
+    }
+    tryMergeFromSettledMoneyDrop(settledDrop);
+  }
+
+  updateMoneyDropMergeJobs(safeDelta);
+  updateMoneyDropHomingAndCollection(safeDelta);
 }
 
 function handlePrimaryAction() {
@@ -622,6 +1170,11 @@ function applyUpgradeGrants(grants = {}) {
 
   if (typeof grants.weaponPierceAdd === "number" && player) {
     player.upgradeWeaponPierce(grants.weaponPierceAdd);
+    appliedAny = true;
+  }
+
+  if (typeof grants.pickupRangeAdd === "number") {
+    upgradeMoneyPickupRange(grants.pickupRangeAdd);
     appliedAny = true;
   }
 
@@ -1519,6 +2072,7 @@ let fpsSampleFrames = 0;
 function resetRunStateForNewLevel() {
   player?.resetRunState?.();
   playerMoney = startingCash;
+  moneyPickupRangeBonus = 0;
   currentWave = WAVE_CONFIG.initialWave;
   waveDelay = 0;
   queuedWaveNumber = null;
@@ -1531,9 +2085,11 @@ function resetRunStateForNewLevel() {
   upgradeCountsById.clear();
   isPrimaryDown = false;
   gameSpeedMultiplier = GAME_SPEED_NORMAL;
+  clearMoneyDrops();
 }
 
 function disposeCombatSystems() {
+  clearMoneyDrops();
   if (towerSystem && typeof towerSystem.dispose === "function") {
     towerSystem.dispose();
   }
@@ -1546,8 +2102,8 @@ function disposeCombatSystems() {
 
 function createEnemySystemForCurrentGrid() {
   return createEnemySystem(scene, grid, {
-    onEnemyDefeated: (cashReward) => {
-      addMoney(cashReward);
+    onEnemyDefeated: (cashReward, _enemyType, dropPosition) => {
+      spawnMoneyDrops(cashReward, dropPosition);
     },
   });
 }
@@ -1893,6 +2449,7 @@ function animate() {
       player.update(simulationDeltaSeconds, enemySystem);
       enemySystem?.update?.(simulationDeltaSeconds, camera);
       towerSystem?.update?.(simulationDeltaSeconds, enemySystem);
+      updateMoneyDrops(simulationDeltaSeconds);
     } else if (waveState === "EDITOR") {
       player.update(simulationDeltaSeconds, enemySystem);
     }

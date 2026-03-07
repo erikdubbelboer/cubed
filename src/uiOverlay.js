@@ -442,6 +442,35 @@ function drawIconWeaponPierce(ctx, x, y, size) {
   ctx.fill();
 }
 
+function drawIconPickupRange(ctx, x, y, size) {
+  const cubeSize = size * 0.28;
+  const cubeX = x + (size * 0.5) - (cubeSize * 0.5);
+  const cubeY = y + (size * 0.5) - (cubeSize * 0.5);
+  drawPanel(
+    ctx,
+    cubeX,
+    cubeY,
+    cubeSize,
+    cubeSize,
+    size * 0.04,
+    "rgba(123, 255, 162, 0.95)",
+    "rgba(193, 255, 216, 0.95)",
+    Math.max(1.2, size * 0.04)
+  );
+
+  const cx = x + size * 0.5;
+  const cy = y + size * 0.5;
+  ctx.strokeStyle = "rgba(118, 255, 171, 0.9)";
+  ctx.lineWidth = Math.max(1.4, size * 0.045);
+  ctx.beginPath();
+  ctx.arc(cx, cy, size * 0.18, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(80, 210, 123, 0.88)";
+  ctx.beginPath();
+  ctx.arc(cx, cy, size * 0.33, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
 function drawIconEditorEraser(ctx, x, y, size) {
   ctx.save();
   ctx.translate(x + size * 0.55, y + size * 0.52);
@@ -631,6 +660,9 @@ function drawIconById(ctx, iconId, x, y, size) {
       return;
     case "player_weapon_pierce":
       drawIconWeaponPierce(ctx, x, y, size);
+      return;
+    case "player_pickup_range":
+      drawIconPickupRange(ctx, x, y, size);
       return;
     case "editor_eraser":
       drawIconEditorEraser(ctx, x, y, size);

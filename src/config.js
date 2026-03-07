@@ -85,6 +85,49 @@ export const GAME_CONFIG = {
     startingCash: 50,
     // Tower types available before any unlock upgrades are chosen.
     startingUnlockedTowers: ["gun"],
+    // Enemy reward pickups (physical cash cubes).
+    pickups: {
+      // Horizontal pickup radius around the player (world units).
+      basePickupRange: 3,
+      // Additive pickup radius granted by the pickup-range upgrade.
+      pickupRangeUpgradeAdd: 1,
+      // Cube visual size in world units.
+      cubeSize: 0.26,
+      // Initial spawn scatter in the XZ plane.
+      spawnSpread: 0.45,
+      // Vertical spawn lift above the enemy defeat position.
+      spawnHeightOffset: 0.38,
+      // Launch tuning for drop burst motion.
+      randomHorizontalSpeed: 1.05,
+      spawnUpwardSpeed: 1.5,
+      // Basic drop physics.
+      gravity: 16,
+      horizontalDamping: 0.9,
+      // Homing speed toward player feet once a cube is in pickup range.
+      homingSpeed: 9,
+      // Cube is only collected once within this distance from player feet.
+      pickupArrivalDistance: 0.18,
+      // Proximity required to auto-merge equal-value settled cubes.
+      mergeRadius: 1.5,
+      // Speed used when merge candidates move toward their shared combine center.
+      mergeConvergeSpeed: 3,
+      // Merge candidates are considered "arrived" within this center distance.
+      mergeConvergeArrivalDistance: 0.06,
+      // Denomination tint map (darker for larger values).
+      valueColors: {
+        value1: 0x61ff8e,
+        value10: 0x39c35b,
+        value100: 0x1f8637,
+      },
+      valueEmissives: {
+        value1: 0x1f6d37,
+        value10: 0x16512a,
+        value100: 0x10371e,
+      },
+      emissiveIntensity: 0.62,
+      roughness: 0.38,
+      metalness: 0.08,
+    },
   },
 
   upgrades: [
@@ -157,6 +200,13 @@ export const GAME_CONFIG = {
       iconId: "player_weapon_pierce",
       maxCount: 1,
       grants: { weaponPierceAdd: 1 },
+    },
+    {
+      id: "player_pickup_range",
+      label: "+pickup rng",
+      iconId: "player_pickup_range",
+      maxCount: null,
+      grants: { pickupRangeAdd: 0.5 },
     },
   ],
 

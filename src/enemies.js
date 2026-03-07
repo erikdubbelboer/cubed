@@ -199,6 +199,7 @@ export function createEnemySystem(scene, grid, options = {}) {
   const tempSegmentEnd = new THREE.Vector3();
   const tempFrontRampContact = new THREE.Vector3();
   const tempBackRampContact = new THREE.Vector3();
+  const tempDefeatDropPosition = new THREE.Vector3();
   const hasPerformanceNow = typeof globalThis.performance?.now === "function";
 
   function getNowMs() {
@@ -1780,7 +1781,8 @@ export function createEnemySystem(scene, grid, options = {}) {
           ? Math.max(0, Math.floor(configuredReward))
           : Math.max(1, Math.floor(enemy.maxHealth || 1));
         if (cashReward > 0) {
-          onEnemyDefeated(cashReward, enemy.type);
+          const dropPosition = getEnemyCollisionCenter(enemy, tempDefeatDropPosition).clone();
+          onEnemyDefeated(cashReward, enemy.type, dropPosition);
         }
       }
       startEnemyDissolve(enemy);
