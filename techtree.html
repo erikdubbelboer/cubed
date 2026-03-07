@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tech Tree Editor</title>
+  <style>
+    body{margin:0;font-family:Inter,Segoe UI,sans-serif;background:#0f1724;color:#e7f0ff;display:grid;grid-template-columns:320px 1fr;height:100vh}
+    #sidebar{padding:12px;border-right:1px solid #29405a;overflow:auto;background:#111b2a}
+    #workspace{position:relative;overflow:hidden}
+    #canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+    input,textarea,button{width:100%;margin:4px 0;background:#1a2840;color:#e7f0ff;border:1px solid #365170;border-radius:6px;padding:8px;box-sizing:border-box}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    pre{white-space:pre-wrap;background:#0b1320;padding:8px;border-radius:6px;max-height:180px;overflow:auto}
+  </style>
+</head>
+<body>
+  <aside id="sidebar">
+    <h3>Tech Tree Editor</h3>
+    <button id="addNode">Add Node</button>
+    <button id="exportJson">Export JSON</button>
+    <button id="importJson">Import JSON</button>
+    <textarea id="jsonBox" rows="10" placeholder="Export/Import JSON"></textarea>
+    <h4>Selected Node</h4>
+    <input id="nodeId" placeholder="id" />
+    <input id="nodeLabel" placeholder="label" />
+    <input id="nodeIcon" placeholder="iconId" />
+    <input id="nodeMaxCount" placeholder="maxCount" />
+    <input id="nodePrereq" placeholder="prerequisites comma-separated" />
+    <textarea id="nodeGrants" rows="5" placeholder='grants JSON e.g. {"towerDamageAdd":0.3}'></textarea>
+    <button id="saveNode">Save Node</button>
+    <button id="deleteNode">Delete Node</button>
+    <pre id="status"></pre>
+  </aside>
+  <main id="workspace">
+    <canvas id="canvas"></canvas>
+  </main>
+  <script type="module" src="/src/techTreeEditor.js"></script>
+</body>
+</html>
