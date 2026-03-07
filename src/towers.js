@@ -6,6 +6,12 @@ const TOWER_TYPES = TOWER_CONFIG.types;
 const GUN_TOWER_CONFIG = TOWER_TYPES.gun;
 const AOE_TOWER_CONFIG = TOWER_TYPES.aoe;
 const SLOW_TOWER_CONFIG = TOWER_TYPES.slow;
+const LASER_SNIPER_TOWER_CONFIG = TOWER_TYPES.laserSniper;
+const MORTAR_TOWER_CONFIG = TOWER_TYPES.mortar;
+const TESLA_TOWER_CONFIG = TOWER_TYPES.tesla;
+const SPIKES_TOWER_CONFIG = TOWER_TYPES.spikes;
+const PLASMA_TOWER_CONFIG = TOWER_TYPES.plasma;
+const BUFF_TOWER_CONFIG = TOWER_TYPES.buff;
 
 const GUN_RANGE = GUN_TOWER_CONFIG.range;
 const GUN_FIRE_INTERVAL = GUN_TOWER_CONFIG.fireInterval;
@@ -57,14 +63,54 @@ const SLOW_PEDESTAL_RADIUS_BOTTOM = SLOW_PEDESTAL_RADIUS_TOP * 1.4;
 const SLOW_TOWER_RADIUS = Math.max(0.05, SLOW_PEDESTAL_RADIUS_BOTTOM * SLOW_VISUAL_SCALE);
 const SLOW_TOWER_HALF_SIZE = SLOW_TOWER_RADIUS;
 const SLOW_TOWER_HEIGHT = SLOW_TOWER_CONFIG.height;
+const LASER_SNIPER_RANGE = LASER_SNIPER_TOWER_CONFIG.range;
+const LASER_SNIPER_FIRE_INTERVAL = LASER_SNIPER_TOWER_CONFIG.fireInterval;
+const LASER_SNIPER_DAMAGE = LASER_SNIPER_TOWER_CONFIG.beamDamage;
+const LASER_SNIPER_BEAM_DURATION = LASER_SNIPER_TOWER_CONFIG.beamDuration;
+const MORTAR_RANGE = MORTAR_TOWER_CONFIG.range;
+const MORTAR_FIRE_INTERVAL = MORTAR_TOWER_CONFIG.fireInterval;
+const MORTAR_SPLASH_DAMAGE = MORTAR_TOWER_CONFIG.splashDamage;
+const MORTAR_SPLASH_RADIUS = MORTAR_TOWER_CONFIG.splashRadius;
+const MORTAR_PROJECTILE_LIFETIME = MORTAR_TOWER_CONFIG.projectileLifetime;
+const TESLA_RANGE = TESLA_TOWER_CONFIG.range;
+const TESLA_FIRE_INTERVAL = TESLA_TOWER_CONFIG.fireInterval;
+const TESLA_DAMAGE = TESLA_TOWER_CONFIG.damage;
+const TESLA_CHAIN_COUNT = Math.max(1, Math.floor(Number(TESLA_TOWER_CONFIG.chainCount) || 1));
+const TESLA_CHAIN_RANGE = TESLA_TOWER_CONFIG.chainRange;
+const TESLA_BOLT_DURATION = TESLA_TOWER_CONFIG.boltDuration;
+const SPIKES_RANGE = SPIKES_TOWER_CONFIG.range;
+const SPIKES_CYCLE_INTERVAL = SPIKES_TOWER_CONFIG.cycleInterval;
+const SPIKES_ACTIVE_DURATION = SPIKES_TOWER_CONFIG.activeDuration;
+const SPIKES_DAMAGE = SPIKES_TOWER_CONFIG.spikeDamage;
+const SPIKES_HIT_RADIUS = SPIKES_TOWER_CONFIG.hitRadius;
+const PLASMA_RANGE = PLASMA_TOWER_CONFIG.range;
+const PLASMA_FIRE_INTERVAL = PLASMA_TOWER_CONFIG.fireInterval;
+const PLASMA_DAMAGE = PLASMA_TOWER_CONFIG.damage;
+const BUFF_RANGE = BUFF_TOWER_CONFIG.range;
 const PATH_RANGE_HIGHLIGHT_VALID_COLOR = GUN_TOWER_CONFIG.rangeHighlightValidColor;
 const PATH_RANGE_HIGHLIGHT_INVALID_COLOR = GUN_TOWER_CONFIG.rangeHighlightInvalidColor;
 const BUILD_FX_CONFIG = TOWER_CONFIG.buildFx ?? {};
-const TOWER_TYPE_ORDER = ["gun", "aoe", "slow"];
+const TOWER_TYPE_ORDER = [
+  "gun",
+  "aoe",
+  "slow",
+  "laserSniper",
+  "mortar",
+  "tesla",
+  "spikes",
+  "plasma",
+  "buff",
+];
 const TOWER_DISPLAY_NAMES = {
   gun: "Gun Tower",
   aoe: "AOE Tower",
   slow: "Slow Tower",
+  laserSniper: "Laser Sniper",
+  mortar: "Mortar Tower",
+  tesla: "Tesla Tower",
+  spikes: "Spikes",
+  plasma: "Plasma Burner",
+  buff: "Buff Tower",
 };
 
 function finiteOr(rawValue, fallback) {
@@ -147,6 +193,50 @@ const BUILD_FX_TELEPORT_FRAGMENT_SHADER = `
   }
 `;
 
+const PLASMA_FLAME_VERTEX_SHADER = `
+  uniform float uTime;
+  varying vec3 vLocalPos;
+
+  void main() {
+    vec3 p = position;
+    float zN = clamp(p.z + 0.5, 0.0, 1.0);
+    float swayX = sin((p.y * 14.0) + (uTime * 8.0) + (p.z * 20.0)) * 0.06 * zN;
+    float swayY = cos((p.x * 13.0) - (uTime * 6.0) + (p.z * 17.0)) * 0.03 * zN;
+    p.x += swayX;
+    p.y += swayY;
+    vLocalPos = p;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+  }
+`;
+
+const PLASMA_FLAME_FRAGMENT_SHADER = `
+  uniform vec3 uColorCore;
+  uniform vec3 uColorEdge;
+  uniform float uOpacity;
+  uniform float uTime;
+  varying vec3 vLocalPos;
+
+  void main() {
+    float zN = clamp(vLocalPos.z + 0.5, 0.0, 1.0);
+    vec2 radialVec = vec2(vLocalPos.x * 1.18, vLocalPos.y * 0.86 + (zN * 0.18));
+    float radial = length(radialVec);
+
+    float coreMask = smoothstep(0.7, 0.08, radial);
+    float startMask = smoothstep(0.0, 0.16, zN);
+    float endMask = 1.0 - smoothstep(0.78, 1.0, zN);
+    float flicker = 0.74 + (0.26 * sin((uTime * 17.0) + (zN * 31.0) + (vLocalPos.y * 14.0)));
+    float turbulence = 0.8 + (0.2 * sin((uTime * 10.0) - (vLocalPos.x * 21.0) + (vLocalPos.y * 16.0)));
+    float alpha = uOpacity * coreMask * startMask * endMask * flicker * turbulence;
+    if (alpha <= 0.02) {
+      discard;
+    }
+
+    vec3 color = mix(uColorEdge, uColorCore, zN);
+    color += uColorCore * pow(zN, 1.8) * 0.32;
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
+
 export function createTowerSystem({
   scene,
   camera,
@@ -164,10 +254,33 @@ export function createTowerSystem({
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -grid.tileTopY);
   const groundHit = new THREE.Vector3();
   const terrainObstacles = Array.isArray(grid.heightObstacles) ? grid.heightObstacles : [];
+  const rampObstacles = Array.isArray(grid.rampObstacles) ? grid.rampObstacles : [];
   const spawnCells = Array.isArray(grid.spawnCells) ? grid.spawnCells : [];
   const endCell = grid.endCell ?? null;
   const gridCellSize = Math.max(0.01, Number(grid.cellSize) || 0);
   const gridCubeHalfSize = gridCellSize * 0.5;
+  const spawnTargetBlockVolumes = spawnCells
+    .map((cell) => {
+      if (!Number.isInteger(cell?.x) || !Number.isInteger(cell?.z)) {
+        return null;
+      }
+      const spawnCellY = Number.isFinite(Number(cell?.y))
+        ? Number(cell.y)
+        : 0;
+      const spawnBaseY = grid.tileTopY + (spawnCellY * gridCellSize);
+      const center = typeof grid.cellToWorldCenter === "function"
+        ? grid.cellToWorldCenter(cell.x, cell.z, spawnBaseY)
+        : new THREE.Vector3(0, spawnBaseY, 0);
+      return {
+        minX: center.x - gridCubeHalfSize,
+        maxX: center.x + gridCubeHalfSize,
+        minY: spawnBaseY,
+        maxY: spawnBaseY + gridCellSize,
+        minZ: center.z - gridCubeHalfSize,
+        maxZ: center.z + gridCubeHalfSize,
+      };
+    })
+    .filter((entry) => !!entry);
 
   const gunProjectileGeometry = new THREE.BoxGeometry(
     GUN_PROJECTILE_SIZE,
@@ -241,6 +354,48 @@ export function createTowerSystem({
   });
   slowFieldMaterial.toneMapped = false;
 
+  const laserBeamGeometry = new THREE.CylinderGeometry(1, 1, 1, 8, 1, true);
+  const laserBeamMaterial = new THREE.MeshBasicMaterial({
+    color: LASER_SNIPER_TOWER_CONFIG.beamColor,
+    transparent: true,
+    opacity: LASER_SNIPER_TOWER_CONFIG.beamOpacity,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  laserBeamMaterial.toneMapped = false;
+
+  const mortarProjectileGeometry = new THREE.BoxGeometry(
+    MORTAR_TOWER_CONFIG.projectileSize,
+    MORTAR_TOWER_CONFIG.projectileSize,
+    MORTAR_TOWER_CONFIG.projectileSize
+  );
+  const mortarProjectileMaterial = new THREE.MeshStandardMaterial({
+    color: MORTAR_TOWER_CONFIG.projectileColor,
+    emissive: MORTAR_TOWER_CONFIG.projectileEmissive,
+    emissiveIntensity: 0.55,
+    roughness: 0.35,
+    metalness: 0.25,
+  });
+  const mortarExplosionGeometry = new THREE.SphereGeometry(1, 16, 12);
+  const mortarExplosionMaterial = new THREE.MeshBasicMaterial({
+    color: MORTAR_TOWER_CONFIG.explosionColor,
+    transparent: true,
+    opacity: MORTAR_TOWER_CONFIG.explosionOpacity,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  mortarExplosionMaterial.toneMapped = false;
+
+  const teslaBoltGeometry = new THREE.CylinderGeometry(1, 1, 1, 6, 1, true);
+  const teslaBoltMaterial = new THREE.MeshBasicMaterial({
+    color: TESLA_TOWER_CONFIG.boltColor,
+    transparent: true,
+    opacity: TESLA_TOWER_CONFIG.boltOpacity,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  teslaBoltMaterial.toneMapped = false;
+
   const buildFxTeleportColumnGeometry = new THREE.CylinderGeometry(1, 1, 1, 22, 1, true);
   const buildFxRingInnerRadius = Math.max(0.01, 1 - BUILD_FX_RING_THICKNESS);
   const buildFxRingGeometry = new THREE.RingGeometry(buildFxRingInnerRadius, 1, 42);
@@ -262,6 +417,10 @@ export function createTowerSystem({
   const tempVecF = new THREE.Vector3();
   const tempVecG = new THREE.Vector3();
   const tempVecH = new THREE.Vector3();
+  const tempVecI = new THREE.Vector3();
+  const tempVecJ = new THREE.Vector3();
+  const tempVecK = new THREE.Vector3();
+  const tempBoxA = new THREE.Box3();
   const tempColorA = new THREE.Color();
   const tempColorB = new THREE.Color();
   const tempQuatA = new THREE.Quaternion();
@@ -270,6 +429,10 @@ export function createTowerSystem({
   const gunMuzzleFlashes = [];
   const aoePulseEffects = [];
   const slowFieldEffects = [];
+  const laserBeamEffects = [];
+  const mortarProjectiles = [];
+  const mortarExplosions = [];
+  const teslaBoltEffects = [];
   const activeBuildEffects = [];
   const gunFootprintCellsX = Math.max(1, Math.floor(Number(GUN_TOWER_CONFIG.footprintCellsX) || 1));
   const gunFootprintCellsZ = Math.max(1, Math.floor(Number(GUN_TOWER_CONFIG.footprintCellsZ) || 2));
@@ -316,6 +479,61 @@ export function createTowerSystem({
       height: SLOW_TOWER_HEIGHT,
       usesLineOfSight: true,
     },
+    laserSniper: {
+      type: "laserSniper",
+      range: LASER_SNIPER_RANGE,
+      radius: Math.max(0.1, Number(LASER_SNIPER_TOWER_CONFIG.halfSize) || 0.95),
+      halfSize: Math.max(0.1, Number(LASER_SNIPER_TOWER_CONFIG.halfSize) || 0.95),
+      height: Math.max(0.1, Number(LASER_SNIPER_TOWER_CONFIG.height) || 2.4),
+      usesLineOfSight: true,
+    },
+    mortar: {
+      type: "mortar",
+      range: MORTAR_RANGE,
+      radius: Math.max(0.1, Number(MORTAR_TOWER_CONFIG.halfSize) || 1.05),
+      halfSize: Math.max(0.1, Number(MORTAR_TOWER_CONFIG.halfSize) || 1.05),
+      height: Math.max(0.1, Number(MORTAR_TOWER_CONFIG.height) || 2.15),
+      usesLineOfSight: false,
+    },
+    tesla: {
+      type: "tesla",
+      range: TESLA_RANGE,
+      radius: Math.max(0.1, Number(TESLA_TOWER_CONFIG.halfSize) || 0.92),
+      halfSize: Math.max(0.1, Number(TESLA_TOWER_CONFIG.halfSize) || 0.92),
+      height: Math.max(0.1, Number(TESLA_TOWER_CONFIG.height) || 2.25),
+      usesLineOfSight: true,
+    },
+    spikes: {
+      type: "spikes",
+      range: SPIKES_RANGE,
+      radius: Math.max(0.1, Number(SPIKES_TOWER_CONFIG.halfSize) || 0.98),
+      halfSize: Math.max(0.1, Number(SPIKES_TOWER_CONFIG.halfSize) || 0.98),
+      height: Math.max(0.1, Number(SPIKES_TOWER_CONFIG.height) || 0.8),
+      usesLineOfSight: false,
+    },
+    plasma: {
+      type: "plasma",
+      range: PLASMA_RANGE,
+      radius: Math.max(
+        0.1,
+        Number.isFinite(Number(PLASMA_TOWER_CONFIG.halfSizeX))
+          ? Number(PLASMA_TOWER_CONFIG.halfSizeX)
+          : Number(PLASMA_TOWER_CONFIG.halfSizeZ) || 0.72
+      ),
+      halfSize: Math.max(0.1, Number(PLASMA_TOWER_CONFIG.halfSizeZ) || 0.72),
+      halfSizeX: Math.max(0.1, Number(PLASMA_TOWER_CONFIG.halfSizeX) || 0.36),
+      halfSizeZ: Math.max(0.1, Number(PLASMA_TOWER_CONFIG.halfSizeZ) || 0.72),
+      height: Math.max(0.1, Number(PLASMA_TOWER_CONFIG.height) || 1.15),
+      usesLineOfSight: false,
+    },
+    buff: {
+      type: "buff",
+      range: BUFF_RANGE,
+      radius: Math.max(0.1, Number(BUFF_TOWER_CONFIG.halfSize) || 0.9),
+      halfSize: Math.max(0.1, Number(BUFF_TOWER_CONFIG.halfSize) || 0.9),
+      height: Math.max(0.1, Number(BUFF_TOWER_CONFIG.height) || 2.1),
+      usesLineOfSight: false,
+    },
   };
 
   let selectedTowerType = null;
@@ -340,15 +558,40 @@ export function createTowerSystem({
     return `${cellX},${cellZ}`;
   }
 
+  function doesTowerTypeBlockPath(towerType) {
+    const normalizedType = normalizeTowerType(towerType);
+    if (!normalizedType) {
+      return true;
+    }
+    if (normalizedType === "plasma" || normalizedType === "spikes") {
+      return false;
+    }
+    return true;
+  }
+
   function normalizeTowerType(type) {
     if (typeof type !== "string") {
       return null;
     }
-    const lowered = type.trim().toLowerCase();
+    const trimmed = type.trim();
+    const lowered = trimmed.toLowerCase();
     if (lowered === "emp") {
       return "aoe";
     }
-    return lowered;
+    if (lowered === "lasersniper" || lowered === "laser_sniper" || lowered === "sniper") {
+      return "laserSniper";
+    }
+    if (lowered === "plasmaburner") {
+      return "plasma";
+    }
+    const byExactKey = Object.keys(towerSpecs).find((key) => key.toLowerCase() === lowered);
+    if (byExactKey) {
+      return byExactKey;
+    }
+    if (Object.prototype.hasOwnProperty.call(towerSpecs, trimmed)) {
+      return trimmed;
+    }
+    return null;
   }
 
   function getTowerSpec(type) {
@@ -449,9 +692,24 @@ export function createTowerSystem({
     return null;
   }
 
+  function findTowerByAnchorKey(anchorKey) {
+    if (typeof anchorKey !== "string" || anchorKey.length === 0) {
+      return null;
+    }
+    for (const tower of towers) {
+      if (tower?.anchorKey === anchorKey) {
+        return tower;
+      }
+    }
+    return null;
+  }
+
   function getBlockedCells() {
     const unique = new Map();
     for (const tower of towers) {
+      if (!doesTowerTypeBlockPath(tower?.towerType)) {
+        continue;
+      }
       const cells = Array.isArray(tower.occupiedCells)
         ? tower.occupiedCells
         : [{ x: tower.cellX, z: tower.cellZ }];
@@ -974,7 +1232,568 @@ export function createTowerSystem({
     return root;
   }
 
+  function createLaserSniperTowerMesh({
+    color,
+    glow,
+    opacity = 1,
+    transparent = false,
+  }) {
+    const root = new THREE.Group();
+    const baseMaterial = new THREE.MeshStandardMaterial({
+      color,
+      emissive: glow,
+      emissiveIntensity: 0.55,
+      roughness: 0.42,
+      metalness: 0.26,
+      transparent,
+      opacity,
+    });
+    const accentMaterial = new THREE.MeshStandardMaterial({
+      color: tempColorA.setHex(color).offsetHSL(0, 0, 0.08),
+      emissive: glow,
+      emissiveIntensity: 0.8,
+      roughness: 0.36,
+      metalness: 0.34,
+      transparent,
+      opacity,
+    });
+
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        LASER_SNIPER_TOWER_CONFIG.baseRadius * 0.84,
+        LASER_SNIPER_TOWER_CONFIG.baseRadius,
+        0.85,
+        16
+      ),
+      baseMaterial
+    );
+    base.position.y = 0.42;
+    root.add(base);
+
+    const spine = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.14, 0.22, LASER_SNIPER_TOWER_CONFIG.spineHeight, 12),
+      accentMaterial
+    );
+    spine.position.y = 0.85 + (LASER_SNIPER_TOWER_CONFIG.spineHeight * 0.5);
+    root.add(spine);
+
+    const dishYawNode = new THREE.Object3D();
+    dishYawNode.position.y = spine.position.y + (LASER_SNIPER_TOWER_CONFIG.spineHeight * 0.38);
+    root.add(dishYawNode);
+
+    const dish = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        LASER_SNIPER_TOWER_CONFIG.dishRadius * 0.35,
+        LASER_SNIPER_TOWER_CONFIG.dishRadius,
+        0.28,
+        14
+      ),
+      accentMaterial
+    );
+    dish.rotation.x = Math.PI * 0.5;
+    dishYawNode.add(dish);
+
+    const emitterNode = new THREE.Object3D();
+    emitterNode.position.set(0, 0, LASER_SNIPER_TOWER_CONFIG.dishRadius * 0.74);
+    dishYawNode.add(emitterNode);
+
+    const outline = createFootprintOutlineMesh({
+      halfSizeX: gridCubeHalfSize,
+      halfSizeZ: gridCubeHalfSize,
+      height: gridCellSize,
+      inset: 0.06,
+      color: glow,
+      opacity: 0.42,
+    });
+    root.add(outline);
+
+    root.userData.materials = [baseMaterial, accentMaterial];
+    root.userData.footprintOutlineMaterial = outline.userData.footprintOutlineMaterial;
+    root.userData.laserSniperYawNode = dishYawNode;
+    root.userData.laserSniperEmitterNode = emitterNode;
+    applyShadowSettings(root);
+    return root;
+  }
+
+  function createMortarTowerMesh({
+    color,
+    glow,
+    opacity = 1,
+    transparent = false,
+  }) {
+    const root = new THREE.Group();
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color,
+      emissive: glow,
+      emissiveIntensity: 0.45,
+      roughness: 0.5,
+      metalness: 0.24,
+      transparent,
+      opacity,
+    });
+    const barrelMaterial = new THREE.MeshStandardMaterial({
+      color: tempColorA.setHex(color).offsetHSL(0, 0, 0.12),
+      emissive: glow,
+      emissiveIntensity: 0.32,
+      roughness: 0.4,
+      metalness: 0.3,
+      transparent,
+      opacity,
+    });
+
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        MORTAR_TOWER_CONFIG.baseRadius,
+        MORTAR_TOWER_CONFIG.baseRadius * 1.08,
+        0.72,
+        14
+      ),
+      bodyMaterial
+    );
+    base.position.y = 0.36;
+    root.add(base);
+
+    const yawNode = new THREE.Object3D();
+    yawNode.position.y = 0.7;
+    root.add(yawNode);
+
+    const barrelPivot = new THREE.Object3D();
+    barrelPivot.rotation.x = -THREE.MathUtils.degToRad(80);
+    yawNode.add(barrelPivot);
+
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        MORTAR_TOWER_CONFIG.barrelRadius,
+        MORTAR_TOWER_CONFIG.barrelRadius * 0.94,
+        MORTAR_TOWER_CONFIG.barrelLength,
+        12
+      ),
+      barrelMaterial
+    );
+    barrel.rotation.x = Math.PI * 0.5;
+    barrel.position.z = MORTAR_TOWER_CONFIG.barrelLength * 0.3;
+    barrelPivot.add(barrel);
+
+    const muzzleNode = new THREE.Object3D();
+    muzzleNode.position.set(0, 0, MORTAR_TOWER_CONFIG.barrelLength * 0.85);
+    barrelPivot.add(muzzleNode);
+
+    const outline = createFootprintOutlineMesh({
+      halfSizeX: gridCubeHalfSize,
+      halfSizeZ: gridCubeHalfSize,
+      height: gridCellSize,
+      inset: 0.06,
+      color: glow,
+      opacity: 0.42,
+    });
+    root.add(outline);
+
+    root.userData.materials = [bodyMaterial, barrelMaterial];
+    root.userData.footprintOutlineMaterial = outline.userData.footprintOutlineMaterial;
+    root.userData.mortarYawNode = yawNode;
+    root.userData.mortarBarrelPivot = barrelPivot;
+    root.userData.mortarMuzzleNode = muzzleNode;
+    applyShadowSettings(root);
+    return root;
+  }
+
+  function createTeslaTowerMesh({
+    color,
+    glow,
+    opacity = 1,
+    transparent = false,
+  }) {
+    const root = new THREE.Group();
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color,
+      emissive: glow,
+      emissiveIntensity: 0.72,
+      roughness: 0.4,
+      metalness: 0.32,
+      transparent,
+      opacity,
+    });
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: glow,
+      transparent: true,
+      opacity: Math.min(1, 0.7 * opacity),
+      depthWrite: false,
+    });
+    ringMaterial.toneMapped = false;
+
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.5, 0.66, 0.72, 14),
+      bodyMaterial
+    );
+    base.position.y = 0.36;
+    root.add(base);
+
+    const core = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.16, 0.22, TESLA_TOWER_CONFIG.coreHeight, 10),
+      bodyMaterial
+    );
+    core.position.y = 0.72 + (TESLA_TOWER_CONFIG.coreHeight * 0.5);
+    root.add(core);
+
+    const ringTop = new THREE.Mesh(
+      new THREE.TorusGeometry(TESLA_TOWER_CONFIG.ringRadius, 0.05, 12, 26),
+      ringMaterial
+    );
+    ringTop.position.y = core.position.y + (TESLA_TOWER_CONFIG.coreHeight * 0.34);
+    ringTop.rotation.x = THREE.MathUtils.degToRad(90);
+    root.add(ringTop);
+
+    const emitterNode = new THREE.Object3D();
+    emitterNode.position.set(0, core.position.y + (TESLA_TOWER_CONFIG.coreHeight * 0.42), 0);
+    root.add(emitterNode);
+
+    const outline = createFootprintOutlineMesh({
+      halfSizeX: gridCubeHalfSize,
+      halfSizeZ: gridCubeHalfSize,
+      height: gridCellSize,
+      inset: 0.06,
+      color: glow,
+      opacity: 0.42,
+    });
+    root.add(outline);
+
+    root.userData.materials = [bodyMaterial, ringMaterial];
+    root.userData.footprintOutlineMaterial = outline.userData.footprintOutlineMaterial;
+    root.userData.teslaEmitterNode = emitterNode;
+    root.userData.teslaRingTop = ringTop;
+    applyShadowSettings(root);
+    ringTop.castShadow = false;
+    ringTop.receiveShadow = false;
+    return root;
+  }
+
+  function createSpikesTowerMesh({
+    color,
+    glow,
+    opacity = 1,
+    transparent = false,
+  }) {
+    const root = new THREE.Group();
+    const baseMaterial = new THREE.MeshStandardMaterial({
+      color,
+      emissive: glow,
+      emissiveIntensity: 0.35,
+      roughness: 0.6,
+      metalness: 0.2,
+      transparent,
+      opacity,
+    });
+    const spikeMaterial = new THREE.MeshStandardMaterial({
+      color: tempColorA.setHex(color).offsetHSL(0, 0, 0.15),
+      emissive: glow,
+      emissiveIntensity: 0.5,
+      roughness: 0.42,
+      metalness: 0.34,
+      transparent,
+      opacity,
+    });
+
+    const spikeBaseHeight = 0.24 * 0.125;
+    const spikeBaseLift = 0.004;
+    const base = new THREE.Mesh(
+      new THREE.BoxGeometry(gridCellSize * 0.86, spikeBaseHeight, gridCellSize * 0.86),
+      baseMaterial
+    );
+    base.position.y = (spikeBaseHeight * 0.5) + spikeBaseLift;
+    root.add(base);
+    const spikeBaseTopY = spikeBaseHeight + spikeBaseLift;
+    const spikeRestOffsetY = 0.002;
+    const spikeGeometry = new THREE.ConeGeometry(0.12, SPIKES_TOWER_CONFIG.spikeHeight, 8);
+    spikeGeometry.translate(0, SPIKES_TOWER_CONFIG.spikeHeight * 0.5, 0);
+
+    const spikeMeshes = [];
+    const spikeCount = Math.max(3, Math.floor(Number(SPIKES_TOWER_CONFIG.spikeCount) || 7));
+    const spikeGridInset = gridCellSize * 0.12;
+    const spikeGridMin = (-gridCellSize * 0.43) + spikeGridInset;
+    const spikeGridMax = (gridCellSize * 0.43) - spikeGridInset;
+    const spikeCols = Math.max(1, Math.ceil(Math.sqrt(spikeCount)));
+    const spikeRows = Math.max(1, Math.ceil(spikeCount / spikeCols));
+    const spikeStepX = (spikeGridMax - spikeGridMin) / Math.max(1, spikeCols);
+    const spikeStepZ = (spikeGridMax - spikeGridMin) / Math.max(1, spikeRows);
+    for (let row = 0; row < spikeRows && spikeMeshes.length < spikeCount; row += 1) {
+      const interleaveOffset = ((row & 1) === 1 && spikeCols > 1) ? 0.5 : 0;
+      for (let col = 0; col < spikeCols && spikeMeshes.length < spikeCount; col += 1) {
+        const x = spikeGridMin + ((col + interleaveOffset + 0.5) * spikeStepX);
+        const z = spikeGridMin + ((row + 0.5) * spikeStepZ);
+        const spike = new THREE.Mesh(
+          spikeGeometry,
+          spikeMaterial
+        );
+        spike.position.set(
+          x,
+          spikeBaseTopY + spikeRestOffsetY,
+          z
+        );
+        spike.scale.y = 0.02;
+        spikeMeshes.push(spike);
+        root.add(spike);
+      }
+    }
+
+    const outline = createFootprintOutlineMesh({
+      halfSizeX: gridCubeHalfSize,
+      halfSizeZ: gridCubeHalfSize,
+      height: gridCellSize,
+      inset: 0.06,
+      color: glow,
+      opacity: 0.42,
+    });
+    root.add(outline);
+
+    root.userData.materials = [baseMaterial, spikeMaterial];
+    root.userData.footprintOutlineMaterial = outline.userData.footprintOutlineMaterial;
+    root.userData.spikeMeshes = spikeMeshes;
+    applyShadowSettings(root);
+    return root;
+  }
+
+  function createPlasmaTowerMesh({
+    color,
+    glow,
+    opacity = 1,
+    transparent = false,
+  }) {
+    const root = new THREE.Group();
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color,
+      emissive: glow,
+      emissiveIntensity: 0.62,
+      roughness: 0.38,
+      metalness: 0.34,
+      transparent,
+      opacity,
+    });
+
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        PLASMA_TOWER_CONFIG.bodyWidth,
+        PLASMA_TOWER_CONFIG.bodyHeight,
+        PLASMA_TOWER_CONFIG.bodyDepth
+      ),
+      bodyMaterial
+    );
+    body.position.y = PLASMA_TOWER_CONFIG.bodyHeight * 0.5;
+    root.add(body);
+
+    const flameLength = Math.max(0.3, Number(PLASMA_TOWER_CONFIG.flameLength) || (gridCellSize * 0.9));
+    const flameWidth = Math.max(0.2, Number(PLASMA_TOWER_CONFIG.flameWidth) || (PLASMA_TOWER_CONFIG.bodyWidth * 0.5));
+    const flameHeight = Math.max(0.2, Number(PLASMA_TOWER_CONFIG.flameHeight) || (PLASMA_TOWER_CONFIG.bodyHeight * 0.48));
+    const flameAnchorY = PLASMA_TOWER_CONFIG.bodyHeight * 0.56;
+    const flameStartZ = (PLASMA_TOWER_CONFIG.bodyDepth * 0.5) + 0.02;
+    const flameCenterZ = flameStartZ + (flameLength * 0.5);
+
+    const flameUniforms = {
+      uTime: { value: 0 },
+      uOpacity: { value: Math.max(0.08, Math.min(1, (Number(PLASMA_TOWER_CONFIG.flameOpacity) || 0.62) * opacity)) },
+      uColorCore: { value: new THREE.Color(glow) },
+      uColorEdge: { value: new THREE.Color(color) },
+    };
+    const flameVolume = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 1, 1, 6, 8, 12),
+      new THREE.ShaderMaterial({
+        uniforms: flameUniforms,
+        vertexShader: PLASMA_FLAME_VERTEX_SHADER,
+        fragmentShader: PLASMA_FLAME_FRAGMENT_SHADER,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      })
+    );
+    flameVolume.material.toneMapped = false;
+    flameVolume.position.set(0, flameAnchorY, flameCenterZ);
+    flameVolume.scale.set(flameWidth, flameHeight, flameLength);
+    flameVolume.renderOrder = 2;
+    root.add(flameVolume);
+
+    const particleCount = Math.max(6, Math.floor(Number(PLASMA_TOWER_CONFIG.particleCount) || 18));
+    const particleBaseSize = Math.max(0.02, Number(PLASMA_TOWER_CONFIG.particleSize) || 0.08);
+    const particleGeometry = new THREE.SphereGeometry(1, 7, 6);
+    const plasmaParticleDescriptors = [];
+    for (let i = 0; i < particleCount; i += 1) {
+      const seedA = Math.random();
+      const seedB = Math.random();
+      const particleMaterial = new THREE.MeshBasicMaterial({
+        color: glow,
+        transparent: true,
+        opacity: 0.55 * opacity,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      particleMaterial.toneMapped = false;
+      const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+      particle.position.set(0, flameAnchorY, flameStartZ);
+      particle.renderOrder = 3;
+      particle.castShadow = false;
+      particle.receiveShadow = false;
+      root.add(particle);
+      plasmaParticleDescriptors.push({
+        mesh: particle,
+        phase: Math.random(),
+        speed: 0.62 + (seedA * 0.95),
+        driftX: (seedA * 2) - 1,
+        driftY: (seedB * 2) - 1,
+        size: particleBaseSize * (0.65 + (0.75 * Math.random())),
+      });
+    }
+
+    root.userData.materials = [bodyMaterial];
+    root.userData.plasmaFlameUniforms = flameUniforms;
+    root.userData.plasmaFlameBaseOpacity = flameUniforms.uOpacity.value;
+    root.userData.plasmaParticleDescriptors = plasmaParticleDescriptors;
+    root.userData.plasmaFlameConfig = {
+      startZ: flameStartZ,
+      length: flameLength,
+      width: flameWidth,
+      height: flameHeight,
+      anchorY: flameAnchorY,
+    };
+    applyShadowSettings(root);
+    flameVolume.castShadow = false;
+    flameVolume.receiveShadow = false;
+    for (const descriptor of plasmaParticleDescriptors) {
+      if (descriptor?.mesh) {
+        descriptor.mesh.castShadow = false;
+        descriptor.mesh.receiveShadow = false;
+      }
+    }
+    return root;
+  }
+
+  function createBuffTowerMesh({
+    color,
+    glow,
+    opacity = 1,
+    transparent = false,
+  }) {
+    const root = new THREE.Group();
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color,
+      emissive: glow,
+      emissiveIntensity: 0.7,
+      roughness: 0.34,
+      metalness: 0.18,
+      transparent,
+      opacity,
+    });
+    const auraMaterial = new THREE.MeshBasicMaterial({
+      color: BUFF_TOWER_CONFIG.auraColor,
+      transparent: true,
+      opacity: BUFF_TOWER_CONFIG.auraOpacity * opacity,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    auraMaterial.toneMapped = false;
+
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.52, 0.66, 0.66, 14),
+      bodyMaterial
+    );
+    base.position.y = 0.33;
+    root.add(base);
+
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(BUFF_TOWER_CONFIG.coreRadius, 14, 10),
+      bodyMaterial
+    );
+    core.position.y = 1.12;
+    root.add(core);
+
+    const halo = new THREE.Mesh(
+      new THREE.TorusGeometry(BUFF_TOWER_CONFIG.haloRadius, 0.08, 12, 28),
+      auraMaterial
+    );
+    halo.position.y = 1.08;
+    halo.rotation.x = THREE.MathUtils.degToRad(90);
+    root.add(halo);
+
+    const aura = new THREE.Mesh(
+      new THREE.SphereGeometry(BUFF_TOWER_CONFIG.range, 20, 14),
+      auraMaterial.clone()
+    );
+    aura.material.opacity = BUFF_TOWER_CONFIG.auraOpacity * opacity;
+    aura.castShadow = false;
+    aura.receiveShadow = false;
+    root.add(aura);
+
+    const outline = createFootprintOutlineMesh({
+      halfSizeX: gridCubeHalfSize,
+      halfSizeZ: gridCubeHalfSize,
+      height: gridCellSize,
+      inset: 0.06,
+      color: glow,
+      opacity: 0.42,
+    });
+    root.add(outline);
+
+    root.userData.materials = [bodyMaterial, auraMaterial, aura.material];
+    root.userData.footprintOutlineMaterial = outline.userData.footprintOutlineMaterial;
+    root.userData.buffAuraMesh = aura;
+    root.userData.buffHaloMesh = halo;
+    applyShadowSettings(root);
+    return root;
+  }
+
   function createTowerPreviewMesh(type) {
+    if (type === "laserSniper") {
+      return createLaserSniperTowerMesh({
+        color: LASER_SNIPER_TOWER_CONFIG.previewColor,
+        glow: LASER_SNIPER_TOWER_CONFIG.previewGlow,
+        opacity: LASER_SNIPER_TOWER_CONFIG.previewOpacity,
+        transparent: true,
+      });
+    }
+
+    if (type === "mortar") {
+      return createMortarTowerMesh({
+        color: MORTAR_TOWER_CONFIG.previewColor,
+        glow: MORTAR_TOWER_CONFIG.previewGlow,
+        opacity: MORTAR_TOWER_CONFIG.previewOpacity,
+        transparent: true,
+      });
+    }
+
+    if (type === "tesla") {
+      return createTeslaTowerMesh({
+        color: TESLA_TOWER_CONFIG.previewColor,
+        glow: TESLA_TOWER_CONFIG.previewGlow,
+        opacity: TESLA_TOWER_CONFIG.previewOpacity,
+        transparent: true,
+      });
+    }
+
+    if (type === "spikes") {
+      return createSpikesTowerMesh({
+        color: SPIKES_TOWER_CONFIG.previewColor,
+        glow: SPIKES_TOWER_CONFIG.previewGlow,
+        opacity: SPIKES_TOWER_CONFIG.previewOpacity,
+        transparent: true,
+      });
+    }
+
+    if (type === "plasma") {
+      return createPlasmaTowerMesh({
+        color: PLASMA_TOWER_CONFIG.previewColor,
+        glow: PLASMA_TOWER_CONFIG.previewGlow,
+        opacity: PLASMA_TOWER_CONFIG.previewOpacity,
+        transparent: true,
+      });
+    }
+
+    if (type === "buff") {
+      return createBuffTowerMesh({
+        color: BUFF_TOWER_CONFIG.previewColor,
+        glow: BUFF_TOWER_CONFIG.previewGlow,
+        opacity: BUFF_TOWER_CONFIG.previewOpacity,
+        transparent: true,
+      });
+    }
+
     if (type === "slow") {
       return createSlowTowerMesh({
         bodyColor: SLOW_TOWER_CONFIG.previewColor,
@@ -1011,6 +1830,48 @@ export function createTowerSystem({
   }
 
   function createTowerPlacedMesh(type) {
+    if (type === "laserSniper") {
+      return createLaserSniperTowerMesh({
+        color: LASER_SNIPER_TOWER_CONFIG.placedColor,
+        glow: LASER_SNIPER_TOWER_CONFIG.placedGlow,
+      });
+    }
+
+    if (type === "mortar") {
+      return createMortarTowerMesh({
+        color: MORTAR_TOWER_CONFIG.placedColor,
+        glow: MORTAR_TOWER_CONFIG.placedGlow,
+      });
+    }
+
+    if (type === "tesla") {
+      return createTeslaTowerMesh({
+        color: TESLA_TOWER_CONFIG.placedColor,
+        glow: TESLA_TOWER_CONFIG.placedGlow,
+      });
+    }
+
+    if (type === "spikes") {
+      return createSpikesTowerMesh({
+        color: SPIKES_TOWER_CONFIG.placedColor,
+        glow: SPIKES_TOWER_CONFIG.placedGlow,
+      });
+    }
+
+    if (type === "plasma") {
+      return createPlasmaTowerMesh({
+        color: PLASMA_TOWER_CONFIG.placedColor,
+        glow: PLASMA_TOWER_CONFIG.placedGlow,
+      });
+    }
+
+    if (type === "buff") {
+      return createBuffTowerMesh({
+        color: BUFF_TOWER_CONFIG.placedColor,
+        glow: BUFF_TOWER_CONFIG.placedGlow,
+      });
+    }
+
     if (type === "slow") {
       return createSlowTowerMesh({
         bodyColor: SLOW_TOWER_CONFIG.placedColor,
@@ -1138,6 +1999,71 @@ export function createTowerSystem({
   }
 
   function setPreviewValidityVisual(isValid) {
+    if (
+      selectedTowerType === "laserSniper"
+      || selectedTowerType === "mortar"
+      || selectedTowerType === "tesla"
+      || selectedTowerType === "spikes"
+      || selectedTowerType === "plasma"
+      || selectedTowerType === "buff"
+    ) {
+      const previewConfigByType = {
+        laserSniper: LASER_SNIPER_TOWER_CONFIG,
+        mortar: MORTAR_TOWER_CONFIG,
+        tesla: TESLA_TOWER_CONFIG,
+        spikes: SPIKES_TOWER_CONFIG,
+        plasma: PLASMA_TOWER_CONFIG,
+        buff: BUFF_TOWER_CONFIG,
+      };
+      const towerConfig = previewConfigByType[selectedTowerType];
+      const colorHex = isValid
+        ? towerConfig.previewColor
+        : towerConfig.previewInvalidColor;
+      const glowHex = isValid
+        ? towerConfig.previewGlow
+        : towerConfig.previewInvalidGlow;
+      const materials = Array.isArray(preview.userData?.materials)
+        ? preview.userData.materials
+        : [];
+      for (const material of materials) {
+        if (!material) {
+          continue;
+        }
+        if (material.color) {
+          material.color.setHex(colorHex);
+        }
+        if (material.emissive) {
+          material.emissive.setHex(glowHex);
+        }
+      }
+      const outlineMaterial = preview.userData?.footprintOutlineMaterial;
+      if (outlineMaterial?.color) {
+        outlineMaterial.color.setHex(glowHex);
+      }
+      const auraMesh = preview.userData?.buffAuraMesh;
+      if (auraMesh?.material?.color) {
+        auraMesh.material.color.setHex(glowHex);
+      }
+      if (selectedTowerType === "plasma") {
+        const flameUniforms = preview.userData?.plasmaFlameUniforms;
+        if (flameUniforms?.uColorCore?.value) {
+          flameUniforms.uColorCore.value.setHex(glowHex);
+        }
+        if (flameUniforms?.uColorEdge?.value) {
+          flameUniforms.uColorEdge.value.setHex(colorHex);
+        }
+        const particleDescriptors = Array.isArray(preview.userData?.plasmaParticleDescriptors)
+          ? preview.userData.plasmaParticleDescriptors
+          : [];
+        for (const descriptor of particleDescriptors) {
+          if (descriptor?.mesh?.material?.color) {
+            descriptor.mesh.material.color.setHex(glowHex);
+          }
+        }
+      }
+      return;
+    }
+
     if (selectedTowerType === "slow") {
       const bodyMaterial = preview.userData.slowBodyMaterial;
       const bandMaterial = preview.userData.slowBandMaterial;
@@ -1261,10 +2187,76 @@ export function createTowerSystem({
     );
   }
 
-  function getCellCenter(cellX, cellZ) {
+  function getCellCenter(cellX, cellZ, y = grid.tileTopY) {
     return typeof grid.cellToWorldCenter === "function"
-      ? grid.cellToWorldCenter(cellX, cellZ)
+      ? grid.cellToWorldCenter(cellX, cellZ, y)
       : new THREE.Vector3(0, 0, 0);
+  }
+
+  function getCellBaseY(cellY = 0) {
+    return grid.tileTopY + (Math.max(0, Number(cellY) || 0) * gridCellSize);
+  }
+
+  function resolvePlasmaPlacementFromRay(ray) {
+    if (typeof grid.raycastWallAnchor !== "function") {
+      return null;
+    }
+    const hit = grid.raycastWallAnchor(ray);
+    if (!hit || !hit.point || !hit.normal) {
+      return null;
+    }
+
+    const rawNormalX = Number(hit.normal.x) || 0;
+    const rawNormalY = Number(hit.normal.y) || 0;
+    const rawNormalZ = Number(hit.normal.z) || 0;
+    if (Math.abs(rawNormalY) > 0.1) {
+      return null;
+    }
+    const absNormalX = Math.abs(rawNormalX);
+    const absNormalZ = Math.abs(rawNormalZ);
+    if (Math.max(absNormalX, absNormalZ) < 1e-3) {
+      return null;
+    }
+    let normalX = 0;
+    let normalZ = 0;
+    if (absNormalX >= absNormalZ) {
+      normalX = rawNormalX < 0 ? -1 : 1;
+    } else {
+      normalZ = rawNormalZ < 0 ? -1 : 1;
+    }
+    if (normalX === 0 && normalZ === 0) {
+      return null;
+    }
+    if (!Number.isInteger(hit.cellX) || !Number.isInteger(hit.cellY) || !Number.isInteger(hit.cellZ)) {
+      return null;
+    }
+
+    const wallBaseY = getCellBaseY(hit.cellY);
+    const wallCenter = getCellCenter(hit.cellX, hit.cellZ);
+    const mountOffset = (gridCellSize * 0.5) + (PLASMA_TOWER_CONFIG.bodyDepth * 0.5) + 0.01;
+    const mountPosition = new THREE.Vector3(
+      wallCenter.x + (normalX * mountOffset),
+      wallBaseY + (gridCellSize * 0.5) - (PLASMA_TOWER_CONFIG.bodyHeight * 0.5),
+      wallCenter.z + (normalZ * mountOffset)
+    );
+    const anchorKey = `plasma:${hit.cellX},${hit.cellY},${hit.cellZ}|${normalX},${normalZ}`;
+    const targetCell = {
+      x: hit.cellX + normalX,
+      z: hit.cellZ + normalZ,
+    };
+
+    return {
+      towerType: "plasma",
+      occupiedCells: [],
+      position: mountPosition,
+      sameSurfaceHeight: true,
+      footprintKey: anchorKey,
+      anchorKey,
+      rotationY: Math.atan2(normalX, normalZ),
+      plasmaDirection: { x: normalX, z: normalZ },
+      plasmaWallCell: { x: hit.cellX, y: hit.cellY, z: hit.cellZ },
+      plasmaTargetCell: targetCell,
+    };
   }
 
   function resolvePlacementFromAim(targetCell, hitPoint, towerType) {
@@ -1308,6 +2300,7 @@ export function createTowerSystem({
     const sameSurfaceHeight = surfaceYs.every((surfaceY) => Number.isFinite(surfaceY) && Math.abs(surfaceY - firstY) <= 1e-4);
     if (!sameSurfaceHeight) {
       return {
+        towerType,
         occupiedCells,
         position: null,
         sameSurfaceHeight: false,
@@ -1322,6 +2315,7 @@ export function createTowerSystem({
     tempVecA.multiplyScalar(1 / Math.max(1, centers.length));
     tempVecA.y = firstY;
     return {
+      towerType,
       occupiedCells,
       position: tempVecA.clone(),
       sameSurfaceHeight: true,
@@ -1330,11 +2324,52 @@ export function createTowerSystem({
   }
 
   function isPlacementLocallyValid(placement) {
-    if (!placement || !placement.position || !isInsideBuildBounds(placement.position)) {
+    if (!placement || !placement.position) {
+      return false;
+    }
+    if (placement.towerType !== "plasma" && !isInsideBuildBounds(placement.position)) {
       return false;
     }
     if (!placement.sameSurfaceHeight) {
       return false;
+    }
+    if (placement.towerType === "plasma") {
+      if (!placement.anchorKey || findTowerByAnchorKey(placement.anchorKey)) {
+        return false;
+      }
+      const targetCell = placement.plasmaTargetCell;
+      const wallCell = placement.plasmaWallCell;
+      const direction = placement.plasmaDirection;
+      if (
+        !Number.isInteger(targetCell?.x)
+        || !Number.isInteger(targetCell?.z)
+        || !Number.isInteger(wallCell?.x)
+        || !Number.isInteger(wallCell?.y)
+        || !Number.isInteger(wallCell?.z)
+        || !Number.isInteger(direction?.x)
+        || !Number.isInteger(direction?.z)
+      ) {
+        return false;
+      }
+      if (typeof grid.isCellInsideLevel === "function" && !grid.isCellInsideLevel(targetCell.x, targetCell.z)) {
+        return false;
+      }
+      if (typeof grid.isRampCell === "function" && grid.isRampCell(targetCell.x, targetCell.z)) {
+        return false;
+      }
+      if (typeof grid.isSpawnCell === "function" && grid.isSpawnCell(targetCell.x, targetCell.z)) {
+        return false;
+      }
+      if (typeof grid.isEndCell === "function" && grid.isEndCell(targetCell.x, targetCell.z)) {
+        return false;
+      }
+      if (typeof grid.getCellHeight === "function") {
+        const targetHeight = Number(grid.getCellHeight(targetCell.x, targetCell.z));
+        if (Number.isFinite(targetHeight) && targetHeight > wallCell.y) {
+          return false;
+        }
+      }
+      return true;
     }
     if (!Array.isArray(placement.occupiedCells) || placement.occupiedCells.length === 0) {
       return false;
@@ -1363,7 +2398,14 @@ export function createTowerSystem({
     if (!isPlacementLocallyValid(placement)) {
       return false;
     }
-    if (!canBlockCellsCached(placement.occupiedCells)) {
+    if (!doesTowerTypeBlockPath(placement?.towerType)) {
+      return true;
+    }
+    if (
+      Array.isArray(placement.occupiedCells)
+      && placement.occupiedCells.length > 0
+      && !canBlockCellsCached(placement.occupiedCells)
+    ) {
       return false;
     }
     return true;
@@ -1432,6 +2474,39 @@ export function createTowerSystem({
     }
 
     raycaster.setFromCamera(aimPoint, camera);
+
+    if (selectedTowerType === "plasma") {
+      const nextPlacement = resolvePlasmaPlacementFromRay(raycaster.ray);
+      if (!nextPlacement) {
+        preview.visible = false;
+        hidePathRangeHighlights();
+        previewValid = false;
+        previewPlacement = null;
+        return;
+      }
+
+      if (suppressPreviewFootprintKey) {
+        if (suppressPreviewFootprintKey === nextPlacement.footprintKey) {
+          preview.visible = false;
+          hidePathRangeHighlights();
+          previewValid = false;
+          previewPlacement = null;
+          return;
+        }
+        setPreviewSuppressedFootprint(null);
+      }
+
+      preview.visible = true;
+      preview.position.copy(nextPlacement.position);
+      preview.rotation.y = nextPlacement.rotationY || 0;
+      previewPlacement = nextPlacement;
+      previewValid = canAffordTower(selectedTowerType)
+        && isPlacementValid(nextPlacement);
+      setPreviewValidityVisual(previewValid);
+      hidePathRangeHighlights();
+      return;
+    }
+
     const hit = typeof grid.raycastBuildSurface === "function"
       ? grid.raycastBuildSurface(raycaster.ray, groundHit)
       : raycaster.ray.intersectPlane(groundPlane, groundHit);
@@ -1475,6 +2550,7 @@ export function createTowerSystem({
     }
 
     preview.visible = true;
+    preview.rotation.y = 0;
     if (nextPlacement.position) {
       preview.position.copy(nextPlacement.position);
     }
@@ -1514,7 +2590,11 @@ export function createTowerSystem({
       cellX: primaryCell?.x,
       cellZ: primaryCell?.z,
       occupiedCells,
-      footprintKey: getFootprintKey(occupiedCells),
+      footprintKey: placement?.footprintKey || getFootprintKey(occupiedCells),
+      anchorKey: placement?.anchorKey ?? null,
+      plasmaTargetCell: placement?.plasmaTargetCell ?? null,
+      plasmaDirection: placement?.plasmaDirection ?? null,
+      plasmaWallCell: placement?.plasmaWallCell ?? null,
       bobClock: Math.random() * Math.PI * 2,
       bobPhase: Math.random() * Math.PI * 2,
       aoeIdleColor: new THREE.Color(AOE_TOWER_CONFIG.idleColor),
@@ -1523,6 +2603,13 @@ export function createTowerSystem({
       aoeEmissiveCharge: new THREE.Color(AOE_TOWER_CONFIG.emissiveCharge),
       gunMuzzleFlashTimer: 0,
       slowProcFlash: 0,
+      spikesCycleTimer: Math.random() * Math.max(0.01, SPIKES_CYCLE_INTERVAL),
+      spikesActiveTimer: 0,
+      spikesDidDamageThisCycle: false,
+      plasmaClock: Math.random() * Math.PI * 2,
+      buffDamageMultiplier: 1,
+      buffFireRateIntervalFactor: 1,
+      buffAuraClock: Math.random() * Math.PI * 2,
       isOperational: true,
       buildFxState: null,
     };
@@ -1855,12 +2942,31 @@ export function createTowerSystem({
 
     const normalizedType = normalizeTowerType(selectedTowerType);
     const resolvedPlacement = {
+      towerType: normalizedType,
       occupiedCells: previewPlacement.occupiedCells.map((cell) => ({ x: cell.x, z: cell.z })),
       position: previewPlacement.position.clone(),
       footprintKey: previewPlacement.footprintKey,
+      anchorKey: previewPlacement.anchorKey ?? null,
+      rotationY: previewPlacement.rotationY ?? 0,
+      plasmaDirection: previewPlacement.plasmaDirection
+        ? { x: previewPlacement.plasmaDirection.x, z: previewPlacement.plasmaDirection.z }
+        : null,
+      plasmaWallCell: previewPlacement.plasmaWallCell
+        ? {
+          x: previewPlacement.plasmaWallCell.x,
+          y: previewPlacement.plasmaWallCell.y,
+          z: previewPlacement.plasmaWallCell.z,
+        }
+        : null,
+      plasmaTargetCell: previewPlacement.plasmaTargetCell
+        ? { x: previewPlacement.plasmaTargetCell.x, z: previewPlacement.plasmaTargetCell.z }
+        : null,
     };
     const towerMesh = createTowerPlacedMesh(normalizedType);
     towerMesh.position.copy(resolvedPlacement.position);
+    if (typeof resolvedPlacement.rotationY === "number") {
+      towerMesh.rotation.y = resolvedPlacement.rotationY;
+    }
     scene.add(towerMesh);
 
     const towerEntry = createTowerEntry(normalizedType, towerMesh, resolvedPlacement.position, resolvedPlacement);
@@ -2049,6 +3155,102 @@ export function createTowerSystem({
         return true;
       }
     }
+
+    const rampSamplePoint = tempVecJ;
+    const segmentDelta = tempVecK.copy(targetPosition).sub(origin);
+    const segmentLength = segmentDelta.length();
+    if (segmentLength <= TOWER_CONFIG.segmentEpsilon) {
+      return false;
+    }
+    const losSampleStep = Math.max(0.22, gridCellSize * 0.12);
+    const sampleCount = THREE.MathUtils.clamp(
+      Math.ceil(segmentLength / losSampleStep),
+      2,
+      72
+    );
+
+    for (const obstacle of rampObstacles) {
+      if (obstacle?.kind !== "ramp") {
+        continue;
+      }
+      const obstaclePos = obstacle?.position ?? obstacle?.mesh?.position;
+      const obstacleBaseY = Number(obstacle?.baseY ?? 0);
+      const obstacleHeight = Number(obstacle?.height);
+      const obstacleDirection = obstacle?.direction;
+      const obstacleHalfSizeX = Number(obstacle?.halfSizeX ?? obstacle?.halfSize);
+      const obstacleHalfSizeZ = Number(obstacle?.halfSizeZ ?? obstacle?.halfSize);
+
+      if (
+        !obstaclePos
+        || !Number.isFinite(obstacleBaseY)
+        || !Number.isFinite(obstacleHeight)
+        || obstacleHeight <= 0
+        || !obstacleDirection
+        || !Number.isFinite(obstacleHalfSizeX)
+        || !Number.isFinite(obstacleHalfSizeZ)
+      ) {
+        continue;
+      }
+
+      const dirXRaw = Number(obstacleDirection.x);
+      const dirZRaw = Number(obstacleDirection.z);
+      const dirLength = Math.hypot(dirXRaw, dirZRaw);
+      if (dirLength <= TOWER_CONFIG.segmentEpsilon) {
+        continue;
+      }
+
+      const dirX = dirXRaw / dirLength;
+      const dirZ = dirZRaw / dirLength;
+      const rightX = -dirZ;
+      const rightZ = dirX;
+      const rampRunsMostlyAlongX = Math.abs(dirX) >= Math.abs(dirZ);
+      const rampAlongHalf = rampRunsMostlyAlongX ? obstacleHalfSizeX : obstacleHalfSizeZ;
+      const rampAcrossHalf = rampRunsMostlyAlongX ? obstacleHalfSizeZ : obstacleHalfSizeX;
+      if (
+        !Number.isFinite(rampAlongHalf)
+        || !Number.isFinite(rampAcrossHalf)
+        || rampAlongHalf <= 0
+        || rampAcrossHalf <= 0
+      ) {
+        continue;
+      }
+
+      const lowCenterX = obstaclePos.x - (dirX * rampAlongHalf * 0.5);
+      const lowCenterZ = obstaclePos.z - (dirZ * rampAlongHalf * 0.5);
+      const alongMin = -rampAcrossHalf;
+      const alongMax = rampAlongHalf + rampAcrossHalf;
+      const paddedAcrossHalf = rampAcrossHalf + TOWER_CONFIG.terrainLosVerticalPadding;
+      const paddedBaseY = obstacleBaseY + TOWER_CONFIG.terrainLosVerticalPadding;
+
+      let blockedByRamp = false;
+      for (let sampleIndex = 0; sampleIndex <= sampleCount; sampleIndex += 1) {
+        const t = sampleIndex / sampleCount;
+        rampSamplePoint.copy(origin).addScaledVector(segmentDelta, t);
+        const deltaX = rampSamplePoint.x - lowCenterX;
+        const deltaZ = rampSamplePoint.z - lowCenterZ;
+        const along = (deltaX * dirX) + (deltaZ * dirZ);
+        const across = (deltaX * rightX) + (deltaZ * rightZ);
+        if (along < alongMin || along > alongMax || Math.abs(across) > paddedAcrossHalf) {
+          continue;
+        }
+
+        const alongT = THREE.MathUtils.clamp(
+          (along - alongMin) / Math.max(TOWER_CONFIG.segmentEpsilon, alongMax - alongMin),
+          0,
+          1
+        );
+        const rampSurfaceY = obstacleBaseY + (obstacleHeight * alongT) - TOWER_CONFIG.terrainLosVerticalPadding;
+        if (rampSamplePoint.y >= paddedBaseY && rampSamplePoint.y <= rampSurfaceY) {
+          blockedByRamp = true;
+          break;
+        }
+      }
+
+      if (blockedByRamp) {
+        return true;
+      }
+    }
+
     return false;
   }
 
@@ -2061,6 +3263,8 @@ export function createTowerSystem({
     let origin = tempVecC;
     if (tower.towerType === "gun") {
       getGunMuzzleWorldPosition(tower, origin);
+    } else if (tower.towerType === "laserSniper") {
+      getLaserEmitterWorldPosition(tower, origin);
     } else {
       const hoverNode = tower.mesh?.userData?.hoverNode;
       if (hoverNode && typeof hoverNode.getWorldPosition === "function") {
@@ -2087,21 +3291,7 @@ export function createTowerSystem({
     const maxRangeSq = towerRange * towerRange;
     let bestTarget = null;
     let bestDistSq = maxRangeSq;
-
-    let enemyMeshes = null;
-    if (typeof enemySystem.getDamageableEnemies === "function") {
-      const damageableMeshes = enemySystem.getDamageableEnemies();
-      if (Array.isArray(damageableMeshes)) {
-        enemyMeshes = damageableMeshes;
-      }
-    }
-    if (!enemyMeshes && typeof enemySystem.getEnemies === "function") {
-      const allEnemyMeshes = enemySystem.getEnemies();
-      if (Array.isArray(allEnemyMeshes)) {
-        enemyMeshes = allEnemyMeshes;
-      }
-    }
-
+    const enemyMeshes = getDamageableEnemyMeshes(enemySystem);
     if (Array.isArray(enemyMeshes)) {
       for (const enemyMesh of enemyMeshes) {
         if (!enemyMesh || !enemyMesh.visible) {
@@ -2145,6 +3335,9 @@ export function createTowerSystem({
     if (!skipSlowed && typeof enemySystem.getTargetInRange === "function") {
       const fallbackTarget = enemySystem.getTargetInRange(tower.mesh.position, towerRange);
       if (fallbackTarget && fallbackTarget.position) {
+        if (!isEnemyMeshFullyOutsideSpawnCubes(fallbackTarget.mesh)) {
+          return null;
+        }
         const fallbackAimPoint = fallbackTarget.position.clone();
         const fallbackOffsetY = fallbackTarget.mesh?.userData?.bodyCenterOffsetY;
         if (typeof fallbackOffsetY === "number") {
@@ -2162,6 +3355,69 @@ export function createTowerSystem({
     return null;
   }
 
+  function findTargetWithUnlimitedLineOfSight(tower, enemySystem) {
+    if (!enemySystem) {
+      return null;
+    }
+    const enemyMeshes = getDamageableEnemyMeshes(enemySystem);
+    let bestTarget = null;
+    let bestDistSq = Number.POSITIVE_INFINITY;
+    for (const enemyMesh of enemyMeshes) {
+      if (!enemyMesh || !enemyMesh.visible) {
+        continue;
+      }
+      getEnemyCollisionCenter(enemyMesh, tempVecD);
+      const distSq = tower.mesh.position.distanceToSquared(tempVecD);
+      if (distSq > bestDistSq) {
+        continue;
+      }
+      if (!hasLineOfSightToPoint(tower, tempVecD)) {
+        continue;
+      }
+      bestDistSq = distSq;
+      bestTarget = {
+        mesh: enemyMesh,
+        position: enemyMesh.position,
+        aimPoint: tempVecD.clone(),
+      };
+    }
+    return bestTarget;
+  }
+
+  function applyPointDamageToTowerTargetableEnemies(enemySystem, point, hitRadius, damage) {
+    if (
+      !enemySystem
+      || typeof enemySystem.applyDamageToEnemyMesh !== "function"
+      || !point
+      || !Number.isFinite(Number(damage))
+      || Number(damage) <= 0
+    ) {
+      return false;
+    }
+
+    const safeHitRadius = Math.max(0, Number(hitRadius) || 0);
+    const targetableEnemies = getDamageableEnemyMeshes(enemySystem);
+    let hitAny = false;
+    for (const enemyMesh of targetableEnemies) {
+      let intersects = false;
+      if (typeof enemySystem.isPointNearEnemyMesh === "function") {
+        intersects = enemySystem.isPointNearEnemyMesh(enemyMesh, point, safeHitRadius);
+      } else {
+        getEnemyCollisionCenter(enemyMesh, tempVecD);
+        const containmentRadius = getEnemyContainmentRadiusForTowerTargeting(enemyMesh);
+        const maxDistance = containmentRadius + safeHitRadius;
+        intersects = tempVecD.distanceToSquared(point) <= (maxDistance * maxDistance);
+      }
+      if (!intersects) {
+        continue;
+      }
+      if (enemySystem.applyDamageToEnemyMesh(enemyMesh, damage)) {
+        hitAny = true;
+      }
+    }
+    return hitAny;
+  }
+
   function getDamageableEnemyMeshes(enemySystem) {
     if (!enemySystem) {
       return [];
@@ -2169,14 +3425,14 @@ export function createTowerSystem({
     if (typeof enemySystem.getDamageableEnemies === "function") {
       const meshes = enemySystem.getDamageableEnemies();
       if (Array.isArray(meshes)) {
-        return meshes;
+        return meshes.filter((mesh) => mesh?.visible && isEnemyMeshFullyOutsideSpawnCubes(mesh));
       }
     }
 
     if (typeof enemySystem.getEnemies === "function") {
       const meshes = enemySystem.getEnemies();
       if (Array.isArray(meshes)) {
-        return meshes.filter((mesh) => mesh?.visible);
+        return meshes.filter((mesh) => mesh?.visible && isEnemyMeshFullyOutsideSpawnCubes(mesh));
       }
     }
 
@@ -2192,6 +3448,40 @@ export function createTowerSystem({
     return out;
   }
 
+  function getEnemyContainmentRadiusForTowerTargeting(enemyMesh) {
+    const bodyHalfSize = Number(enemyMesh?.userData?.bodyHalfSize);
+    const legacyRadius = Number(enemyMesh?.userData?.hitSphereRadius);
+    const baseHalfSize = Number.isFinite(bodyHalfSize) && bodyHalfSize > 0
+      ? bodyHalfSize
+      : (Number.isFinite(legacyRadius) && legacyRadius > 0 ? legacyRadius : 0);
+    const scaleX = Math.max(0.001, Math.abs(Number(enemyMesh?.scale?.x) || 1));
+    const scaleY = Math.max(0.001, Math.abs(Number(enemyMesh?.scale?.y) || 1));
+    const scaleZ = Math.max(0.001, Math.abs(Number(enemyMesh?.scale?.z) || 1));
+    return baseHalfSize * Math.max(scaleX, scaleY, scaleZ);
+  }
+
+  function isEnemyMeshFullyOutsideSpawnCubes(enemyMesh) {
+    if (!enemyMesh || spawnTargetBlockVolumes.length === 0) {
+      return true;
+    }
+    const containmentRadius = getEnemyContainmentRadiusForTowerTargeting(enemyMesh);
+    getEnemyCollisionCenter(enemyMesh, tempVecH);
+    for (const volume of spawnTargetBlockVolumes) {
+      const intersectsSpawnCube = (
+        tempVecH.x + containmentRadius > volume.minX
+        && tempVecH.x - containmentRadius < volume.maxX
+        && tempVecH.y + containmentRadius > volume.minY
+        && tempVecH.y - containmentRadius < volume.maxY
+        && tempVecH.z + containmentRadius > volume.minZ
+        && tempVecH.z - containmentRadius < volume.maxZ
+      );
+      if (intersectsSpawnCube) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   function hasDamageableEnemyInRange(tower, enemySystem) {
     const range = tower.range ?? AOE_RANGE;
     const rangeSq = range * range;
@@ -2204,6 +3494,65 @@ export function createTowerSystem({
       }
     }
     return false;
+  }
+
+  function getTowerDamageScale(tower) {
+    const localBuff = Number.isFinite(Number(tower?.buffDamageMultiplier))
+      ? Number(tower.buffDamageMultiplier)
+      : 1;
+    return towerDamageMultiplier * Math.max(0, localBuff);
+  }
+
+  function getTowerFireIntervalScale(tower) {
+    const localBuff = Number.isFinite(Number(tower?.buffFireRateIntervalFactor))
+      ? Number(tower.buffFireRateIntervalFactor)
+      : 1;
+    return towerFireRateMultiplier * Math.max(0.05, localBuff);
+  }
+
+  function updateBuffTowerAurasAndBonuses(deltaSeconds) {
+    const buffRangeSq = BUFF_RANGE * BUFF_RANGE;
+    const damageBonusPerTower = Number(BUFF_TOWER_CONFIG.damageBonusPerTower) || 0;
+    const fireRateBonusPerTower = Number(BUFF_TOWER_CONFIG.fireRateBonusPerTower) || 0;
+    const activeBuffTowers = towers.filter((tower) => tower?.isOperational && tower.towerType === "buff");
+
+    for (const tower of towers) {
+      if (!tower) {
+        continue;
+      }
+      tower.buffDamageMultiplier = 1;
+      tower.buffFireRateIntervalFactor = 1;
+    }
+
+    for (const buffTower of activeBuffTowers) {
+      buffTower.buffAuraClock = (buffTower.buffAuraClock || 0) + Math.max(0, deltaSeconds);
+      const pulseT = 0.5 + (0.5 * Math.sin(buffTower.buffAuraClock * BUFF_TOWER_CONFIG.auraPulseSpeed));
+      const auraMesh = buffTower.mesh?.userData?.buffAuraMesh;
+      if (auraMesh?.material) {
+        auraMesh.material.opacity = THREE.MathUtils.lerp(
+          BUFF_TOWER_CONFIG.auraOpacity * 0.5,
+          BUFF_TOWER_CONFIG.auraOpacity,
+          pulseT
+        );
+      }
+    }
+
+    for (const tower of towers) {
+      if (!tower?.isOperational || tower.towerType === "buff") {
+        continue;
+      }
+      let stackedCount = 0;
+      for (const buffTower of activeBuffTowers) {
+        if (tower.mesh.position.distanceToSquared(buffTower.mesh.position) <= buffRangeSq) {
+          stackedCount += 1;
+        }
+      }
+      if (stackedCount <= 0) {
+        continue;
+      }
+      tower.buffDamageMultiplier = 1 + (stackedCount * damageBonusPerTower);
+      tower.buffFireRateIntervalFactor = Math.max(0.1, 1 - (stackedCount * fireRateBonusPerTower));
+    }
   }
 
   function rotateYawTowards(currentYaw, targetYaw, maxStep) {
@@ -2259,7 +3608,7 @@ export function createTowerSystem({
       mesh: projectileMesh,
       velocity: tempVecB.clone().multiplyScalar(GUN_PROJECTILE_SPEED),
       life: GUN_PROJECTILE_LIFETIME,
-      damage: GUN_PROJECTILE_DAMAGE * towerDamageMultiplier,
+      damage: GUN_PROJECTILE_DAMAGE * getTowerDamageScale(tower),
       hitRadius: GUN_PROJECTILE_HIT_RADIUS,
     });
     spawnGunMuzzleFlash(tempVecA);
@@ -2614,7 +3963,7 @@ export function createTowerSystem({
     }
 
     tower.slowProcFlash = 1;
-    tower.cooldown = SLOW_FIRE_INTERVAL * towerFireRateMultiplier;
+    tower.cooldown = SLOW_FIRE_INTERVAL * getTowerFireIntervalScale(tower);
   }
 
   function updateGunTowerCombat(tower, deltaSeconds, enemySystem) {
@@ -2640,7 +3989,7 @@ export function createTowerSystem({
     if (tower.cooldown <= 0) {
       const targetPoint = target.aimPoint ? target.aimPoint.clone() : target.position.clone();
       spawnGunProjectile(tower, targetPoint);
-      tower.cooldown = GUN_FIRE_INTERVAL * towerFireRateMultiplier;
+      tower.cooldown = GUN_FIRE_INTERVAL * getTowerFireIntervalScale(tower);
     }
   }
 
@@ -2648,7 +3997,7 @@ export function createTowerSystem({
     updateAoeTowerBobbing(tower, deltaSeconds);
 
     const hasEnemyInRange = hasDamageableEnemyInRange(tower, enemySystem);
-    const chargeInterval = Math.max(0.05, AOE_PULSE_INTERVAL * towerFireRateMultiplier);
+    const chargeInterval = Math.max(0.05, AOE_PULSE_INTERVAL * getTowerFireIntervalScale(tower));
     if (hasEnemyInRange) {
       tower.chargeTimer += deltaSeconds;
     } else {
@@ -2663,7 +4012,7 @@ export function createTowerSystem({
     }
 
     const pulseRange = tower.range ?? AOE_RANGE;
-    const pulseDamage = AOE_PULSE_DAMAGE * towerDamageMultiplier;
+    const pulseDamage = AOE_PULSE_DAMAGE * getTowerDamageScale(tower);
     while (tower.chargeTimer >= chargeInterval) {
       tower.chargeTimer -= chargeInterval;
       getAoePulseOrigin(tower, tempVecA);
@@ -2674,19 +4023,643 @@ export function createTowerSystem({
     updateAoeTowerAppearance(tower, chargeRatio);
   }
 
+  function spawnCylinderSegmentEffect(start, end, geometry, baseMaterial, width = 0.1) {
+    tempVecI.copy(end).sub(start);
+    const length = tempVecI.length();
+    if (length <= TOWER_CONFIG.segmentEpsilon) {
+      return null;
+    }
+    const mesh = new THREE.Mesh(geometry, baseMaterial.clone());
+    mesh.material.toneMapped = false;
+    mesh.position.copy(start).add(end).multiplyScalar(0.5);
+    mesh.scale.set(Math.max(0.01, width), length, Math.max(0.01, width));
+    mesh.quaternion.setFromUnitVectors(upVector, tempVecI.normalize());
+    scene.add(mesh);
+    return mesh;
+  }
+
+  function updateTimedMeshEffects(collection, deltaSeconds, {
+    baseOpacity = 1,
+    minScale = 1,
+    maxScale = 1,
+  } = {}) {
+    for (let i = collection.length - 1; i >= 0; i -= 1) {
+      const effect = collection[i];
+      effect.life -= deltaSeconds;
+      if (effect.life <= 0) {
+        if (effect.mesh?.parent) {
+          effect.mesh.parent.remove(effect.mesh);
+        }
+        effect.mesh?.material?.dispose?.();
+        collection.splice(i, 1);
+        continue;
+      }
+
+      const t = Math.max(0, effect.life / effect.maxLife);
+      if (effect.mesh?.material) {
+        effect.mesh.material.opacity = baseOpacity * t;
+      }
+      if (effect.mesh && (minScale !== 1 || maxScale !== 1)) {
+        const scale = THREE.MathUtils.lerp(minScale, maxScale, 1 - t);
+        if (effect.scaleAxis === "xyz") {
+          effect.mesh.scale.setScalar(scale);
+        } else if (effect.scaleAxis === "y") {
+          effect.mesh.scale.y = scale;
+        }
+      }
+    }
+  }
+
+  function getLaserEmitterWorldPosition(tower, out) {
+    const emitterNode = tower.mesh?.userData?.laserSniperEmitterNode;
+    if (emitterNode && typeof emitterNode.getWorldPosition === "function") {
+      emitterNode.getWorldPosition(out);
+      return out;
+    }
+    out.copy(tower.mesh.position);
+    out.y += LASER_SNIPER_TOWER_CONFIG.spineHeight * 0.8;
+    return out;
+  }
+
+  function spawnLaserBeam(start, end) {
+    const beamMesh = spawnCylinderSegmentEffect(
+      start,
+      end,
+      laserBeamGeometry,
+      laserBeamMaterial,
+      LASER_SNIPER_TOWER_CONFIG.beamWidth
+    );
+    if (!beamMesh) {
+      return;
+    }
+    laserBeamEffects.push({
+      mesh: beamMesh,
+      life: Math.max(0.01, LASER_SNIPER_BEAM_DURATION),
+      maxLife: Math.max(0.01, LASER_SNIPER_BEAM_DURATION),
+    });
+  }
+
+  function updateLaserSniperCombat(tower, deltaSeconds, enemySystem) {
+    tower.cooldown = Math.max(0, tower.cooldown - deltaSeconds);
+    const target = findTargetWithUnlimitedLineOfSight(tower, enemySystem);
+    const yawNode = tower.mesh?.userData?.laserSniperYawNode;
+    if (target && yawNode) {
+      tempVecA.copy(target.aimPoint || target.position).sub(tower.mesh.position);
+      tempVecA.y = 0;
+      if (tempVecA.lengthSq() >= TOWER_CONFIG.segmentEpsilon) {
+        yawNode.rotation.y = Math.atan2(tempVecA.x, tempVecA.z);
+      }
+    }
+    if (!target || !target.mesh || tower.cooldown > 0) {
+      return;
+    }
+    if (typeof enemySystem.applyDamageToEnemyMesh === "function") {
+      enemySystem.applyDamageToEnemyMesh(target.mesh, LASER_SNIPER_DAMAGE * getTowerDamageScale(tower));
+    }
+    getLaserEmitterWorldPosition(tower, tempVecB);
+    spawnLaserBeam(tempVecB, target.aimPoint || target.position);
+    tower.cooldown = LASER_SNIPER_FIRE_INTERVAL * getTowerFireIntervalScale(tower);
+  }
+
+  function findTargetInRangeNoLos(tower, enemySystem) {
+    const rangeSq = (tower.range ?? MORTAR_RANGE) ** 2;
+    let best = null;
+    let bestDistSq = rangeSq;
+    for (const enemyMesh of getDamageableEnemyMeshes(enemySystem)) {
+      getEnemyCollisionCenter(enemyMesh, tempVecA);
+      const distSq = tower.mesh.position.distanceToSquared(tempVecA);
+      if (distSq > bestDistSq) {
+        continue;
+      }
+      bestDistSq = distSq;
+      best = {
+        mesh: enemyMesh,
+        aimPoint: tempVecA.clone(),
+      };
+    }
+    return best;
+  }
+
+  function getMortarMuzzleWorldPosition(tower, out) {
+    const muzzleNode = tower.mesh?.userData?.mortarMuzzleNode;
+    if (muzzleNode && typeof muzzleNode.getWorldPosition === "function") {
+      muzzleNode.getWorldPosition(out);
+      return out;
+    }
+    out.copy(tower.mesh.position);
+    out.y += 1.2;
+    return out;
+  }
+
+  function getMortarImpactPoint(targetPoint, out) {
+    out.copy(targetPoint);
+    const impactSurfaceY = getBuildSurfaceY(targetPoint.x, targetPoint.z);
+    if (Number.isFinite(impactSurfaceY)) {
+      out.y = impactSurfaceY + (MORTAR_TOWER_CONFIG.projectileSize * 0.4);
+    }
+    return out;
+  }
+
+  function setMortarBarrelElevation(tower, elevationRadians) {
+    const barrelPivot = tower.mesh?.userData?.mortarBarrelPivot;
+    if (!barrelPivot || !Number.isFinite(elevationRadians)) {
+      return;
+    }
+    const clampedElevation = THREE.MathUtils.clamp(
+      elevationRadians,
+      THREE.MathUtils.degToRad(20),
+      THREE.MathUtils.degToRad(88)
+    );
+    barrelPivot.rotation.x = -clampedElevation;
+  }
+
+  function setMortarYawToward(tower, targetPoint) {
+    const yawNode = tower.mesh?.userData?.mortarYawNode;
+    if (!yawNode || !targetPoint) {
+      return;
+    }
+    tempVecF.copy(targetPoint).sub(tower.mesh.position);
+    tempVecF.y = 0;
+    if (tempVecF.lengthSq() <= TOWER_CONFIG.segmentEpsilon) {
+      return;
+    }
+    yawNode.rotation.y = Math.atan2(tempVecF.x, tempVecF.z);
+  }
+
+  function solveMortarLaunchVelocity(launchPosition, impactPoint, outVelocity) {
+    const gravity = Math.max(0.01, Number(MORTAR_TOWER_CONFIG.projectileGravity) || 0.01);
+    const baseLaunchVerticalSpeed = Math.max(0.01, Number(MORTAR_TOWER_CONFIG.projectileLaunchArcY) || 0.01);
+
+    tempVecD.copy(impactPoint).sub(launchPosition);
+    tempVecE.set(tempVecD.x, 0, tempVecD.z);
+    const horizontalDistance = tempVecE.length();
+    const verticalDelta = tempVecD.y;
+
+    let launchVerticalSpeed = baseLaunchVerticalSpeed;
+    if (verticalDelta > 0) {
+      const minVerticalSpeed = Math.sqrt(Math.max(0, 2 * gravity * verticalDelta)) + 0.5;
+      launchVerticalSpeed = Math.max(launchVerticalSpeed, minVerticalSpeed);
+    }
+
+    const discriminant = (launchVerticalSpeed * launchVerticalSpeed) - (2 * gravity * verticalDelta);
+    if (!(discriminant > 0)) {
+      return null;
+    }
+
+    const sqrtDiscriminant = Math.sqrt(discriminant);
+    const timeShort = (launchVerticalSpeed - sqrtDiscriminant) / gravity;
+    const timeLong = (launchVerticalSpeed + sqrtDiscriminant) / gravity;
+    const flightTime = (Number.isFinite(timeLong) && timeLong > 0.02)
+      ? timeLong
+      : ((Number.isFinite(timeShort) && timeShort > 0.02) ? timeShort : 0);
+    if (!(flightTime > 0)) {
+      return null;
+    }
+
+    let horizontalSpeed = 0;
+    if (horizontalDistance > TOWER_CONFIG.segmentEpsilon) {
+      tempVecE.multiplyScalar(1 / horizontalDistance);
+      horizontalSpeed = horizontalDistance / flightTime;
+      outVelocity.set(
+        tempVecE.x * horizontalSpeed,
+        launchVerticalSpeed,
+        tempVecE.z * horizontalSpeed
+      );
+    } else {
+      outVelocity.set(0, launchVerticalSpeed, 0);
+    }
+
+    return {
+      flightTime,
+      elevationRadians: Math.atan2(launchVerticalSpeed, Math.max(0.0001, horizontalSpeed)),
+    };
+  }
+
+  function spawnMortarProjectile(tower, targetPoint) {
+    getMortarImpactPoint(targetPoint, tempVecC);
+    setMortarYawToward(tower, tempVecC);
+    getMortarMuzzleWorldPosition(tower, tempVecA);
+    const launchSolution = solveMortarLaunchVelocity(tempVecA, tempVecC, tempVecB);
+    if (!launchSolution) {
+      return false;
+    }
+    setMortarBarrelElevation(tower, launchSolution.elevationRadians);
+    const projectile = new THREE.Mesh(mortarProjectileGeometry, mortarProjectileMaterial);
+    projectile.position.copy(tempVecA);
+    scene.add(projectile);
+    mortarProjectiles.push({
+      mesh: projectile,
+      velocity: tempVecB.clone(),
+      life: MORTAR_PROJECTILE_LIFETIME,
+      splashDamage: MORTAR_SPLASH_DAMAGE * getTowerDamageScale(tower),
+      splashRadius: MORTAR_SPLASH_RADIUS,
+      sourceTower: tower,
+    });
+    return true;
+  }
+
+  function isPointInsideObstacle(position, obstacle, padding = 0) {
+    if (obstacle?.kind === "ramp" && typeof obstacle.getSurfaceYAtWorld === "function") {
+      const rampSurfaceY = obstacle.getSurfaceYAtWorld(position.x, position.z);
+      if (!Number.isFinite(rampSurfaceY)) {
+        return false;
+      }
+      return position.y <= (rampSurfaceY + padding) && position.y >= (obstacle.baseY - padding);
+    }
+
+    const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
+    const halfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
+      ? Number(obstacle.halfSizeX)
+      : Number(obstacle?.halfSize);
+    const halfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
+      ? Number(obstacle.halfSizeZ)
+      : Number(obstacle?.halfSize);
+    const height = Number(obstacle?.height);
+    const baseY = Number(obstacle?.baseY ?? 0);
+    if (
+      !obstaclePos
+      || !Number.isFinite(halfSizeX)
+      || !Number.isFinite(halfSizeZ)
+      || !Number.isFinite(height)
+    ) {
+      return false;
+    }
+    return (
+      position.x >= obstaclePos.x - halfSizeX - padding
+      && position.x <= obstaclePos.x + halfSizeX + padding
+      && position.y >= baseY - padding
+      && position.y <= baseY + height + padding
+      && position.z >= obstaclePos.z - halfSizeZ - padding
+      && position.z <= obstaclePos.z + halfSizeZ + padding
+    );
+  }
+
+  function spawnMortarExplosion(position, radius) {
+    const explosionMesh = new THREE.Mesh(mortarExplosionGeometry, mortarExplosionMaterial.clone());
+    explosionMesh.material.toneMapped = false;
+    explosionMesh.position.copy(position);
+    explosionMesh.scale.setScalar(0.01);
+    scene.add(explosionMesh);
+    mortarExplosions.push({
+      mesh: explosionMesh,
+      life: Math.max(0.05, MORTAR_TOWER_CONFIG.explosionDuration),
+      maxLife: Math.max(0.05, MORTAR_TOWER_CONFIG.explosionDuration),
+      radius: Math.max(0.1, radius),
+      scaleAxis: "xyz",
+    });
+  }
+
+  function detonateMortarProjectile(projectile, enemySystem) {
+    if (!projectile?.mesh) {
+      return;
+    }
+    const explosionPoint = projectile.mesh.position.clone();
+    spawnMortarExplosion(explosionPoint, projectile.splashRadius);
+    applyPointDamageToTowerTargetableEnemies(
+      enemySystem,
+      explosionPoint,
+      projectile.splashRadius,
+      projectile.splashDamage
+    );
+    scene.remove(projectile.mesh);
+  }
+
+  function updateMortarProjectiles(deltaSeconds, enemySystem) {
+    const staticObstacles = [
+      ...terrainObstacles,
+      ...(Array.isArray(grid.rampObstacles) ? grid.rampObstacles : []),
+      ...(Array.isArray(grid.endpointObstacles) ? grid.endpointObstacles : []),
+    ];
+
+    for (let i = mortarProjectiles.length - 1; i >= 0; i -= 1) {
+      const projectile = mortarProjectiles[i];
+      projectile.velocity.y -= MORTAR_TOWER_CONFIG.projectileGravity * deltaSeconds;
+      projectile.mesh.position.addScaledVector(projectile.velocity, deltaSeconds);
+      projectile.life -= deltaSeconds;
+
+      let shouldExplode = projectile.life <= 0;
+      if (!shouldExplode) {
+        const projectilePadding = (MORTAR_TOWER_CONFIG.projectileSize * 0.45);
+        for (const obstacle of staticObstacles) {
+          if (isPointInsideObstacle(projectile.mesh.position, obstacle, projectilePadding)) {
+            shouldExplode = true;
+            break;
+          }
+        }
+      }
+      if (!shouldExplode) {
+        for (const tower of towers) {
+          if (!tower?.mesh || tower === projectile.sourceTower) {
+            continue;
+          }
+          if (isPointInsideObstacle(projectile.mesh.position, tower, MORTAR_TOWER_CONFIG.projectileSize * 0.45)) {
+            shouldExplode = true;
+            break;
+          }
+        }
+      }
+      if (!shouldExplode) {
+        const groundY = getBuildSurfaceY(projectile.mesh.position.x, projectile.mesh.position.z);
+        if (projectile.mesh.position.y <= (groundY + (MORTAR_TOWER_CONFIG.projectileSize * 0.4))) {
+          projectile.mesh.position.y = groundY + (MORTAR_TOWER_CONFIG.projectileSize * 0.4);
+          shouldExplode = true;
+        }
+      }
+      if (!shouldExplode) {
+        continue;
+      }
+
+      detonateMortarProjectile(projectile, enemySystem);
+      mortarProjectiles.splice(i, 1);
+    }
+  }
+
+  function updateMortarCombat(tower, deltaSeconds, enemySystem) {
+    tower.cooldown = Math.max(0, tower.cooldown - deltaSeconds);
+    const target = findTargetInRangeNoLos(tower, enemySystem);
+    if (target?.mesh) {
+      getMortarImpactPoint(target.aimPoint, tempVecC);
+      setMortarYawToward(tower, tempVecC);
+      getMortarMuzzleWorldPosition(tower, tempVecA);
+      const previewLaunch = solveMortarLaunchVelocity(tempVecA, tempVecC, tempVecB);
+      if (previewLaunch) {
+        setMortarBarrelElevation(tower, previewLaunch.elevationRadians);
+      }
+    }
+    if (tower.cooldown > 0) {
+      return;
+    }
+    if (!target?.mesh) {
+      return;
+    }
+    if (!spawnMortarProjectile(tower, target.aimPoint)) {
+      return;
+    }
+    tower.cooldown = MORTAR_FIRE_INTERVAL * getTowerFireIntervalScale(tower);
+  }
+
+  function getTeslaEmitterWorldPosition(tower, out) {
+    const emitterNode = tower.mesh?.userData?.teslaEmitterNode;
+    if (emitterNode && typeof emitterNode.getWorldPosition === "function") {
+      emitterNode.getWorldPosition(out);
+      return out;
+    }
+    out.copy(tower.mesh.position);
+    out.y += 1.6;
+    return out;
+  }
+
+  function spawnTeslaBolt(start, end) {
+    const boltMesh = spawnCylinderSegmentEffect(
+      start,
+      end,
+      teslaBoltGeometry,
+      teslaBoltMaterial,
+      0.08
+    );
+    if (!boltMesh) {
+      return;
+    }
+    teslaBoltEffects.push({
+      mesh: boltMesh,
+      life: Math.max(0.01, TESLA_BOLT_DURATION),
+      maxLife: Math.max(0.01, TESLA_BOLT_DURATION),
+    });
+  }
+
+  function updateTeslaCombat(tower, deltaSeconds, enemySystem) {
+    tower.cooldown = Math.max(0, tower.cooldown - deltaSeconds);
+    const ringTop = tower.mesh?.userData?.teslaRingTop;
+    if (ringTop) {
+      ringTop.rotation.z += deltaSeconds * 1.2;
+    }
+    if (tower.cooldown > 0) {
+      return;
+    }
+
+    const primary = findTargetWithLineOfSight(tower, enemySystem, { skipSlowed: false });
+    if (!primary?.mesh) {
+      return;
+    }
+
+    const candidates = getDamageableEnemyMeshes(enemySystem);
+    const chainTargets = [primary.mesh];
+    const targetSet = new Set([primary.mesh.uuid]);
+    let lastCenter = getEnemyCollisionCenter(primary.mesh, tempVecD).clone();
+    while (chainTargets.length < TESLA_CHAIN_COUNT) {
+      let bestCandidate = null;
+      let bestDistSq = TESLA_CHAIN_RANGE * TESLA_CHAIN_RANGE;
+      for (const enemyMesh of candidates) {
+        if (!enemyMesh?.visible || targetSet.has(enemyMesh.uuid)) {
+          continue;
+        }
+        getEnemyCollisionCenter(enemyMesh, tempVecE);
+        const distSq = tempVecE.distanceToSquared(lastCenter);
+        if (distSq > bestDistSq) {
+          continue;
+        }
+        bestDistSq = distSq;
+        bestCandidate = enemyMesh;
+      }
+      if (!bestCandidate) {
+        break;
+      }
+      chainTargets.push(bestCandidate);
+      targetSet.add(bestCandidate.uuid);
+      lastCenter = getEnemyCollisionCenter(bestCandidate, tempVecF).clone();
+    }
+
+    const linkDamage = TESLA_DAMAGE * getTowerDamageScale(tower);
+    getTeslaEmitterWorldPosition(tower, tempVecA);
+    let previousPoint = tempVecA.clone();
+    for (const enemyMesh of chainTargets) {
+      getEnemyCollisionCenter(enemyMesh, tempVecB);
+      spawnTeslaBolt(previousPoint, tempVecB);
+      if (typeof enemySystem.applyDamageToEnemyMesh === "function") {
+        enemySystem.applyDamageToEnemyMesh(enemyMesh, linkDamage);
+      }
+      previousPoint = tempVecB.clone();
+    }
+
+    tower.cooldown = TESLA_FIRE_INTERVAL * getTowerFireIntervalScale(tower);
+  }
+
+  function updateSpikesCombat(tower, deltaSeconds, enemySystem) {
+    tower.spikesCycleTimer += Math.max(0, deltaSeconds);
+    if (tower.spikesCycleTimer >= SPIKES_CYCLE_INTERVAL) {
+      tower.spikesCycleTimer -= SPIKES_CYCLE_INTERVAL;
+      tower.spikesActiveTimer = SPIKES_ACTIVE_DURATION;
+      tower.spikesDidDamageThisCycle = false;
+    }
+
+    tower.spikesActiveTimer = Math.max(0, tower.spikesActiveTimer - deltaSeconds);
+    let extension = 0.02;
+    if (tower.spikesActiveTimer > 0) {
+      const activeT = 1 - (tower.spikesActiveTimer / Math.max(0.01, SPIKES_ACTIVE_DURATION));
+      extension = Math.max(0.02, Math.sin(activeT * Math.PI));
+      if (!tower.spikesDidDamageThisCycle && enemySystem) {
+        tempVecA.copy(tower.mesh.position);
+        tempVecA.y = tower.baseY + 0.45;
+        applyPointDamageToTowerTargetableEnemies(
+          enemySystem,
+          tempVecA,
+          SPIKES_HIT_RADIUS,
+          SPIKES_DAMAGE * getTowerDamageScale(tower)
+        );
+        tower.spikesDidDamageThisCycle = true;
+      }
+    }
+
+    const spikeMeshes = tower.mesh?.userData?.spikeMeshes;
+    if (Array.isArray(spikeMeshes)) {
+      for (const spike of spikeMeshes) {
+        spike.scale.y = extension;
+      }
+    }
+  }
+
+  function updatePlasmaVisualState(tower, deltaSeconds, intensity = 1) {
+    if (!tower?.mesh) {
+      return;
+    }
+    const mesh = tower.mesh;
+    tower.plasmaClock = (tower.plasmaClock || 0) + Math.max(0, deltaSeconds);
+
+    const flameUniforms = mesh.userData?.plasmaFlameUniforms;
+    const baseOpacity = Number(mesh.userData?.plasmaFlameBaseOpacity) || 0.6;
+    const intensityClamped = THREE.MathUtils.clamp(intensity, 0, 1.2);
+    if (flameUniforms?.uTime) {
+      flameUniforms.uTime.value = tower.plasmaClock;
+    }
+    if (flameUniforms?.uOpacity) {
+      flameUniforms.uOpacity.value = THREE.MathUtils.lerp(
+        baseOpacity * 0.7,
+        baseOpacity * 1.1,
+        THREE.MathUtils.clamp(intensityClamped, 0, 1)
+      );
+    }
+
+    const flameConfig = mesh.userData?.plasmaFlameConfig;
+    const descriptors = Array.isArray(mesh.userData?.plasmaParticleDescriptors)
+      ? mesh.userData.plasmaParticleDescriptors
+      : [];
+    if (!flameConfig || descriptors.length === 0) {
+      return;
+    }
+    for (const descriptor of descriptors) {
+      const particleMesh = descriptor?.mesh;
+      if (!particleMesh) {
+        continue;
+      }
+      const progress = (tower.plasmaClock * descriptor.speed + descriptor.phase) % 1;
+      const spread = 1 - progress;
+      const lateralJitter = Math.sin((tower.plasmaClock * 9.5) + (descriptor.phase * 19)) * 0.03;
+      const verticalJitter = Math.cos((tower.plasmaClock * 7.2) + (descriptor.phase * 23)) * 0.035;
+      const x = (descriptor.driftX * spread * flameConfig.width * 0.26) + (lateralJitter * spread);
+      const y = flameConfig.anchorY + (descriptor.driftY * spread * flameConfig.height * 0.18) + verticalJitter;
+      const z = flameConfig.startZ + (progress * flameConfig.length);
+      particleMesh.position.set(x, y, z);
+
+      const particleScale = descriptor.size * THREE.MathUtils.lerp(1.3, 0.36, progress);
+      particleMesh.scale.setScalar(Math.max(0.01, particleScale));
+      if (particleMesh.material) {
+        particleMesh.material.opacity = THREE.MathUtils.clamp(
+          THREE.MathUtils.lerp(0.1, 0.78, spread) * THREE.MathUtils.clamp(intensityClamped, 0.65, 1.2),
+          0,
+          1
+        );
+      }
+    }
+  }
+
+  function updatePlasmaCombat(tower, deltaSeconds, enemySystem) {
+    const targetCell = tower.plasmaTargetCell;
+    const wallCell = tower.plasmaWallCell;
+    if (!Number.isInteger(targetCell?.x) || !Number.isInteger(targetCell?.z) || !Number.isInteger(wallCell?.y)) {
+      updatePlasmaVisualState(tower, deltaSeconds, 0.82);
+      return;
+    }
+
+    const targetBaseY = getCellBaseY(wallCell.y);
+    const targetCenter = getCellCenter(targetCell.x, targetCell.z, targetBaseY + (gridCellSize * 0.5));
+    targetCenter.y = targetBaseY + (gridCellSize * 0.5);
+
+    let hitAny = false;
+    if (enemySystem) {
+      const halfExtent = gridCellSize * 0.5;
+      const dpsBase = PLASMA_DAMAGE / Math.max(0.05, PLASMA_FIRE_INTERVAL);
+      const frameDamage = dpsBase
+        * Math.max(0, deltaSeconds)
+        * getTowerDamageScale(tower)
+        / Math.max(0.05, getTowerFireIntervalScale(tower));
+      const damageable = getDamageableEnemyMeshes(enemySystem);
+      for (const enemyMesh of damageable) {
+        getEnemyCollisionCenter(enemyMesh, tempVecA);
+        if (
+          Math.abs(tempVecA.x - targetCenter.x) <= halfExtent
+          && Math.abs(tempVecA.y - targetCenter.y) <= halfExtent
+          && Math.abs(tempVecA.z - targetCenter.z) <= halfExtent
+        ) {
+          if (typeof enemySystem.applyDamageToEnemyMesh === "function" && frameDamage > 0) {
+            enemySystem.applyDamageToEnemyMesh(enemyMesh, frameDamage);
+            hitAny = true;
+          }
+        }
+      }
+    }
+
+    updatePlasmaVisualState(tower, deltaSeconds, hitAny ? 1 : 0.82);
+  }
+
+  function updateBuffTowerVisualOnly(tower, deltaSeconds) {
+    tower.buffAuraClock = (tower.buffAuraClock || 0) + Math.max(0, deltaSeconds);
+    const halo = tower.mesh?.userData?.buffHaloMesh;
+    if (halo) {
+      halo.rotation.y += deltaSeconds * 0.8;
+    }
+  }
+
   function updateTowerCombat(deltaSeconds, enemySystem) {
+    updateBuffTowerAurasAndBonuses(deltaSeconds);
     for (const tower of towers) {
       if (!tower.isOperational) {
         continue;
       }
-      if (tower.towerType === "aoe") {
-        updateAoeTowerCombat(tower, deltaSeconds, enemySystem);
-      } else if (tower.towerType === "slow") {
-        updateSlowTowerCombat(tower, deltaSeconds, enemySystem);
-      } else {
-        updateGunTowerCombat(tower, deltaSeconds, enemySystem);
+      const behaviorByType = {
+        gun: updateGunTowerCombat,
+        aoe: updateAoeTowerCombat,
+        slow: updateSlowTowerCombat,
+        laserSniper: updateLaserSniperCombat,
+        mortar: updateMortarCombat,
+        tesla: updateTeslaCombat,
+        spikes: updateSpikesCombat,
+        plasma: updatePlasmaCombat,
+        buff: updateBuffTowerVisualOnly,
+      };
+      const handler = behaviorByType[tower.towerType] || updateGunTowerCombat;
+      handler(tower, deltaSeconds, enemySystem);
+    }
+  }
+
+  function updateTransientTowerEffects(deltaSeconds, enemySystem) {
+    updateTimedMeshEffects(laserBeamEffects, deltaSeconds, {
+      baseOpacity: LASER_SNIPER_TOWER_CONFIG.beamOpacity,
+    });
+    updateMortarProjectiles(deltaSeconds, enemySystem);
+    updateTimedMeshEffects(mortarExplosions, deltaSeconds, {
+      baseOpacity: MORTAR_TOWER_CONFIG.explosionOpacity,
+      minScale: 0.1,
+      maxScale: 1,
+    });
+    for (const explosion of mortarExplosions) {
+      if (explosion?.mesh) {
+        const growthT = 1 - (explosion.life / Math.max(0.01, explosion.maxLife));
+        explosion.mesh.scale.setScalar(Math.max(0.01, explosion.radius * growthT));
       }
     }
+    updateTimedMeshEffects(teslaBoltEffects, deltaSeconds, {
+      baseOpacity: TESLA_TOWER_CONFIG.boltOpacity,
+    });
   }
 
   function update(deltaSeconds, enemySystem) {
@@ -2697,6 +4670,7 @@ export function createTowerSystem({
     updateGunMuzzleFlashes(deltaSeconds);
     updateAoePulseEffects(deltaSeconds, enemySystem);
     updateSlowFieldEffects(deltaSeconds);
+    updateTransientTowerEffects(deltaSeconds, enemySystem);
   }
 
   function disposeMeshResources(root, { disposeGeometry = true } = {}) {
@@ -2748,6 +4722,40 @@ export function createTowerSystem({
     }
     slowFieldEffects.length = 0;
 
+    for (let i = laserBeamEffects.length - 1; i >= 0; i -= 1) {
+      const effect = laserBeamEffects[i];
+      if (effect?.mesh?.parent) {
+        effect.mesh.parent.remove(effect.mesh);
+      }
+      effect?.mesh?.material?.dispose?.();
+    }
+    laserBeamEffects.length = 0;
+
+    for (let i = mortarProjectiles.length - 1; i >= 0; i -= 1) {
+      if (mortarProjectiles[i]?.mesh?.parent) {
+        mortarProjectiles[i].mesh.parent.remove(mortarProjectiles[i].mesh);
+      }
+    }
+    mortarProjectiles.length = 0;
+
+    for (let i = mortarExplosions.length - 1; i >= 0; i -= 1) {
+      const effect = mortarExplosions[i];
+      if (effect?.mesh?.parent) {
+        effect.mesh.parent.remove(effect.mesh);
+      }
+      effect?.mesh?.material?.dispose?.();
+    }
+    mortarExplosions.length = 0;
+
+    for (let i = teslaBoltEffects.length - 1; i >= 0; i -= 1) {
+      const effect = teslaBoltEffects[i];
+      if (effect?.mesh?.parent) {
+        effect.mesh.parent.remove(effect.mesh);
+      }
+      effect?.mesh?.material?.dispose?.();
+    }
+    teslaBoltEffects.length = 0;
+
     for (let i = activeBuildEffects.length - 1; i >= 0; i -= 1) {
       const tower = activeBuildEffects[i];
       if (!tower) {
@@ -2795,6 +4803,14 @@ export function createTowerSystem({
     aoePulseMaterial.dispose();
     slowFieldGeometry.dispose();
     slowFieldMaterial.dispose();
+    laserBeamGeometry.dispose();
+    laserBeamMaterial.dispose();
+    mortarProjectileGeometry.dispose();
+    mortarProjectileMaterial.dispose();
+    mortarExplosionGeometry.dispose();
+    mortarExplosionMaterial.dispose();
+    teslaBoltGeometry.dispose();
+    teslaBoltMaterial.dispose();
     buildFxTeleportColumnGeometry.dispose();
     buildFxRingGeometry.dispose();
     buildFxSparkGeometry.dispose();
@@ -2897,6 +4913,9 @@ export function createTowerSystem({
       const towerMesh = createTowerPlacedMesh(normalizedType);
 
       towerMesh.position.copy(resolvedPlacement.position);
+      if (typeof resolvedPlacement.rotationY === "number") {
+        towerMesh.rotation.y = resolvedPlacement.rotationY;
+      }
       scene.add(towerMesh);
       const towerEntry = createTowerEntry(
         normalizedType,

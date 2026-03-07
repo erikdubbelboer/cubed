@@ -37,6 +37,58 @@
 - `towerSystem.selectTower(type)` returns `false` if the tower is locked or unaffordable.
 - `towerSystem.placeSelectedTower()` spends cash through `spendMoney` and cancels build mode if post-purchase money is insufficient for another of that type.
 
+### New Tower Archetypes (Latest)
+- New unlockable tower types are now:
+  - `laserSniper`, `mortar`, `tesla`, `spikes`, `plasma`, `buff`
+- Unlock flow remains upgrade-driven:
+  - first forced menu pick is still `tower_aoe_unlock`.
+  - six new unlock upgrades exist:
+    - `tower_laser_sniper_unlock`
+    - `tower_mortar_unlock`
+    - `tower_tesla_unlock`
+    - `tower_spikes_unlock`
+    - `tower_plasma_unlock`
+    - `tower_buff_unlock`
+- Plasma tower placement contract:
+  - plasma is wall-mounted and only valid on **terrain wall side faces**.
+  - gameplay uses `grid.raycastWallAnchor(ray)` for placement hit data (`point`, horizontal `normal`, wall voxel `cellX/cellY/cellZ`).
+  - `raycastWallAnchor` now resolves explicit side-plane intersections (X/Z faces), improving placement reliability from oblique camera angles.
+  - plasma anchor uniqueness is keyed by wall voxel + face normal.
+  - plasma occupies no build cells, so it does **not** path-block enemy routes.
+  - plasma affects exactly one adjacent outward grid cube from its mounted face.
+  - plasma visuals are now a large wall panel (covering > half of a wall tile face) with reduced depth/protrusion; mount gap to wall face is minimal.
+  - plasma no longer has a barrel/shot burst: it renders a constant forward flame volume using a shader plus animated additive particles.
+  - plasma damage is continuous DPS in the target cube (`baseDamage / fireInterval`, scaled by damage buffs and fire-rate interval factor).
+  - plasma flame width/height are tuned to cover almost the full wall tile area.
+- Buff tower stacking contract:
+  - buff towers apply additive bonuses per in-range buff source.
+  - bonuses apply to **non-buff towers only** (buff towers do not buff buff towers).
+  - additive defaults: `+25% damage` and `+20% fire-rate` per buff tower in range.
+- New combat behavior contracts:
+  - `laserSniper`: map-wide LOS-gated hitscan beam burst.
+  - `mortar`: steep high-arc projectile with splash detonation on ground/timeout/obstacle hit.
+  - mortar launch tuning uses high initial vertical speed plus stronger gravity for an almost-straight-up lob that still lands quickly in-range.
+  - mortar launch angle is now dynamic per shot using a ballistic solve from muzzle->impact point; close targets force steeper pitch so shots do not sail over nearby enemies.
+  - mortar visuals now yaw + pitch to match solved shot direction (`mortarYawNode` + `mortarBarrelPivot`) before preview/firing.
+  - mortar barrel defaults to an upward idle angle in preview/placed mesh creation (`barrelPivot.rotation.x` negative), so build-mode mortar visuals start pointing up instead of horizontal.
+  - `plasma`: continuous wall-mounted flame volume with shader distortion + particles; deals continuous DPS in the adjacent target cube (not burst shots).
+  - `tesla`: chain lightning up to 3 unique enemies per attack.
+  - `spikes`: periodic raise/retract trap that damages enemies overlapping its cell during active window.
+  - `spikes` remain cell-snapped for placement occupancy, but are excluded from blocked-cell pathfinding so enemies still walk over them.
+  - spike tower base slab visual is intentionally very thin (`0.03` high, slight lift) so pickups/enemy cubes read on top instead of appearing embedded.
+  - spike meshes are laid out as an interleaved square grid (row-offset lattice) across the tile, not a circular ring.
+  - spike cone geometry is bottom-pivoted and positioned from the plate top, so retract/extend scaling keeps spikes seated on the base (no hover gap).
+- Spawn target-gating rule (latest):
+  - Towers should only target/damage enemies whose full body is outside spawn marker cubes.
+  - Enemies still intersecting a spawn cube are ignored by tower targeting and tower point/splash damage paths.
+- Ramp LOS rule (latest):
+  - Tower LOS checks now include ramp wedge volume blocking (base-to-slope shape), not only terrain cube AABBs.
+  - This prevents LOS towers (including sniper) from shooting through visible ramp mass while preserving empty-space-over-low-side sight lines.
+- Laser sniper targeting/cadence detail (latest):
+  - LOS origin uses the sniper emitter node (not mesh base position) to avoid false terrain-blocked shots.
+  - Target selection is unlimited-range LOS scan over all damageable enemies.
+  - Base fire interval is now `2.0s`.
+
 ### Gun Tower Replacement (Latest, Override)
 - The default starter tower type is now `gun` (the old `laser` tower type was fully replaced).
 - `GAME_CONFIG.economy.startingUnlockedTowers` should include `gun`; `towers.js` fallback also ensures `gun` is always unlocked.

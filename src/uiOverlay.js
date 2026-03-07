@@ -217,6 +217,130 @@ function drawIconTowerSlow(ctx, x, y, size) {
   );
 }
 
+function drawIconTowerLaserSniper(ctx, x, y, size) {
+  drawIconTowerLaser(ctx, x, y, size);
+  ctx.strokeStyle = "rgba(210, 236, 255, 0.95)";
+  ctx.lineWidth = Math.max(1.2, size * 0.04);
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.15, y + size * 0.2);
+  ctx.lineTo(x + size * 0.85, y + size * 0.8);
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(175, 226, 255, 0.95)";
+  ctx.beginPath();
+  ctx.arc(x + size * 0.72, y + size * 0.35, size * 0.08, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawIconTowerMortar(ctx, x, y, size) {
+  drawPanel(
+    ctx,
+    x + size * 0.2,
+    y + size * 0.62,
+    size * 0.6,
+    size * 0.18,
+    size * 0.06,
+    "rgba(136, 154, 180, 0.95)",
+    "rgba(192, 209, 230, 0.95)",
+    Math.max(1.2, size * 0.04)
+  );
+  ctx.strokeStyle = "rgba(198, 224, 255, 0.95)";
+  ctx.lineWidth = Math.max(1.3, size * 0.045);
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.4, y + size * 0.64);
+  ctx.lineTo(x + size * 0.72, y + size * 0.38);
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(224, 236, 248, 0.95)";
+  ctx.beginPath();
+  ctx.arc(x + size * 0.72, y + size * 0.36, size * 0.07, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawIconTowerTesla(ctx, x, y, size) {
+  drawTowerBaseIcon(ctx, x, y, size);
+  ctx.strokeStyle = "rgba(174, 200, 255, 0.98)";
+  ctx.lineWidth = Math.max(1.3, size * 0.05);
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.28, y + size * 0.2);
+  ctx.lineTo(x + size * 0.5, y + size * 0.45);
+  ctx.lineTo(x + size * 0.42, y + size * 0.45);
+  ctx.lineTo(x + size * 0.7, y + size * 0.8);
+  ctx.stroke();
+}
+
+function drawIconTowerSpikes(ctx, x, y, size) {
+  drawPanel(
+    ctx,
+    x + size * 0.16,
+    y + size * 0.62,
+    size * 0.68,
+    size * 0.2,
+    size * 0.07,
+    "rgba(131, 151, 162, 0.95)",
+    "rgba(186, 205, 218, 0.92)",
+    Math.max(1.2, size * 0.04)
+  );
+  const spikeCount = 5;
+  ctx.fillStyle = "rgba(198, 226, 222, 0.96)";
+  for (let i = 0; i < spikeCount; i += 1) {
+    const t = i / Math.max(1, spikeCount - 1);
+    const spikeX = x + size * (0.22 + t * 0.56);
+    fillPath(
+      ctx,
+      [
+        [spikeX - size * 0.04, y + size * 0.64],
+        [spikeX + size * 0.04, y + size * 0.64],
+        [spikeX, y + size * 0.34],
+      ],
+      "rgba(199, 227, 223, 0.96)",
+      "rgba(225, 244, 240, 0.95)",
+      Math.max(1, size * 0.03)
+    );
+  }
+}
+
+function drawIconTowerPlasma(ctx, x, y, size) {
+  drawPanel(
+    ctx,
+    x + size * 0.18,
+    y + size * 0.28,
+    size * 0.34,
+    size * 0.46,
+    size * 0.08,
+    "rgba(110, 210, 230, 0.9)",
+    "rgba(163, 241, 255, 0.95)",
+    Math.max(1.2, size * 0.04)
+  );
+  ctx.fillStyle = "rgba(140, 255, 242, 0.95)";
+  ctx.fillRect(
+    x + size * 0.5,
+    y + size * 0.46,
+    size * 0.3,
+    size * 0.08
+  );
+  ctx.strokeStyle = "rgba(176, 255, 247, 0.95)";
+  ctx.lineWidth = Math.max(1.2, size * 0.04);
+  ctx.strokeRect(
+    x + size * 0.5,
+    y + size * 0.46,
+    size * 0.3,
+    size * 0.08
+  );
+}
+
+function drawIconTowerBuff(ctx, x, y, size) {
+  drawTowerBaseIcon(ctx, x, y, size);
+  ctx.strokeStyle = "rgba(255, 214, 128, 0.98)";
+  ctx.lineWidth = Math.max(1.3, size * 0.045);
+  ctx.beginPath();
+  ctx.arc(x + size * 0.5, y + size * 0.5, size * 0.28, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x + size * 0.5, y + size * 0.5, size * 0.16, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
 function drawIconTowerDamage(ctx, x, y, size) {
   drawTowerBaseIcon(ctx, x, y, size);
   const burstCx = x + size * 0.78;
@@ -630,6 +754,42 @@ function drawIconById(ctx, iconId, x, y, size) {
       return;
     case "tower_slow":
       drawIconTowerSlow(ctx, x, y, size);
+      return;
+    case "tower_laser_sniper_add":
+      drawIconTowerLaserSniper(ctx, x, y, size);
+      return;
+    case "tower_laser_sniper":
+      drawIconTowerLaserSniper(ctx, x, y, size);
+      return;
+    case "tower_mortar_add":
+      drawIconTowerMortar(ctx, x, y, size);
+      return;
+    case "tower_mortar":
+      drawIconTowerMortar(ctx, x, y, size);
+      return;
+    case "tower_tesla_add":
+      drawIconTowerTesla(ctx, x, y, size);
+      return;
+    case "tower_tesla":
+      drawIconTowerTesla(ctx, x, y, size);
+      return;
+    case "tower_spikes_add":
+      drawIconTowerSpikes(ctx, x, y, size);
+      return;
+    case "tower_spikes":
+      drawIconTowerSpikes(ctx, x, y, size);
+      return;
+    case "tower_plasma_add":
+      drawIconTowerPlasma(ctx, x, y, size);
+      return;
+    case "tower_plasma":
+      drawIconTowerPlasma(ctx, x, y, size);
+      return;
+    case "tower_buff_add":
+      drawIconTowerBuff(ctx, x, y, size);
+      return;
+    case "tower_buff":
+      drawIconTowerBuff(ctx, x, y, size);
       return;
     case "tower_emp_add":
       drawIconTowerAoe(ctx, x, y, size);

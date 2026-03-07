@@ -556,6 +556,8 @@ export function createGrid(scene, options = {}) {
   const buildRaycastHitPoint = new THREE.Vector3();
   const buildRaycastBestPoint = new THREE.Vector3();
   const buildRaycastRampHitPoint = new THREE.Vector3();
+  const wallAnchorRaycastBestPoint = new THREE.Vector3();
+  const wallAnchorRaycastBestNormal = new THREE.Vector3();
 
   const ramps = Array.isArray(levelLayout.ramps) ? levelLayout.ramps : [];
   const wallVoxels = Array.isArray(levelLayout.wallVoxels) ? levelLayout.wallVoxels : [];
@@ -588,6 +590,9 @@ export function createGrid(scene, options = {}) {
       halfSizeZ: TERRAIN_OBSTACLE_HALF_SIZE,
       height: ALTITUDE_CUBE_SIZE,
       baseY,
+      cellX,
+      cellY,
+      cellZ,
       // Terrain tops should remain continuously walkable across adjacent cells.
       topInsetFromRadius: 0,
     });
@@ -1445,6 +1450,169 @@ export function createGrid(scene, options = {}) {
     return true;
   }
 
+  function raycastWallAnchor(ray) {
+    if (!ray || !ray.origin || !ray.direction) {
+      return null;
+    }
+
+    const origin = ray.origin;
+    let bestDistanceSq = Number.POSITIVE_INFINITY;
+    let bestCellX = null;
+    let bestCellY = null;
+    let bestCellZ = null;
+
+    for (const obstacle of altitudeObstacles) {
+      const obstaclePos = obstacle?.position;
+      const obstacleHeight = Number(obstacle?.height);
+      const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
+        ? Number(obstacle.halfSizeX)
+        : Number(obstacle?.halfSize);
+      const obstacleHalfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
+        ? Number(obstacle.halfSizeZ)
+        : Number(obstacle?.halfSize);
+      const obstacleBaseY = Number(obstacle?.baseY);
+      if (
+        !obstaclePos
+        || !Number.isFinite(obstacleHalfSizeX)
+        || !Number.isFinite(obstacleHalfSizeZ)
+        || !Number.isFinite(obstacleHeight)
+        || !Number.isFinite(obstacleBaseY)
+      ) {
+        continue;
+      }
+
+      buildRaycastObstacleBox.min.set(
+        obstaclePos.x - obstacleHalfSizeX,
+        obstacleBaseY,
+        obstaclePos.z - obstacleHalfSizeZ
+      );
+      buildRaycastObstacleBox.max.set(
+        obstaclePos.x + obstacleHalfSizeX,
+        obstacleBaseY + obstacleHeight,
+        obstaclePos.z + obstacleHalfSizeZ
+      );
+
+      const hitPoint = ray.intersectBox(buildRaycastObstacleBox, buildRaycastHitPoint);
+      if (!hitPoint) {
+        continue;
+      }
+
+      const minX = buildRaycastObstacleBox.min.x;
+      const maxX = buildRaycastObstacleBox.max.x;
+      const minY = buildRaycastObstacleBox.min.y;
+      const maxY = buildRaycastObstacleBox.max.y;
+      const minZ = buildRaycastObstacleBox.min.z;
+      const maxZ = buildRaycastObstacleBox.max.z;
+      const direction = ray.direction;
+      const sidePlaneEpsilon = 1e-4;
+      const sideRayParallelEpsilon = Math.max(1e-6, Number(GRID_CONFIG.rayParallelEpsilon) || 1e-6);
+      let localBestDistanceSq = Number.POSITIVE_INFINITY;
+      let localBestX = 0;
+      let localBestY = 0;
+      let localBestZ = 0;
+      let localBestNormalX = 0;
+      let localBestNormalZ = 0;
+
+      if (Math.abs(direction.x) > sideRayParallelEpsilon) {
+        const testXPlanes = [
+          { value: minX, normalX: -1 },
+          { value: maxX, normalX: 1 },
+        ];
+        for (const plane of testXPlanes) {
+          const t = (plane.value - origin.x) / direction.x;
+          if (t < 0) {
+            continue;
+          }
+          const hitY = origin.y + (direction.y * t);
+          const hitZ = origin.z + (direction.z * t);
+          if (
+            hitY < (minY - sidePlaneEpsilon)
+            || hitY > (maxY + sidePlaneEpsilon)
+            || hitZ < (minZ - sidePlaneEpsilon)
+            || hitZ > (maxZ + sidePlaneEpsilon)
+          ) {
+            continue;
+          }
+          const hitX = plane.value;
+          const distanceSq = ((hitX - origin.x) ** 2) + ((hitY - origin.y) ** 2) + ((hitZ - origin.z) ** 2);
+          if (distanceSq >= localBestDistanceSq) {
+            continue;
+          }
+          localBestDistanceSq = distanceSq;
+          localBestX = hitX;
+          localBestY = hitY;
+          localBestZ = hitZ;
+          localBestNormalX = plane.normalX;
+          localBestNormalZ = 0;
+        }
+      }
+
+      if (Math.abs(direction.z) > sideRayParallelEpsilon) {
+        const testZPlanes = [
+          { value: minZ, normalZ: -1 },
+          { value: maxZ, normalZ: 1 },
+        ];
+        for (const plane of testZPlanes) {
+          const t = (plane.value - origin.z) / direction.z;
+          if (t < 0) {
+            continue;
+          }
+          const hitX = origin.x + (direction.x * t);
+          const hitY = origin.y + (direction.y * t);
+          if (
+            hitX < (minX - sidePlaneEpsilon)
+            || hitX > (maxX + sidePlaneEpsilon)
+            || hitY < (minY - sidePlaneEpsilon)
+            || hitY > (maxY + sidePlaneEpsilon)
+          ) {
+            continue;
+          }
+          const hitZ = plane.value;
+          const distanceSq = ((hitX - origin.x) ** 2) + ((hitY - origin.y) ** 2) + ((hitZ - origin.z) ** 2);
+          if (distanceSq >= localBestDistanceSq) {
+            continue;
+          }
+          localBestDistanceSq = distanceSq;
+          localBestX = hitX;
+          localBestY = hitY;
+          localBestZ = hitZ;
+          localBestNormalX = 0;
+          localBestNormalZ = plane.normalZ;
+        }
+      }
+
+      if (!Number.isFinite(localBestDistanceSq)) {
+        continue;
+      }
+
+      if (localBestDistanceSq >= bestDistanceSq) {
+        continue;
+      }
+
+      bestDistanceSq = localBestDistanceSq;
+      wallAnchorRaycastBestPoint.set(localBestX, localBestY, localBestZ);
+      wallAnchorRaycastBestNormal.set(localBestNormalX, 0, localBestNormalZ);
+      bestCellX = Number.isInteger(obstacle?.cellX) ? obstacle.cellX : null;
+      bestCellY = Number.isInteger(obstacle?.cellY) ? obstacle.cellY : null;
+      bestCellZ = Number.isInteger(obstacle?.cellZ) ? obstacle.cellZ : null;
+    }
+
+    if (!Number.isFinite(bestDistanceSq)) {
+      return null;
+    }
+    if (!Number.isInteger(bestCellX) || !Number.isInteger(bestCellY) || !Number.isInteger(bestCellZ)) {
+      return null;
+    }
+
+    return {
+      point: wallAnchorRaycastBestPoint.clone(),
+      normal: wallAnchorRaycastBestNormal.clone(),
+      cellX: bestCellX,
+      cellY: bestCellY,
+      cellZ: bestCellZ,
+    };
+  }
+
   function cellToWorldCenter(cellX, cellZ, y = FLOOR_Y) {
     return cellToWorld(cellX, cellZ, y);
   }
@@ -1544,6 +1712,7 @@ export function createGrid(scene, options = {}) {
     getCellSurfaceY,
     getBuildSurfaceYAtWorld,
     raycastBuildSurface,
+    raycastWallAnchor,
     updateBoundaryWallVisual,
     getLevelObjects,
     getEditorRaycastTargets,

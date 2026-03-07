@@ -17,7 +17,18 @@ const ENEMY_CONFIG = GAME_CONFIG.enemies ?? {};
 const ENEMY_TYPES = ENEMY_CONFIG.types ?? {};
 const CONFIGURED_ROUNDS = Array.isArray(WAVE_CONFIG.rounds) ? WAVE_CONFIG.rounds : [];
 const UPGRADE_DEFINITIONS = Array.isArray(GAME_CONFIG.upgrades) ? GAME_CONFIG.upgrades : [];
+const TOWER_UNLOCK_UPGRADE_IDS = UPGRADE_DEFINITIONS
+  .filter(
+    (definition) => typeof definition?.id === "string"
+      && definition.id.length > 0
+      && typeof definition?.grants?.unlockTowerType === "string"
+  )
+  .map((definition) => definition.id);
 const FIRST_MENU_FORCED_UPGRADE_ID = "tower_aoe_unlock";
+const DEFAULT_MAX_TOWER_UNLOCKS = 5;
+const MAX_TOWER_UNLOCKS = Number.isFinite(Number(ECONOMY_CONFIG.maxTowerUnlocks))
+  ? Math.max(0, Math.floor(Number(ECONOMY_CONFIG.maxTowerUnlocks)))
+  : DEFAULT_MAX_TOWER_UNLOCKS;
 const MOBILE_LOOK_SENSITIVITY_SCALE = Number.isFinite(Number(MOBILE_UI_CONFIG.lookSensitivityScale))
   ? Math.max(0.1, Number(MOBILE_UI_CONFIG.lookSensitivityScale))
   : 1;
@@ -1093,6 +1104,13 @@ function incrementUpgradeCount(id) {
   upgradeCountsById.set(id, getUpgradeCount(id) + 1);
 }
 
+function getTowerUnlockUpgradeCount() {
+  return TOWER_UNLOCK_UPGRADE_IDS.reduce(
+    (total, upgradeId) => total + getUpgradeCount(upgradeId),
+    0
+  );
+}
+
 function normalizeMaxUpgradeCount(rawMaxCount) {
   if (rawMaxCount === null || rawMaxCount === undefined) {
     return null;
@@ -1118,8 +1136,13 @@ function isUpgradeAvailable(definition) {
   }
 
   const unlockTowerType = definition.grants?.unlockTowerType;
-  if (typeof unlockTowerType === "string" && towerSystem?.isTowerTypeUnlocked(unlockTowerType)) {
-    return false;
+  if (typeof unlockTowerType === "string") {
+    if (getTowerUnlockUpgradeCount() >= MAX_TOWER_UNLOCKS) {
+      return false;
+    }
+    if (towerSystem?.isTowerTypeUnlocked(unlockTowerType)) {
+      return false;
+    }
   }
 
   return true;
@@ -2477,6 +2500,12 @@ function animate() {
           gun: "tower_gun",
           aoe: "tower_aoe",
           slow: "tower_slow",
+          laserSniper: "tower_laser_sniper",
+          mortar: "tower_mortar",
+          tesla: "tower_tesla",
+          spikes: "tower_spikes",
+          plasma: "tower_plasma",
+          buff: "tower_buff",
         }[entry.type] || "tower_gun"
       ),
       hotkey: String((index + 1) % 10 || 0),
