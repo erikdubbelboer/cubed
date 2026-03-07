@@ -915,6 +915,7 @@ export function createUiOverlay({
     showCrosshair: true,
     jetpackFuelRatio: 1,
     money: 0,
+    experienceRatio: 0,
     waveNumber: 1,
     towerInventory: [],
     selectedTowerType: null,
@@ -1007,6 +1008,9 @@ export function createUiOverlay({
     }
     if (typeof partialState.money === "number") {
       state.money = Math.max(0, Math.floor(partialState.money));
+    }
+    if (typeof partialState.experienceRatio === "number" && Number.isFinite(partialState.experienceRatio)) {
+      state.experienceRatio = clamp(partialState.experienceRatio, 0, 1);
     }
     if (typeof partialState.waveNumber === "number" && Number.isFinite(partialState.waveNumber)) {
       state.waveNumber = Math.max(1, Math.floor(partialState.waveNumber));
@@ -1288,6 +1292,10 @@ export function createUiOverlay({
     if (waveRect) {
       stackBottom = Math.max(stackBottom, waveRect.panelY + waveRect.panelHeight);
     }
+    const experienceRect = getExperienceBarRect();
+    if (experienceRect) {
+      stackBottom = Math.max(stackBottom, experienceRect.panelY + experienceRect.panelHeight);
+    }
     return stackBottom;
   }
 
@@ -1336,6 +1344,112 @@ export function createUiOverlay({
     );
 
     pushTouchBlockedRect(panelX, panelY, panelWidth, panelHeight);
+  }
+
+  function getExperienceBarRect() {
+    if (state.menuOpen) {
+      return null;
+    }
+    const {
+      panelX: moneyPanelX,
+      panelWidth: moneyPanelWidth,
+      panelY: moneyPanelY,
+      panelHeight: moneyPanelHeight,
+    } = getMoneyPanelRect();
+    const waveRect = getWaveCounterRect();
+    const topGap = state.showTouchControls
+      ? clamp(viewportHeight * 0.008, 4, 8)
+      : clamp(viewportHeight * 0.008, 5, 10);
+    const panelWidth = state.showTouchControls
+      ? clamp(moneyPanelWidth * 0.96, 96, 162)
+      : clamp(moneyPanelWidth * 0.92, 104, 178);
+    const panelHeight = state.showTouchControls
+      ? clamp(moneyPanelHeight * 0.46, 16, 24)
+      : clamp(moneyPanelHeight * 0.44, 16, 24);
+    const panelX = moneyPanelX + moneyPanelWidth - panelWidth;
+    const anchorBottom = waveRect
+      ? (waveRect.panelY + waveRect.panelHeight)
+      : (moneyPanelY + moneyPanelHeight);
+    const panelY = anchorBottom + topGap;
+    return {
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+    };
+  }
+
+  function drawExperienceHud() {
+    const expRect = getExperienceBarRect();
+    if (!expRect) {
+      return;
+    }
+    const {
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+    } = expRect;
+    const expRatio = clamp(state.experienceRatio, 0, 1);
+
+    drawPanel(
+      drawCtx,
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+      clamp(panelHeight * 0.35, 4, 8),
+      "rgba(11, 20, 34, 0.78)",
+      "rgba(145, 205, 255, 0.48)",
+      1.1
+    );
+
+    drawCtx.fillStyle = "rgba(220, 239, 255, 0.9)";
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "middle";
+    drawCtx.font = `700 ${clamp(panelHeight * 0.5, 8, 11)}px ${FONT_STACK}`;
+    const labelX = panelX + clamp(panelWidth * 0.05, 5, 8);
+    const labelY = panelY + panelHeight * 0.52;
+    drawCtx.fillText("XP", labelX, labelY);
+
+    const labelReserve = clamp(panelWidth * 0.14, 14, 28);
+    const trackPadding = clamp(panelHeight * 0.2, 2, 4);
+    const trackX = panelX + labelReserve;
+    const trackY = panelY + trackPadding;
+    const trackWidth = Math.max(8, panelWidth - labelReserve - trackPadding);
+    const trackHeight = Math.max(6, panelHeight - (trackPadding * 2));
+    drawPanel(
+      drawCtx,
+      trackX,
+      trackY,
+      trackWidth,
+      trackHeight,
+      clamp(trackHeight * 0.5, 3, 7),
+      "rgba(8, 16, 28, 0.86)",
+      "rgba(130, 180, 228, 0.5)",
+      1
+    );
+
+    const fillWidth = Math.max(0, (trackWidth - 2) * expRatio);
+    if (fillWidth > 0.5) {
+      const gradient = drawCtx.createLinearGradient(trackX, trackY, trackX + trackWidth, trackY);
+      gradient.addColorStop(0, "#63bdff");
+      gradient.addColorStop(1, "#7bf7ff");
+      drawPanel(
+        drawCtx,
+        trackX + 1,
+        trackY + 1,
+        fillWidth,
+        Math.max(1, trackHeight - 2),
+        clamp((trackHeight - 2) * 0.5, 2, 6),
+        gradient,
+        null
+      );
+    }
+
+    pushTouchBlockedRect(panelX, panelY, panelWidth, panelHeight);
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "alphabetic";
   }
 
   function formatTimerSeconds(totalSeconds) {
@@ -2022,11 +2136,11 @@ export function createUiOverlay({
     drawCtx.textAlign = "center";
     drawCtx.textBaseline = "top";
     drawCtx.font = `700 ${clamp(panelWidth * 0.08, 21, 30)}px ${FONT_STACK}`;
-    drawCtx.fillText("Wave Completed!", panelX + panelWidth * 0.5, panelY + panelPadding);
+    drawCtx.fillText("Upgrade Ready", panelX + panelWidth * 0.5, panelY + panelPadding);
     drawCtx.font = `500 ${clamp(panelWidth * 0.04, 12, 16)}px ${FONT_STACK}`;
     drawCtx.fillStyle = "rgba(228, 240, 255, 0.82)";
     drawCtx.fillText(
-      "Select an upgrade for the next wave",
+      "Select an upgrade",
       panelX + panelWidth * 0.5,
       panelY + panelPadding + clamp(panelWidth * 0.1, 30, 40)
     );
@@ -2126,6 +2240,7 @@ export function createUiOverlay({
     drawJetpackHud();
     drawMoneyHud();
     drawWaveHud();
+    drawExperienceHud();
     drawBuildPhaseTimer();
     drawFpsHud();
     drawHudUtilityButtons();

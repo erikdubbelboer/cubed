@@ -569,6 +569,17 @@ export function createTowerSystem({
     return true;
   }
 
+  function doesTowerTypeCollideWithPlayer(towerType) {
+    const normalizedType = normalizeTowerType(towerType);
+    if (!normalizedType) {
+      return true;
+    }
+    if (normalizedType === "plasma" || normalizedType === "spikes") {
+      return false;
+    }
+    return true;
+  }
+
   function normalizeTowerType(type) {
     if (typeof type !== "string") {
       return null;
@@ -2580,6 +2591,7 @@ export function createTowerSystem({
       cooldown: 0,
       chargeTimer: 0,
       towerType,
+      collidesWithPlayer: doesTowerTypeCollideWithPlayer(towerType),
       range: towerSpec.range,
       radius: towerSpec.radius,
       halfSize: towerSpec.halfSize,

@@ -70,6 +70,20 @@ const BUILD_PREVIEW_ARROW_RADIUS_FROM_CELL = 0.07;
 const BUILD_PREVIEW_ARROW_VERTICAL_JITTER = 0.06;
 const FPS_SAMPLE_WINDOW_SECONDS = 0.35;
 const EDITOR_TOOL_ROTATE_INTERVAL_MS = 200;
+const LEVELING_CONFIG = ECONOMY_CONFIG.leveling ?? {};
+const DEFAULT_XP_PER_KILL = 1;
+const XP_PER_KILL = Number.isFinite(Number(LEVELING_CONFIG.xpPerKill))
+  ? Math.max(0, Number(LEVELING_CONFIG.xpPerKill))
+  : DEFAULT_XP_PER_KILL;
+const DEFAULT_BASE_XP_TO_LEVEL = 9;
+const BASE_XP_TO_LEVEL = Number.isFinite(Number(LEVELING_CONFIG.baseXpToLevel))
+  ? Math.max(0.01, Number(LEVELING_CONFIG.baseXpToLevel))
+  : DEFAULT_BASE_XP_TO_LEVEL;
+const DEFAULT_LEVEL_XP_GROWTH_MULTIPLIER = 1.1;
+const LEVEL_XP_GROWTH_MULTIPLIER = Number.isFinite(Number(LEVELING_CONFIG.levelXpGrowthMultiplier))
+  ? Math.max(1, Number(LEVELING_CONFIG.levelXpGrowthMultiplier))
+  : DEFAULT_LEVEL_XP_GROWTH_MULTIPLIER;
+const LEVEL_XP_COMPARE_EPSILON = 1e-6;
 const ECONOMY_PICKUP_CONFIG = ECONOMY_CONFIG.pickups ?? {};
 const MONEY_DROP_DENOMINATIONS = [1, 10, 100];
 const MONEY_DROP_MERGE_TARGET_BY_VALUE = new Map([
@@ -1055,7 +1069,12 @@ let hoveredUpgradeIndex = -1;
 let currentUpgradeOptions = [];
 let menuAdvancesWaveOnChoice = true;
 let menuResumeWaveState = "PLAYING";
+let menuConsumesPendingLevelUp = false;
 let hasShownFirstUpgradeMenu = false;
+let currentExperience = 0;
+let experienceToNextLevel = BASE_XP_TO_LEVEL;
+let pendingLevelUpMenus = 0;
+let levelingUpgradesExhausted = false;
 let forceTouchControls = false;
 const mobileInput = {
   movePointerId: null,
@@ -1215,6 +1234,71 @@ function getUpgradePool() {
     }));
 }
 
+function getExperienceRatio() {
+  if (levelingUpgradesExhausted) {
+    return 1;
+  }
+  if (!Number.isFinite(experienceToNextLevel) || experienceToNextLevel <= 0) {
+    return 1;
+  }
+  return clamp(currentExperience / experienceToNextLevel, 0, 1);
+}
+
+function clearPendingLevelUpsAsExhausted() {
+  pendingLevelUpMenus = 0;
+  levelingUpgradesExhausted = true;
+  currentExperience = experienceToNextLevel;
+}
+
+function tryOpenPendingLevelUpMenu() {
+  if (
+    pendingLevelUpMenus <= 0
+    || levelingUpgradesExhausted
+    || waveState === "MENU"
+    || waveState === "EDITOR"
+    || !player
+  ) {
+    return false;
+  }
+  if (getUpgradePool().length === 0) {
+    clearPendingLevelUpsAsExhausted();
+    return false;
+  }
+
+  const resumeWaveState = normalizeMenuResumeWaveState(waveState);
+  waveState = "MENU";
+  showUpgradeMenu({
+    advanceWaveOnChoice: false,
+    resumeWaveState,
+    consumePendingLevelUp: true,
+  });
+  return true;
+}
+
+function addExperience(amount) {
+  if (levelingUpgradesExhausted) {
+    return false;
+  }
+  const gainAmount = Number(amount);
+  if (!Number.isFinite(gainAmount) || gainAmount <= 0) {
+    return false;
+  }
+  currentExperience += gainAmount;
+  while (
+    !levelingUpgradesExhausted
+    && currentExperience >= (experienceToNextLevel - LEVEL_XP_COMPARE_EPSILON)
+  ) {
+    if (getUpgradePool().length === 0) {
+      clearPendingLevelUpsAsExhausted();
+      break;
+    }
+    currentExperience = Math.max(0, currentExperience - experienceToNextLevel);
+    experienceToNextLevel *= LEVEL_XP_GROWTH_MULTIPLIER;
+    pendingLevelUpMenus += 1;
+  }
+  return tryOpenPendingLevelUpMenu();
+}
+
 function finishUpgradeMenuChoice() {
   currentUpgradeOptions = [];
   hoveredUpgradeIndex = -1;
@@ -1228,6 +1312,8 @@ function finishUpgradeMenuChoice() {
   }
   menuAdvancesWaveOnChoice = true;
   menuResumeWaveState = "PLAYING";
+  menuConsumesPendingLevelUp = false;
+  tryOpenPendingLevelUpMenu();
 }
 
 function applyUpgradeChoice(index) {
@@ -1242,6 +1328,9 @@ function applyUpgradeChoice(index) {
 
   selectedUpgrade.apply();
   incrementUpgradeCount(selectedUpgrade.id);
+  if (menuConsumesPendingLevelUp && pendingLevelUpMenus > 0) {
+    pendingLevelUpMenus -= 1;
+  }
   finishUpgradeMenuChoice();
   return true;
 }
@@ -2017,6 +2106,7 @@ window.addEventListener("keydown", (event) => {
       showUpgradeMenu({
         advanceWaveOnChoice: menuAdvancesWaveOnChoice,
         resumeWaveState: menuResumeWaveState,
+        consumePendingLevelUp: menuConsumesPendingLevelUp,
       });
       return;
     }
@@ -2104,7 +2194,12 @@ function resetRunStateForNewLevel() {
   hoveredUpgradeIndex = -1;
   menuAdvancesWaveOnChoice = true;
   menuResumeWaveState = "PLAYING";
+  menuConsumesPendingLevelUp = false;
   hasShownFirstUpgradeMenu = false;
+  currentExperience = 0;
+  experienceToNextLevel = BASE_XP_TO_LEVEL;
+  pendingLevelUpMenus = 0;
+  levelingUpgradesExhausted = false;
   upgradeCountsById.clear();
   isPrimaryDown = false;
   gameSpeedMultiplier = GAME_SPEED_NORMAL;
@@ -2127,6 +2222,7 @@ function createEnemySystemForCurrentGrid() {
   return createEnemySystem(scene, grid, {
     onEnemyDefeated: (cashReward, _enemyType, dropPosition) => {
       spawnMoneyDrops(cashReward, dropPosition);
+      addExperience(XP_PER_KILL);
     },
   });
 }
@@ -2390,9 +2486,11 @@ function showUpgradeMenu(options = {}) {
   const {
     advanceWaveOnChoice = true,
     resumeWaveState = "PLAYING",
+    consumePendingLevelUp = false,
   } = options;
   menuAdvancesWaveOnChoice = advanceWaveOnChoice;
   menuResumeWaveState = normalizeMenuResumeWaveState(resumeWaveState);
+  menuConsumesPendingLevelUp = !!consumePendingLevelUp;
 
   player.setMenuMode(true);
   resetMobileInputState();
@@ -2442,6 +2540,7 @@ function animate() {
   }
 
   if (!isPaused) {
+    tryOpenPendingLevelUpMenu();
     if (waveState === "PLAYING") {
       if (enemySystem && enemySystem.isWaveClear()) {
         waveState = "DELAY";
@@ -2450,8 +2549,7 @@ function animate() {
     } else if (waveState === "DELAY") {
       waveDelay -= simulationDeltaSeconds;
       if (waveDelay <= 0) {
-        waveState = "MENU";
-        showUpgradeMenu();
+        startBuildPhase(currentWave + 1);
       }
     } else if (waveState === "BUILD") {
       buildPhaseRemainingSeconds = Math.max(0, buildPhaseRemainingSeconds - rawDeltaSeconds);
@@ -2539,6 +2637,7 @@ function animate() {
     menuCursorVisible: waveState === "MENU" && !!player?.controls?.isLocked,
     jetpackFuelRatio: player ? player.getJetpackFuelRatio() : 1,
     money: playerMoney,
+    experienceRatio: getExperienceRatio(),
     waveNumber: hudWaveNumber,
     towerInventory,
     selectedTowerType: waveState === "EDITOR"

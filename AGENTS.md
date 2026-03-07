@@ -60,6 +60,10 @@
   - plasma no longer has a barrel/shot burst: it renders a constant forward flame volume using a shader plus animated additive particles.
   - plasma damage is continuous DPS in the target cube (`baseDamage / fireInterval`, scaled by damage buffs and fire-rate interval factor).
   - plasma flame width/height are tuned to cover almost the full wall tile area.
+- Player collision exclusions (latest):
+  - `spikes` and `plasma` towers no longer block player movement/collision.
+  - Implementation detail: tower entries expose `collidesWithPlayer`; `player.js:updateMovement` filters obstacles by this flag.
+  - Player projectile-vs-obstacle collision path remains unchanged (still uses full obstacle list from `getMovementObstacles()`).
 - Buff tower stacking contract:
   - buff towers apply additive bonuses per in-range buff source.
   - bonuses apply to **non-buff towers only** (buff towers do not buff buff towers).

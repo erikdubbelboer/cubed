@@ -1176,9 +1176,12 @@ export function createPlayer({
   }
 
   function updateMovement(deltaSeconds) {
-    const obstacles = typeof getMovementObstacles === "function"
+    const movementObstacles = typeof getMovementObstacles === "function"
       ? (Array.isArray(getMovementObstacles()) ? getMovementObstacles() : [])
       : [];
+    const obstacles = movementObstacles.filter(
+      (obstacle) => obstacle?.collidesWithPlayer !== false
+    );
 
     function getSupportCameraYAtPosition(x, z, currentCameraY) {
       let supportY = eyeHeight;

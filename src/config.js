@@ -84,9 +84,18 @@ export const GAME_CONFIG = {
     // Starting cash at game start (BTD6-style opening economy).
     startingCash: 50,
     // Tower types available before any unlock upgrades are chosen.
-    startingUnlockedTowers: ["gun", "mortar", "plasma"],
+    startingUnlockedTowers: ["gun"],
     // Global cap for additional tower unlock upgrades per run.
     maxTowerUnlocks: 5,
+    // Kill-based XP leveling for upgrade picks.
+    leveling: {
+      // XP granted for each enemy kill.
+      xpPerKill: 1,
+      // XP required for the first level-up.
+      baseXpToLevel: 9,
+      // Multiplier applied to each subsequent XP requirement.
+      levelXpGrowthMultiplier: 1.1,
+    },
     // Enemy reward pickups (physical cash cubes).
     pickups: {
       // Horizontal pickup radius around the player (world units).
@@ -257,9 +266,9 @@ export const GAME_CONFIG = {
   waves: {
     // First wave number shown to player. Typical value: 1.
     initialWave: 1,
-    // Delay after clearing a wave before upgrade menu (seconds). Typical range: 0.5-4.
+    // Delay after clearing a wave before build phase starts (seconds). Typical range: 0.5-4.
     upgradeDelaySeconds: 2.0,
-    // Build phase duration after each upgrade choice (seconds). Typical range: 30-600.
+    // Build phase duration after each wave clear (seconds). Typical range: 30-600.
     buildPhaseDurationSeconds: 300,
     // Behavior once the configured rounds are exhausted.
     // "stay_on_last": keep replaying the final configured round.
