@@ -263,6 +263,37 @@ export const GAME_CONFIG = {
     },
   ],
 
+  techTree: {
+    rootId: "tower_gun_root",
+    nodes: [
+      { id: "tower_gun_root", label: "Gun Core", iconId: "tower_gun", maxCount: 1, grants: {}, position: { x: 0.5, y: 0.1 } },
+
+      { id: "tower_aoe_unlock", label: "AOE", iconId: "tower_aoe_add", maxCount: 1, prerequisites: ["tower_gun_root"], grants: { unlockTowerType: "aoe" }, position: { x: 0.1, y: 0.24 } },
+      { id: "tower_slow_unlock", label: "Slow", iconId: "tower_slow_add", maxCount: 1, prerequisites: ["tower_gun_root"], grants: { unlockTowerType: "slow" }, position: { x: 0.2, y: 0.24 } },
+      { id: "tower_laser_sniper_unlock", label: "Sniper", iconId: "tower_laser_sniper_add", maxCount: 1, prerequisites: ["tower_gun_root"], grants: { unlockTowerType: "laserSniper" }, position: { x: 0.3, y: 0.24 } },
+      { id: "tower_mortar_unlock", label: "Mortar", iconId: "tower_mortar_add", maxCount: 1, prerequisites: ["tower_gun_root"], grants: { unlockTowerType: "mortar" }, position: { x: 0.4, y: 0.24 } },
+      { id: "tower_tesla_unlock", label: "Tesla", iconId: "tower_tesla_add", maxCount: 1, prerequisites: ["tower_gun_root"], grants: { unlockTowerType: "tesla" }, position: { x: 0.6, y: 0.24 } },
+      { id: "tower_spikes_unlock", label: "Spikes", iconId: "tower_spikes_add", maxCount: 1, prerequisites: ["tower_gun_root"], grants: { unlockTowerType: "spikes" }, position: { x: 0.7, y: 0.24 } },
+      { id: "tower_plasma_unlock", label: "Plasma", iconId: "tower_plasma_add", maxCount: 1, prerequisites: ["tower_gun_root"], grants: { unlockTowerType: "plasma" }, position: { x: 0.8, y: 0.24 } },
+      { id: "tower_buff_unlock", label: "Buff", iconId: "tower_buff_add", maxCount: 1, prerequisites: ["tower_gun_root"], grants: { unlockTowerType: "buff" }, position: { x: 0.9, y: 0.24 } },
+
+      { id: "gun_damage_t1", label: "Gun Dmg", iconId: "tower_damage", maxCount: 5, prerequisites: ["tower_gun_root"], grants: { towerDamageAdd: 0.3 }, position: { x: 0.44, y: 0.4 } },
+      { id: "gun_attack_speed_t1", label: "Gun RPM", iconId: "tower_fire_rate", maxCount: 4, prerequisites: ["tower_gun_root"], grants: { towerFireRateMultiplier: 0.9 }, position: { x: 0.56, y: 0.4 } },
+      { id: "projectile_pierce_theory", label: "Pierce", iconId: "player_weapon_pierce", maxCount: 3, prerequisites: ["tower_gun_root"], grants: { weaponPierceAdd: 1 }, position: { x: 0.5, y: 0.5 } },
+
+      { id: "tower_extra_bullet", label: "Extra Bullet", iconId: "player_fire_rate", maxCount: 3, prerequisites: ["gun_attack_speed_t1"], grants: { towerFireRateMultiplier: 0.88, towerDamageAdd: 0.15 }, position: { x: 0.62, y: 0.54 } },
+      { id: "tower_range_calibration", label: "Range", iconId: "tower_laser_sniper", maxCount: 3, prerequisites: ["gun_damage_t1"], grants: { towerDamageAdd: 0.2 }, position: { x: 0.38, y: 0.54 } },
+      { id: "enemy_explode_on_death", label: "Death Blast", iconId: "tower_aoe", maxCount: 2, prerequisites: ["tower_aoe_unlock"], grants: { towerDamageAdd: 0.45 }, position: { x: 0.12, y: 0.52 } },
+
+      { id: "player_damage_t1", label: "Player Dmg", iconId: "player_damage", maxCount: 4, prerequisites: ["gun_damage_t1"], grants: { playerDamageAdd: 0.45 }, position: { x: 0.44, y: 0.68 } },
+      { id: "player_fire_rate_t1", label: "Player RPM", iconId: "player_fire_rate", maxCount: 4, prerequisites: ["gun_attack_speed_t1"], grants: { playerFireRateMultiplier: 0.9 }, position: { x: 0.56, y: 0.68 } },
+      { id: "player_weapon_charge_capacity", label: "x2 Charges", iconId: "player_weapon_charge_capacity", maxCount: 1, prerequisites: ["player_damage_t1", "player_fire_rate_t1"], grants: { weaponMaxChargesMultiplier: 2 }, position: { x: 0.5, y: 0.78 } },
+      { id: "player_jetpack_efficiency", label: "Jetpack", iconId: "player_jetpack_efficiency", maxCount: 1, prerequisites: ["tower_buff_unlock"], grants: { jetpackEfficiencyMultiplier: 2 }, position: { x: 0.76, y: 0.7 } },
+      { id: "player_pickup_range", label: "Pickup Rng", iconId: "player_pickup_range", maxCount: 5, prerequisites: ["tower_buff_unlock"], grants: { pickupRangeAdd: 0.5 }, position: { x: 0.84, y: 0.8 } },
+      { id: "enemy_slow", label: "Global Slow", iconId: "enemy_slow", maxCount: 4, prerequisites: ["tower_slow_unlock"], grants: { enemySpeedMultiplier: 0.9 }, position: { x: 0.22, y: 0.68 } }
+    ],
+  },
+
   waves: {
     // First wave number shown to player. Typical value: 1.
     initialWave: 1,

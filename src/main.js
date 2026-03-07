@@ -17,18 +17,10 @@ const ENEMY_CONFIG = GAME_CONFIG.enemies ?? {};
 const ENEMY_TYPES = ENEMY_CONFIG.types ?? {};
 const CONFIGURED_ROUNDS = Array.isArray(WAVE_CONFIG.rounds) ? WAVE_CONFIG.rounds : [];
 const UPGRADE_DEFINITIONS = Array.isArray(GAME_CONFIG.upgrades) ? GAME_CONFIG.upgrades : [];
-const TOWER_UNLOCK_UPGRADE_IDS = UPGRADE_DEFINITIONS
-  .filter(
-    (definition) => typeof definition?.id === "string"
-      && definition.id.length > 0
-      && typeof definition?.grants?.unlockTowerType === "string"
-  )
-  .map((definition) => definition.id);
-const FIRST_MENU_FORCED_UPGRADE_ID = "tower_aoe_unlock";
-const DEFAULT_MAX_TOWER_UNLOCKS = 5;
-const MAX_TOWER_UNLOCKS = Number.isFinite(Number(ECONOMY_CONFIG.maxTowerUnlocks))
-  ? Math.max(0, Math.floor(Number(ECONOMY_CONFIG.maxTowerUnlocks)))
-  : DEFAULT_MAX_TOWER_UNLOCKS;
+const TECH_TREE_CONFIG = GAME_CONFIG.techTree ?? {};
+const TECH_TREE_NODES = Array.isArray(TECH_TREE_CONFIG.nodes)
+  ? TECH_TREE_CONFIG.nodes
+  : UPGRADE_DEFINITIONS;
 const MOBILE_LOOK_SENSITIVITY_SCALE = Number.isFinite(Number(MOBILE_UI_CONFIG.lookSensitivityScale))
   ? Math.max(0.1, Number(MOBILE_UI_CONFIG.lookSensitivityScale))
   : 1;
@@ -1067,6 +1059,7 @@ let vCursorX = viewportWidth / 2;
 let vCursorY = viewportHeight / 2;
 let hoveredUpgradeIndex = -1;
 let currentUpgradeOptions = [];
+let currentTechTreeNodes = [];
 let menuAdvancesWaveOnChoice = true;
 let menuResumeWaveState = "PLAYING";
 let menuConsumesPendingLevelUp = false;
@@ -1100,6 +1093,7 @@ const mobileInput = {
   suppressPrimaryFireUntilRelease: false,
 };
 const upgradeCountsById = new Map();
+const unlockedTechNodeIds = new Set(["tower_gun_root"]);
 
 function updateMenuHoverFromVirtualCursor() {
   if (waveState !== "MENU") {
@@ -1121,13 +1115,6 @@ function incrementUpgradeCount(id) {
     return;
   }
   upgradeCountsById.set(id, getUpgradeCount(id) + 1);
-}
-
-function getTowerUnlockUpgradeCount() {
-  return TOWER_UNLOCK_UPGRADE_IDS.reduce(
-    (total, upgradeId) => total + getUpgradeCount(upgradeId),
-    0
-  );
 }
 
 function normalizeMaxUpgradeCount(rawMaxCount) {
@@ -1154,14 +1141,28 @@ function isUpgradeAvailable(definition) {
     return false;
   }
 
+  if (unlockedTechNodeIds.has(definition.id)) {
+    return false;
+  }
+
+  const prerequisites = Array.isArray(definition.prerequisites) ? definition.prerequisites : [];
+  if (prerequisites.some((prereqId) => !unlockedTechNodeIds.has(prereqId))) {
+    return false;
+  }
+
   const unlockTowerType = definition.grants?.unlockTowerType;
-  if (typeof unlockTowerType === "string") {
-    if (getTowerUnlockUpgradeCount() >= MAX_TOWER_UNLOCKS) {
-      return false;
-    }
-    if (towerSystem?.isTowerTypeUnlocked(unlockTowerType)) {
-      return false;
-    }
+  if (typeof unlockTowerType === "string" && towerSystem?.isTowerTypeUnlocked(unlockTowerType)) {
+    return false;
+  }
+
+  const requiresAnyNodes = Array.isArray(definition.requiresAnyNodes) ? definition.requiresAnyNodes : [];
+  if (requiresAnyNodes.length > 0 && !requiresAnyNodes.some((nodeId) => unlockedTechNodeIds.has(nodeId))) {
+    return false;
+  }
+
+  const requiresAllNodes = Array.isArray(definition.requiresAllNodes) ? definition.requiresAllNodes : [];
+  if (requiresAllNodes.some((nodeId) => !unlockedTechNodeIds.has(nodeId))) {
+    return false;
   }
 
   return true;
@@ -1224,14 +1225,43 @@ function applyUpgradeGrants(grants = {}) {
 }
 
 function getUpgradePool() {
-  return UPGRADE_DEFINITIONS
+  return TECH_TREE_NODES
     .filter((definition) => isUpgradeAvailable(definition))
     .map((definition) => ({
       id: definition.id,
       label: definition.label,
       iconId: definition.iconId,
+      description: definition.description || "",
+      position: definition.position ?? null,
+      prerequisites: Array.isArray(definition.prerequisites) ? definition.prerequisites.slice() : [],
       apply: () => applyUpgradeGrants(definition.grants),
     }));
+}
+
+function buildCurrentTechTreeNodes() {
+  const definitionsById = new Map(TECH_TREE_NODES.map((node) => [node.id, node]));
+  const availableIds = new Set(getUpgradePool().map((node) => node.id));
+  currentTechTreeNodes = TECH_TREE_NODES
+    .filter((node) => typeof node?.id === "string" && node.id.length > 0)
+    .map((node, index) => {
+      const maxCount = normalizeMaxUpgradeCount(node.maxCount);
+      const count = getUpgradeCount(node.id);
+      const unlocked = unlockedTechNodeIds.has(node.id) || (maxCount !== null && count >= maxCount);
+      const prerequisites = Array.isArray(node.prerequisites) ? node.prerequisites : [];
+      const prerequisiteComplete = prerequisites.every((id) => unlockedTechNodeIds.has(id));
+      return {
+        id: node.id,
+        index,
+        label: node.label,
+        iconId: node.iconId,
+        description: node.description || "",
+        position: node.position ?? null,
+        prerequisites: prerequisites.filter((id) => definitionsById.has(id)),
+        unlocked,
+        available: availableIds.has(node.id),
+        count,
+      };
+    });
 }
 
 function getExperienceRatio() {
@@ -1301,6 +1331,7 @@ function addExperience(amount) {
 
 function finishUpgradeMenuChoice() {
   currentUpgradeOptions = [];
+  currentTechTreeNodes = [];
   hoveredUpgradeIndex = -1;
   player.setMenuMode(false);
   resetMobileInputState();
@@ -1327,6 +1358,7 @@ function applyUpgradeChoice(index) {
   }
 
   selectedUpgrade.apply();
+  unlockedTechNodeIds.add(selectedUpgrade.id);
   incrementUpgradeCount(selectedUpgrade.id);
   if (menuConsumesPendingLevelUp && pendingLevelUpMenus > 0) {
     pendingLevelUpMenus -= 1;
@@ -2139,7 +2171,7 @@ window.addEventListener("keydown", (event) => {
   }
 
   if (waveState === "MENU") {
-    if (event.code === "Digit1" || event.code === "Digit2" || event.code === "Digit3") {
+    if (event.code.startsWith("Digit")) {
       const optionIndex = Number(event.code.slice(-1)) - 1;
       applyUpgradeChoice(optionIndex);
     }
@@ -2201,6 +2233,9 @@ function resetRunStateForNewLevel() {
   pendingLevelUpMenus = 0;
   levelingUpgradesExhausted = false;
   upgradeCountsById.clear();
+  unlockedTechNodeIds.clear();
+  unlockedTechNodeIds.add("tower_gun_root");
+  currentTechTreeNodes = [];
   isPrimaryDown = false;
   gameSpeedMultiplier = GAME_SPEED_NORMAL;
   clearMoneyDrops();
@@ -2497,30 +2532,14 @@ function showUpgradeMenu(options = {}) {
   vCursorX = viewportWidth * 0.5;
   vCursorY = viewportHeight * 0.5;
 
-  const optionCount = Math.max(1, Math.floor(Number(UI_CONFIG.upgradesShown) || 1));
   const upgradePool = getUpgradePool();
   if (upgradePool.length === 0) {
     finishUpgradeMenuChoice();
     return;
   }
-
-  const randomize = (pool) => pool.slice().sort(() => 0.5 - Math.random());
-
-  if (!hasShownFirstUpgradeMenu) {
-    const forcedUpgrade = upgradePool.find((upgrade) => upgrade.id === FIRST_MENU_FORCED_UPGRADE_ID);
-    if (forcedUpgrade) {
-      const randomPool = randomize(upgradePool.filter((upgrade) => upgrade.id !== FIRST_MENU_FORCED_UPGRADE_ID));
-      currentUpgradeOptions = [
-        forcedUpgrade,
-        ...randomPool.slice(0, Math.max(0, optionCount - 1)),
-      ];
-    } else {
-      currentUpgradeOptions = randomize(upgradePool).slice(0, optionCount);
-    }
-    hasShownFirstUpgradeMenu = true;
-  } else {
-    currentUpgradeOptions = randomize(upgradePool).slice(0, optionCount);
-  }
+  currentUpgradeOptions = upgradePool;
+  buildCurrentTechTreeNodes();
+  hasShownFirstUpgradeMenu = true;
 
   hoveredUpgradeIndex = -1;
   updateMenuHoverFromVirtualCursor();
@@ -2628,8 +2647,13 @@ function animate() {
     showCrosshair: waveState !== "MENU",
     menuOpen: waveState === "MENU",
     menuOptions: currentUpgradeOptions.map((upgrade) => ({
+      id: upgrade.id,
       label: upgrade.label,
       iconId: upgrade.iconId,
+    })),
+    techTreeNodes: currentTechTreeNodes.map((node) => ({
+      ...node,
+      optionIndex: currentUpgradeOptions.findIndex((option) => option.id === node.id),
     })),
     hoveredMenuIndex: hoveredUpgradeIndex,
     menuCursorX: vCursorX,

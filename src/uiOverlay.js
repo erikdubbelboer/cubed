@@ -908,6 +908,7 @@ export function createUiOverlay({
   const state = {
     menuOpen: false,
     menuOptions: [],
+    techTreeNodes: [],
     hoveredMenuIndex: -1,
     menuCursorX: viewportWidth * 0.5,
     menuCursorY: viewportHeight * 0.5,
@@ -941,6 +942,7 @@ export function createUiOverlay({
   };
 
   let menuOptionRects = [];
+  let techTreeNodeRects = [];
   let towerSlotRects = [];
   let hudButtonRects = [];
   let touchActionZones = [];
@@ -986,7 +988,10 @@ export function createUiOverlay({
       state.menuOpen = partialState.menuOpen;
     }
     if (Array.isArray(partialState.menuOptions)) {
-      state.menuOptions = partialState.menuOptions.slice(0, 3);
+      state.menuOptions = partialState.menuOptions.slice();
+    }
+    if (Array.isArray(partialState.techTreeNodes)) {
+      state.techTreeNodes = partialState.techTreeNodes.slice();
     }
     if (typeof partialState.hoveredMenuIndex === "number") {
       state.hoveredMenuIndex = partialState.hoveredMenuIndex;
@@ -2065,6 +2070,7 @@ export function createUiOverlay({
 
   function drawUpgradeMenu() {
     menuOptionRects = [];
+    techTreeNodeRects = [];
     if (!state.menuOpen) {
       return;
     }
@@ -2072,53 +2078,11 @@ export function createUiOverlay({
     drawCtx.fillStyle = "rgba(4, 8, 20, 0.85)";
     drawCtx.fillRect(0, 0, viewportWidth, viewportHeight);
 
-    const isMobileMenu = state.showTouchControls && state.touchPortrait;
-    const panelWidth = isMobileMenu
-      ? clamp(viewportWidth * 0.88, 286, 470)
-      : clamp(viewportWidth * 0.82, 290, 470);
-    const panelPadding = isMobileMenu
-      ? clamp(panelWidth * 0.06, 14, 22)
-      : clamp(panelWidth * 0.07, 16, 26);
-    let cardHeight = isMobileMenu
-      ? clamp(viewportHeight * 0.095, 56, 82)
-      : clamp(viewportHeight * 0.11, 64, 92);
-    let cardGap = isMobileMenu
-      ? clamp(cardHeight * 0.16, 8, 13)
-      : clamp(cardHeight * 0.2, 10, 18);
-    const titleHeight = isMobileMenu
-      ? clamp(viewportHeight * 0.11, 66, 94)
-      : clamp(viewportHeight * 0.13, 78, 112);
-    const cardCount = Math.min(3, state.menuOptions.length);
-    let cardsHeight = cardCount > 0
-      ? (cardCount * cardHeight) + ((cardCount - 1) * cardGap)
-      : 0;
-    let panelHeight = titleHeight + cardsHeight + panelPadding * 2;
-    if (isMobileMenu) {
-      const topInset = clamp(viewportHeight * 0.035, 14, 26);
-      const bottomInset = clamp(viewportHeight * 0.02, 12, 20);
-      const maxPanelHeight = viewportHeight - topInset - bottomInset;
-      if (panelHeight > maxPanelHeight && cardCount > 0) {
-        const maxCardsHeight = Math.max(
-          cardCount * 46,
-          maxPanelHeight - titleHeight - panelPadding * 2
-        );
-        const nextCardHeight = (
-          maxCardsHeight - ((cardCount - 1) * cardGap)
-        ) / cardCount;
-        cardHeight = clamp(nextCardHeight, 46, cardHeight);
-        cardGap = clamp(cardHeight * 0.14, 6, 11);
-        cardsHeight = (cardCount * cardHeight) + ((cardCount - 1) * cardGap);
-        panelHeight = titleHeight + cardsHeight + panelPadding * 2;
-      }
-    }
-    const panelX = (viewportWidth - panelWidth) * 0.5;
-    const panelY = isMobileMenu
-      ? clamp(
-        viewportHeight * 0.035,
-        8,
-        Math.max(8, viewportHeight - panelHeight - 8)
-      )
-      : (viewportHeight - panelHeight) * 0.5;
+    const panelPadding = clamp(Math.min(viewportWidth, viewportHeight) * 0.024, 10, 24);
+    const panelX = panelPadding;
+    const panelY = panelPadding;
+    const panelWidth = viewportWidth - (panelPadding * 2);
+    const panelHeight = viewportHeight - (panelPadding * 2);
 
     drawPanel(
       drawCtx,
@@ -2135,84 +2099,111 @@ export function createUiOverlay({
     drawCtx.fillStyle = "#ffffff";
     drawCtx.textAlign = "center";
     drawCtx.textBaseline = "top";
-    drawCtx.font = `700 ${clamp(panelWidth * 0.08, 21, 30)}px ${FONT_STACK}`;
-    drawCtx.fillText("Upgrade Ready", panelX + panelWidth * 0.5, panelY + panelPadding);
-    drawCtx.font = `500 ${clamp(panelWidth * 0.04, 12, 16)}px ${FONT_STACK}`;
+    drawCtx.font = `700 ${clamp(panelWidth * 0.046, 18, 30)}px ${FONT_STACK}`;
+    drawCtx.fillText("Tech Tree", panelX + panelWidth * 0.5, panelY + panelPadding);
+    drawCtx.font = `500 ${clamp(panelWidth * 0.022, 11, 16)}px ${FONT_STACK}`;
     drawCtx.fillStyle = "rgba(228, 240, 255, 0.82)";
     drawCtx.fillText(
-      "Select an upgrade",
+      "Unlock connected nodes",
       panelX + panelWidth * 0.5,
-      panelY + panelPadding + clamp(panelWidth * 0.1, 30, 40)
+      panelY + panelPadding + clamp(panelWidth * 0.055, 24, 38)
     );
 
-    const cardX = panelX + panelPadding;
-    const cardWidth = panelWidth - panelPadding * 2;
-    let cardY = panelY + panelPadding + titleHeight;
+    const graphTop = panelY + panelPadding + clamp(panelHeight * 0.12, 72, 110);
+    const graphBottom = panelY + panelHeight - panelPadding - clamp(panelHeight * 0.2, 78, 130);
+    const graphLeft = panelX + panelPadding;
+    const graphRight = panelX + panelWidth - panelPadding;
+    const graphWidth = Math.max(60, graphRight - graphLeft);
+    const graphHeight = Math.max(60, graphBottom - graphTop);
+    const allNodes = Array.isArray(state.techTreeNodes) && state.techTreeNodes.length > 0
+      ? state.techTreeNodes
+      : state.menuOptions;
 
-    for (let i = 0; i < cardCount; i += 1) {
-      const option = state.menuOptions[i];
-      const hovered = i === state.hoveredMenuIndex;
+    const positioned = allNodes.map((node, index) => {
+      const xNorm = clamp(Number(node.position?.x), 0, 1);
+      const yNorm = clamp(Number(node.position?.y), 0, 1);
+      return {
+        ...node,
+        x: graphLeft + ((Number.isFinite(xNorm) ? xNorm : ((index % 6) / 5)) * graphWidth),
+        y: graphTop + ((Number.isFinite(yNorm) ? yNorm : (Math.floor(index / 6) / 5)) * graphHeight),
+      };
+    });
+    const nodeById = new Map(positioned.map((node) => [node.id, node]));
+    const nodeSize = clamp(Math.min(graphWidth, graphHeight) * (state.touchPortrait ? 0.082 : 0.07), 28, 46);
+
+    drawCtx.lineWidth = 2;
+    for (const node of positioned) {
+      const prereq = Array.isArray(node.prerequisites) ? node.prerequisites : [];
+      for (const prereqId of prereq) {
+        const parent = nodeById.get(prereqId);
+        if (!parent) {
+          continue;
+        }
+        drawCtx.strokeStyle = node.available ? "rgba(118, 240, 170, 0.85)" : "rgba(103, 140, 188, 0.55)";
+        drawCtx.beginPath();
+        drawCtx.moveTo(parent.x, parent.y);
+        drawCtx.lineTo(node.x, node.y);
+        drawCtx.stroke();
+      }
+    }
+
+    for (const node of positioned) {
+      const optionIndex = Number.isInteger(node.optionIndex) ? node.optionIndex : state.menuOptions.findIndex((opt) => opt.id === node.id);
+      const hovered = optionIndex >= 0 && optionIndex === state.hoveredMenuIndex;
+      const unlocked = !!node.unlocked;
+      const available = !!node.available;
+      const fill = unlocked
+        ? "rgba(86, 157, 111, 0.92)"
+        : (available ? "rgba(46, 102, 141, 0.95)" : "rgba(34, 45, 62, 0.9)");
+      const stroke = hovered
+        ? "rgba(168, 235, 255, 0.98)"
+        : (available ? "rgba(121, 206, 255, 0.85)" : "rgba(88, 117, 149, 0.7)");
+
       drawPanel(
         drawCtx,
-        cardX,
-        cardY,
-        cardWidth,
-        cardHeight,
-        clamp(cardHeight * 0.15, 8, 14),
-        hovered ? "rgba(44, 80, 120, 0.94)" : "rgba(24, 44, 70, 0.82)",
-        hovered ? "rgba(121, 206, 255, 0.98)" : "rgba(93, 161, 245, 0.72)",
+        node.x - (nodeSize * 0.5),
+        node.y - (nodeSize * 0.5),
+        nodeSize,
+        nodeSize,
+        clamp(nodeSize * 0.24, 7, 14),
+        fill,
+        stroke,
         hovered ? 1.8 : 1.2
       );
-
-      const iconSize = cardHeight * 0.9;
-      const iconX = cardX + clamp(cardWidth * 0.03, 10, 16);
-      const iconY = cardY + (cardHeight - iconSize) * 0.5;
-      drawPanel(
-        drawCtx,
-        iconX,
-        iconY,
-        iconSize,
-        iconSize,
-        clamp(iconSize * 0.17, 7, 12),
-        "rgba(8, 18, 30, 0.64)",
-        "rgba(148, 214, 255, 0.72)",
-        1
-      );
-      drawIconById(drawCtx, option.iconId, iconX + 2, iconY + 2, iconSize - 4);
-
-      drawCtx.textAlign = "left";
-      drawCtx.textBaseline = "middle";
-      drawCtx.fillStyle = "rgba(240, 247, 255, 0.98)";
-      const optionPrefix = state.showKeyboardHints ? `${i + 1}. ` : "";
-      const optionText = `${optionPrefix}${option.label}`;
-      const textMaxWidth = Math.max(
-        24,
-        cardWidth - (iconX + iconSize + clamp(cardWidth * 0.04, 12, 18) - cardX) - clamp(cardWidth * 0.04, 12, 18)
-      );
-      const fittedLabel = fitLabelText(
-        drawCtx,
-        optionText,
-        textMaxWidth,
-        clamp(cardHeight * 0.27, 13, 19),
-        11,
-        600
-      );
-      drawCtx.font = `600 ${fittedLabel.fontSize}px ${FONT_STACK}`;
-      drawCtx.fillText(
-        fittedLabel.text,
-        iconX + iconSize + clamp(cardWidth * 0.04, 12, 18),
-        cardY + cardHeight * 0.52
-      );
-
-      menuOptionRects.push({
-        index: i,
-        x: cardX,
-        y: cardY,
-        width: cardWidth,
-        height: cardHeight,
+      const iconSize = nodeSize * 0.84;
+      drawIconById(drawCtx, node.iconId || "tower_gun", node.x - (iconSize * 0.5), node.y - (iconSize * 0.5), iconSize);
+      drawCtx.font = `600 ${clamp(nodeSize * 0.32, 10, 14)}px ${FONT_STACK}`;
+      drawCtx.fillStyle = unlocked ? "rgba(206, 255, 220, 0.95)" : "rgba(235, 242, 255, 0.95)";
+      drawCtx.textAlign = "center";
+      drawCtx.textBaseline = "top";
+      drawCtx.fillText(node.label || node.id || "Node", node.x, node.y + (nodeSize * 0.54));
+      techTreeNodeRects.push({
+        optionIndex,
+        x: node.x - (nodeSize * 0.5),
+        y: node.y - (nodeSize * 0.5),
+        width: nodeSize,
+        height: nodeSize,
       });
-      cardY += cardHeight + cardGap;
+      if (available && optionIndex >= 0) {
+        menuOptionRects.push({
+          index: optionIndex,
+          x: node.x - (nodeSize * 0.5),
+          y: node.y - (nodeSize * 0.5),
+          width: nodeSize,
+          height: nodeSize,
+        });
+      }
     }
+
+    const selectedOption = state.menuOptions[state.hoveredMenuIndex] ?? null;
+    const detailsText = selectedOption
+      ? `Unlock: ${selectedOption.label}`
+      : "Tap any highlighted node to unlock";
+    drawCtx.textAlign = "center";
+    drawCtx.textBaseline = "middle";
+    drawCtx.font = `600 ${clamp(panelWidth * 0.024, 12, 18)}px ${FONT_STACK}`;
+    drawCtx.fillStyle = "rgba(224, 236, 255, 0.92)";
+    drawCtx.fillText(detailsText, panelX + (panelWidth * 0.5), panelY + panelHeight - panelPadding - 20);
 
     if (state.menuCursorVisible) {
       drawCtx.beginPath();
