@@ -486,7 +486,7 @@
   - invalid level: stay in editor and log clear warning reason.
   - valid level: rebuild gameplay grid (`allowIncompleteMarkers: false`, `editorMode: false`), recreate tower/enemy systems, reset run state, and restart at build phase wave 1.
 - Global export API:
-  - `window.exportLevel()` returns `{ levelObjects: [...] }`.
+  - `window.exportLevel()` returns `[...]`.
   - While editor is active it returns editor model payload; otherwise it exports from current gameplay grid.
   - Intended workflow: `copy(JSON.stringify(window.exportLevel()))`.
 

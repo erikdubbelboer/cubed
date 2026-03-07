@@ -2750,9 +2750,7 @@ function initGame() {
     if (waveState === "EDITOR" && levelEditor && typeof levelEditor.getExportPayload === "function") {
       return levelEditor.getExportPayload();
     }
-    return {
-      levelObjects: typeof grid?.getLevelObjects === "function" ? grid.getLevelObjects() : [],
-    };
+    return typeof grid?.getLevelObjects === "function" ? grid.getLevelObjects() : [];
   };
 
   startBuildPhase(WAVE_CONFIG.initialWave);
