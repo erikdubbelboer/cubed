@@ -13,6 +13,8 @@ const LIGHT_CONFIG = GAME_CONFIG.lights;
 const UI_CONFIG = GAME_CONFIG.ui;
 const MOBILE_UI_CONFIG = UI_CONFIG.mobile ?? {};
 const WAVE_CONFIG = GAME_CONFIG.waves;
+const TOWER_CONFIG = GAME_CONFIG.towers ?? {};
+const TOWER_SELL_CONFIG = TOWER_CONFIG.sell ?? {};
 const ECONOMY_CONFIG = GAME_CONFIG.economy ?? {};
 const ENEMY_CONFIG = GAME_CONFIG.enemies ?? {};
 const PLAYER_CONFIG = GAME_CONFIG.player ?? {};
@@ -61,6 +63,16 @@ const GAME_SPEED_NORMAL = 1;
 const GAME_SPEED_FAST = 2;
 const DESKTOP_SPEED_TOGGLE_KEY = "KeyF";
 const DESKTOP_EDITOR_TOGGLE_KEY = "KeyN";
+const DESKTOP_SELL_HOLD_KEY = "KeyE";
+const SELL_HOLD_DURATION_SECONDS = Number.isFinite(Number(TOWER_SELL_CONFIG.holdDurationSeconds))
+  ? Math.max(0.15, Number(TOWER_SELL_CONFIG.holdDurationSeconds))
+  : 0.9;
+const SELL_AIM_MAX_DISTANCE = Number.isFinite(Number(TOWER_SELL_CONFIG.aimMaxDistance))
+  ? Math.max(0.5, Number(TOWER_SELL_CONFIG.aimMaxDistance))
+  : 7;
+const SELL_PLAYER_MAX_DISTANCE = Number.isFinite(Number(TOWER_SELL_CONFIG.playerMaxDistance))
+  ? Math.max(0.5, Number(TOWER_SELL_CONFIG.playerMaxDistance))
+  : 5;
 const DEFAULT_BUILD_PHASE_DURATION_SECONDS = 300;
 const BUILD_PHASE_DURATION_SECONDS = Number.isFinite(Number(WAVE_CONFIG.buildPhaseDurationSeconds))
   ? Math.max(0, Number(WAVE_CONFIG.buildPhaseDurationSeconds))
@@ -109,6 +121,7 @@ const MULTIPLAYER_MESSAGE_TYPE = {
   waveCmd: "wave_cmd",
   speedPauseCmd: "speed_pause_cmd",
   towerPlaceCommit: "tower_place_commit",
+  towerSellCommit: "tower_sell_commit",
   techChoiceCommit: "tech_choice_commit",
   weaponChoiceCommit: "weapon_choice_commit",
   enemySpawn: "enemy_spawn",
@@ -242,6 +255,17 @@ function summarizeMultiplayerPayloadForLog(type, payload = {}) {
       requestId: typeof payload.requestId === "string" ? payload.requestId : null,
       ownerId: typeof payload.ownerId === "string" ? payload.ownerId : null,
       placement: summarizeTowerPlacementForLog(payload.placement),
+    };
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.towerSellCommit) {
+    return {
+      request: payload.request === true,
+      rejected: payload.rejected === true,
+      requestId: typeof payload.requestId === "string" ? payload.requestId : null,
+      targetId: typeof payload.targetId === "string" ? payload.targetId : null,
+      sellerId: typeof payload.sellerId === "string" ? payload.sellerId : null,
+      towerType: typeof payload.towerType === "string" ? payload.towerType : null,
+      refundAmount: roundMultiplayerLogNumber(payload.refundAmount, 2),
     };
   }
   if (type === MULTIPLAYER_MESSAGE_TYPE.techChoiceCommit) {
@@ -566,6 +590,8 @@ const remoteWeaponVectorC = new THREE.Vector3();
 const remoteWeaponYAxis = new THREE.Vector3(0, 1, 0);
 const pendingTowerRequestsById = new Map();
 let nextTowerRequestId = 1;
+const pendingTowerSellRequestsById = new Map();
+let nextTowerSellRequestId = 1;
 let pendingAutoJoinLobbyCode = initialLobbyQueryCode;
 let localMultiplayerPeerId = "local";
 let multiplayerTransformTimer = 0;
@@ -1560,6 +1586,10 @@ function applyPausedState(nextPaused) {
       player.resetMovement();
     }
     resetMobileInputState();
+    resetSellHoldState({
+      clearDesktopHeld: true,
+      clearAwaitRelease: true,
+    });
     return;
   }
 
@@ -2166,23 +2196,124 @@ const mobileInput = {
     primaryAlt: false,
     jump: false,
     cancel: false,
+    sell: false,
   },
   buttonPointerIds: {
     primary: null,
     primaryAlt: null,
     jump: null,
     cancel: null,
+    sell: null,
   },
   previousPrimaryPressed: false,
   pendingBuildConfirm: false,
   suppressPrimaryFireUntilRelease: false,
 };
+const sellHoldState = {
+  desktopHeld: false,
+  activeTargetId: null,
+  elapsedSeconds: 0,
+  awaitingRelease: false,
+  currentCandidate: null,
+};
+const sellPromptProjectVector = new THREE.Vector3();
 
 function setPrimaryDownState(isDown) {
   isPrimaryDown = !!isDown;
   if (player && typeof player.setPrimaryHeld === "function") {
     player.setPrimaryHeld(isPrimaryDown);
   }
+}
+
+function clearSellHoldProgress() {
+  sellHoldState.activeTargetId = null;
+  sellHoldState.elapsedSeconds = 0;
+}
+
+function resetSellHoldState(options = {}) {
+  if (options.clearDesktopHeld === true) {
+    sellHoldState.desktopHeld = false;
+  }
+  if (options.clearAwaitRelease === true) {
+    sellHoldState.awaitingRelease = false;
+  }
+  sellHoldState.currentCandidate = null;
+  clearSellHoldProgress();
+}
+
+function isSellInputHeld() {
+  return !!(sellHoldState.desktopHeld || mobileInput.pressedButtons.sell);
+}
+
+function getSellPromptProgressForCandidate(candidate) {
+  if (!candidate || sellHoldState.awaitingRelease) {
+    return 0;
+  }
+  if (!isSellInputHeld()) {
+    return 0;
+  }
+  if (sellHoldState.activeTargetId !== candidate.targetId) {
+    return 0;
+  }
+  return clamp(sellHoldState.elapsedSeconds / SELL_HOLD_DURATION_SECONDS, 0, 1);
+}
+
+function projectWorldToScreenPoint(worldPosition, outPoint = { x: 0, y: 0 }) {
+  if (!worldPosition || !camera) {
+    return null;
+  }
+  sellPromptProjectVector.copy(worldPosition).project(camera);
+  if (
+    !Number.isFinite(sellPromptProjectVector.x)
+    || !Number.isFinite(sellPromptProjectVector.y)
+    || !Number.isFinite(sellPromptProjectVector.z)
+    || sellPromptProjectVector.z < -1
+    || sellPromptProjectVector.z > 1
+  ) {
+    return null;
+  }
+
+  const screenX = (sellPromptProjectVector.x * 0.5 + 0.5) * viewportWidth;
+  const screenY = (-sellPromptProjectVector.y * 0.5 + 0.5) * viewportHeight;
+  if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) {
+    return null;
+  }
+  outPoint.x = screenX;
+  outPoint.y = screenY;
+  return outPoint;
+}
+
+function buildSellPromptViewState(showTouchControls) {
+  const candidate = sellHoldState.currentCandidate;
+  if (!candidate || !candidate.worldAnchor) {
+    return {
+      visible: false,
+      x: 0,
+      y: 0,
+      progress: 0,
+      refund: 0,
+      keyHint: "",
+    };
+  }
+  const projected = projectWorldToScreenPoint(candidate.worldAnchor);
+  if (!projected) {
+    return {
+      visible: false,
+      x: 0,
+      y: 0,
+      progress: 0,
+      refund: 0,
+      keyHint: "",
+    };
+  }
+  return {
+    visible: true,
+    x: projected.x,
+    y: projected.y,
+    progress: getSellPromptProgressForCandidate(candidate),
+    refund: Math.max(0, Math.floor(Number(candidate.refundAmount) || 0)),
+    keyHint: showTouchControls ? "" : `Hold ${DESKTOP_SELL_HOLD_KEY.slice(-1)}`,
+  };
 }
 
 function getActiveMenuOptions() {
@@ -3149,15 +3280,20 @@ function resetMobileInputState() {
   mobileInput.pressedButtons.primaryAlt = false;
   mobileInput.pressedButtons.jump = false;
   mobileInput.pressedButtons.cancel = false;
+  mobileInput.pressedButtons.sell = false;
   mobileInput.buttonPointerIds.primary = null;
   mobileInput.buttonPointerIds.primaryAlt = null;
   mobileInput.buttonPointerIds.jump = null;
   mobileInput.buttonPointerIds.cancel = null;
+  mobileInput.buttonPointerIds.sell = null;
   mobileInput.previousPrimaryPressed = false;
   mobileInput.pendingBuildConfirm = false;
   mobileInput.suppressPrimaryFireUntilRelease = false;
   clearTechTreeDragState();
   setPrimaryDownState(false);
+  resetSellHoldState({
+    clearAwaitRelease: true,
+  });
   if (player) {
     player.setVirtualMove(0, 0);
     if (typeof player.setJumpHeld === "function") {
@@ -3167,7 +3303,7 @@ function resetMobileInputState() {
 }
 
 function releaseMobileButtonPointer(pointerId) {
-  for (const action of ["primary", "primaryAlt", "jump", "cancel"]) {
+  for (const action of ["primary", "primaryAlt", "jump", "cancel", "sell"]) {
     if (mobileInput.buttonPointerIds[action] !== pointerId) {
       continue;
     }
@@ -3257,6 +3393,62 @@ function applyMobileGameplayInput() {
     mobileInput.pendingBuildConfirm = false;
   }
   mobileInput.previousPrimaryPressed = primaryPressed;
+}
+
+function updateSellHoldFromAim(deltaSeconds) {
+  if (
+    !towerSystem
+    || typeof towerSystem.getSellCandidateFromAim !== "function"
+    || !player
+    || !isGameplayWaveState(waveState)
+    || isPaused
+  ) {
+    resetSellHoldState({
+      clearAwaitRelease: true,
+    });
+    return;
+  }
+
+  const candidate = towerSystem.getSellCandidateFromAim({
+    playerPosition: player.getPosition(),
+    maxAimDistance: SELL_AIM_MAX_DISTANCE,
+    maxPlayerDistance: SELL_PLAYER_MAX_DISTANCE,
+  });
+  sellHoldState.currentCandidate = candidate;
+  const inputHeld = isSellInputHeld();
+  if (!inputHeld) {
+    clearSellHoldProgress();
+    sellHoldState.awaitingRelease = false;
+    return;
+  }
+  if (!candidate || typeof candidate.targetId !== "string" || candidate.targetId.length <= 0) {
+    clearSellHoldProgress();
+    return;
+  }
+
+  if (sellHoldState.awaitingRelease) {
+    clearSellHoldProgress();
+    return;
+  }
+  if (sellHoldState.activeTargetId !== candidate.targetId) {
+    sellHoldState.activeTargetId = candidate.targetId;
+    sellHoldState.elapsedSeconds = 0;
+  }
+
+  sellHoldState.elapsedSeconds += Math.max(0, Number.isFinite(deltaSeconds) ? deltaSeconds : 0);
+  if (sellHoldState.elapsedSeconds < SELL_HOLD_DURATION_SECONDS) {
+    return;
+  }
+
+  const didRequestSell = requestTowerSellFromLocalPlayer(candidate);
+  sellHoldState.awaitingRelease = true;
+  clearSellHoldProgress();
+  if (!didRequestSell) {
+    mpWarn("Tower sell hold completed but request failed", {
+      targetId: candidate.targetId,
+      localPeerId: localMultiplayerPeerId,
+    });
+  }
 }
 
 if (!isTouchDevice) {
@@ -3725,6 +3917,12 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.code === DESKTOP_SELL_HOLD_KEY) {
+    sellHoldState.desktopHeld = true;
+    event.preventDefault();
+    return;
+  }
+
   if (event.code === "Escape" && towerSystem?.isBuildMode()) {
     towerSystem.cancelPlacement();
     return;
@@ -3749,6 +3947,13 @@ window.addEventListener("keydown", (event) => {
 
   if (event.code === "Enter" && towerSystem?.isBuildMode()) {
     requestTowerPlacementFromLocalPlayer();
+  }
+});
+
+window.addEventListener("keyup", (event) => {
+  if (event.code === DESKTOP_SELL_HOLD_KEY) {
+    sellHoldState.desktopHeld = false;
+    return;
   }
 });
 
@@ -4147,6 +4352,81 @@ function requestTowerPlacementFromLocalPlayer() {
   return sent;
 }
 
+function requestTowerSellFromLocalPlayer(candidate) {
+  const targetId = typeof candidate?.targetId === "string" ? candidate.targetId : null;
+  if (!towerSystem || typeof towerSystem.sellTowerById !== "function" || !targetId) {
+    mpLog("Tower sell request ignored (invalid context)", {
+      hasTowerSystem: !!towerSystem,
+      hasSellApi: typeof towerSystem?.sellTowerById === "function",
+      targetId,
+    });
+    return false;
+  }
+
+  if (!isMultiplayerLobbyActive()) {
+    const result = towerSystem.sellTowerById(targetId, {
+      sellerId: localMultiplayerPeerId,
+      applyRefund: true,
+    });
+    mpLog("Tower sell attempt (single-player)", {
+      targetId,
+      success: result?.success === true,
+      refundAmount: roundMultiplayerLogNumber(result?.refundAmount, 2),
+    });
+    return result?.success === true;
+  }
+
+  if (isMultiplayerHost()) {
+    const result = towerSystem.sellTowerById(targetId, {
+      sellerId: localMultiplayerPeerId,
+      applyRefund: true,
+    });
+    if (!result?.success) {
+      mpWarn("Host local tower sell failed", { targetId });
+      return false;
+    }
+    multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.towerSellCommit, {
+      request: false,
+      rejected: false,
+      targetId: result.targetId,
+      towerType: result.towerType,
+      sellerId: result.sellerId,
+      refundAmount: result.refundAmount,
+    });
+    broadcastHostStateSync(true);
+    return true;
+  }
+
+  if (pendingTowerSellRequestsById.size > 0) {
+    mpWarn("Guest tower sell request blocked: pending request already exists", {
+      pendingCount: pendingTowerSellRequestsById.size,
+    });
+    return false;
+  }
+
+  const requestId = `sell_${nextTowerSellRequestId++}`;
+  pendingTowerSellRequestsById.set(requestId, {
+    targetId,
+    createdAt: (typeof performance?.now === "function" ? performance.now() : Date.now()),
+  });
+  const sent = sendReliableToHost(MULTIPLAYER_MESSAGE_TYPE.towerSellCommit, {
+    request: true,
+    requestId,
+    targetId,
+    sellerId: localMultiplayerPeerId,
+  });
+  mpLog("Guest tower sell request sent", {
+    requestId,
+    sent,
+    targetId,
+  });
+  if (!sent) {
+    pendingTowerSellRequestsById.delete(requestId);
+    mpWarn("Guest tower sell request failed to send", { requestId, targetId });
+  }
+  return sent;
+}
+
 function processPendingTowerRequestTimeouts() {
   if (pendingTowerRequestsById.size === 0) {
     return;
@@ -4167,6 +4447,25 @@ function processPendingTowerRequestTimeouts() {
   }
 }
 
+function processPendingTowerSellRequestTimeouts() {
+  if (pendingTowerSellRequestsById.size === 0) {
+    return;
+  }
+  const nowMs = typeof performance?.now === "function" ? performance.now() : Date.now();
+  const timeoutMs = 5000;
+  for (const [requestId, request] of pendingTowerSellRequestsById.entries()) {
+    if ((nowMs - request.createdAt) < timeoutMs) {
+      continue;
+    }
+    pendingTowerSellRequestsById.delete(requestId);
+    mpWarn("Pending tower sell request timed out", {
+      requestId,
+      targetId: request.targetId,
+      ageMs: roundMultiplayerLogNumber(nowMs - request.createdAt, 0),
+    });
+  }
+}
+
 function refundAllPendingTowerRequests() {
   if (pendingTowerRequestsById.size === 0) {
     return;
@@ -4180,10 +4479,19 @@ function refundAllPendingTowerRequests() {
   pendingTowerRequestsById.clear();
 }
 
+function clearPendingTowerSellRequests() {
+  if (pendingTowerSellRequestsById.size <= 0) {
+    return;
+  }
+  mpLog("Cleared pending tower sell requests", { count: pendingTowerSellRequestsById.size });
+  pendingTowerSellRequestsById.clear();
+}
+
 function handleHostEndedSession() {
   mpWarn("Handling host-ended session");
   flushUnreliableMultiplayerStatsLog(true);
   refundAllPendingTowerRequests();
+  clearPendingTowerSellRequests();
   clearAllRemotePlayers();
   clearAllRemoteWeaponEffects();
   towerSystem?.clearAllPeerPreviews?.();
@@ -4330,6 +4638,106 @@ function handleTowerCommitMessage(peer, payload = {}) {
   });
 }
 
+function handleTowerSellCommitMessage(peer, payload = {}) {
+  const requestId = typeof payload?.requestId === "string" ? payload.requestId : null;
+  const targetId = typeof payload?.targetId === "string" ? payload.targetId : null;
+  const refundAmount = Math.max(0, Math.floor(Number(payload?.refundAmount) || 0));
+  const sellerIdFromPayload = typeof payload?.sellerId === "string" && payload.sellerId.length > 0
+    ? payload.sellerId
+    : null;
+  const sellerId = payload?.request === true
+    ? (peer?.id || sellerIdFromPayload)
+    : (sellerIdFromPayload || peer?.id || null);
+
+  mpLog("Handling tower sell commit message", {
+    fromPeerId: peer?.id || null,
+    payload: summarizeMultiplayerPayloadForLog(MULTIPLAYER_MESSAGE_TYPE.towerSellCommit, payload),
+  });
+
+  if (payload?.request === true) {
+    if (!isMultiplayerHost() || !peer?.id || !targetId || !towerSystem) {
+      mpWarn("Ignoring tower sell request: invalid host/request context", {
+        isHost: isMultiplayerHost(),
+        hasTowerSystem: !!towerSystem,
+        targetId,
+        fromPeerId: peer?.id || null,
+      });
+      return;
+    }
+    const result = towerSystem.sellTowerById(targetId, {
+      sellerId: peer.id,
+      applyRefund: false,
+    });
+    if (!result?.success) {
+      mpWarn("Host rejected tower sell request", { requestId, targetId, sellerId: peer.id });
+      multiplayerController.sendReliable(peer.id, MULTIPLAYER_MESSAGE_TYPE.towerSellCommit, {
+        request: false,
+        rejected: true,
+        requestId,
+      });
+      return;
+    }
+    multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.towerSellCommit, {
+      request: false,
+      rejected: false,
+      requestId,
+      targetId: result.targetId,
+      towerType: result.towerType,
+      sellerId: peer.id,
+      refundAmount: result.refundAmount,
+    });
+    broadcastHostStateSync(true);
+    return;
+  }
+
+  if (payload?.rejected === true) {
+    if (requestId) {
+      pendingTowerSellRequestsById.delete(requestId);
+    }
+    mpWarn("Tower sell request rejected", { requestId, targetId });
+    return;
+  }
+
+  if (!towerSystem || !targetId) {
+    mpWarn("Ignoring tower sell commit with missing target/system", {
+      hasTowerSystem: !!towerSystem,
+      targetId,
+    });
+    return;
+  }
+
+  const result = towerSystem.sellTowerById(targetId, {
+    sellerId,
+    applyRefund: false,
+  });
+  const hadPendingRequest = !!(requestId && pendingTowerSellRequestsById.has(requestId));
+  if (requestId) {
+    pendingTowerSellRequestsById.delete(requestId);
+  }
+  if (!result?.success) {
+    if (hadPendingRequest && sellerId && sellerId === localMultiplayerPeerId && refundAmount > 0) {
+      addMoney(refundAmount);
+      mpLog("Tower sell commit arrived after local desync; applied refund without local removal", {
+        requestId,
+        targetId,
+        refundAmount,
+      });
+      return;
+    }
+    mpWarn("Tower sell commit apply failed", { requestId, targetId, sellerId });
+    return;
+  }
+  if (sellerId && sellerId === localMultiplayerPeerId && refundAmount > 0) {
+    addMoney(refundAmount);
+  }
+  mpLog("Applied tower sell commit", {
+    requestId,
+    targetId,
+    sellerId,
+    refundAmount,
+  });
+}
+
 function handleMultiplayerReady() {
   const state = getMultiplayerState();
   mpLog("Multiplayer ready", summarizeMultiplayerStateForLog(state));
@@ -4377,6 +4785,7 @@ function handleMultiplayerLeftLobby() {
   clearAllRemotePlayers();
   clearAllRemoteWeaponEffects();
   refundAllPendingTowerRequests();
+  clearPendingTowerSellRequests();
   hasAppliedHostSnapshot = false;
   towerSystem?.clearAllPeerPreviews?.();
   applyMultiplayerAuthorityForCurrentSystems();
@@ -4496,6 +4905,11 @@ function handleMultiplayerReliableMessage(peer, type, payload) {
 
   if (type === MULTIPLAYER_MESSAGE_TYPE.towerPlaceCommit) {
     handleTowerCommitMessage(peer, payload);
+    return;
+  }
+
+  if (type === MULTIPLAYER_MESSAGE_TYPE.towerSellCommit) {
+    handleTowerSellCommitMessage(peer, payload);
     return;
   }
 
@@ -5113,6 +5527,7 @@ function animate() {
   syncBuildPhasePathPreviewVisibility();
   syncPokiGameplayState();
   processPendingTowerRequestTimeouts();
+  processPendingTowerSellRequestTimeouts();
 
   if (isMultiplayerWithPeer()) {
     multiplayerTransformTimer += rawDeltaSeconds;
@@ -5142,6 +5557,7 @@ function animate() {
   }
 
   flushUnreliableMultiplayerStatsLog(false);
+  updateSellHoldFromAim(rawDeltaSeconds);
 
   const towerInventory = waveState === "EDITOR"
     ? EDITOR_TOOL_INVENTORY.map((entry) => ({
@@ -5183,6 +5599,7 @@ function animate() {
   );
   const showTouchControls = isTouchDevice || forceTouchControls;
   const touchPortrait = viewportIsPortrait;
+  const sellPrompt = buildSellPromptViewState(showTouchControls);
   const activeMenuOptions = getActiveMenuOptions();
   if (waveState === "MENU" && currentMenuMode === MENU_MODE_TECH_TREE) {
     currentMenuSubtitle = getTechTreeMenuSubtitle();
@@ -5235,6 +5652,7 @@ function animate() {
     movePadCenterX: mobileInput.movePadCenterX,
     movePadCenterY: mobileInput.movePadCenterY,
     pressedActions: mobileInput.pressedButtons,
+    sellPrompt,
   });
   uiOverlay.draw();
 

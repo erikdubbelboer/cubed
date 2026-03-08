@@ -112,6 +112,16 @@ const TOWER_DISPLAY_NAMES = {
   plasma: "Plasma Burner",
   buff: "Buff Tower",
 };
+const SELL_CONFIG = TOWER_CONFIG.sell ?? {};
+const DEFAULT_SELL_AIM_MAX_DISTANCE = Number.isFinite(Number(SELL_CONFIG.aimMaxDistance))
+  ? Math.max(0.5, Number(SELL_CONFIG.aimMaxDistance))
+  : 7;
+const DEFAULT_SELL_PLAYER_MAX_DISTANCE = Number.isFinite(Number(SELL_CONFIG.playerMaxDistance))
+  ? Math.max(0.5, Number(SELL_CONFIG.playerMaxDistance))
+  : 5;
+const DEFAULT_SELL_ANCHOR_Y_OFFSET = Number.isFinite(Number(SELL_CONFIG.anchorYOffset))
+  ? Number(SELL_CONFIG.anchorYOffset)
+  : 0.45;
 
 function finiteOr(rawValue, fallback) {
   const numericValue = Number(rawValue);
@@ -810,6 +820,31 @@ export function createTowerSystem({
     }
     for (const tower of towers) {
       if (tower?.anchorKey === anchorKey) {
+        return tower;
+      }
+    }
+    return null;
+  }
+
+  function getTowerTargetId(tower) {
+    if (!tower || typeof tower !== "object") {
+      return null;
+    }
+    if (typeof tower.anchorKey === "string" && tower.anchorKey.length > 0) {
+      return tower.anchorKey;
+    }
+    if (typeof tower.footprintKey === "string" && tower.footprintKey.length > 0) {
+      return tower.footprintKey;
+    }
+    return null;
+  }
+
+  function findTowerByTargetId(targetId) {
+    if (typeof targetId !== "string" || targetId.length === 0) {
+      return null;
+    }
+    for (const tower of towers) {
+      if (getTowerTargetId(tower) === targetId) {
         return tower;
       }
     }
@@ -4014,6 +4049,7 @@ export function createTowerSystem({
       hitRadius: GUN_PROJECTILE_HIT_RADIUS,
       remainingPierceHits: extraPierce,
       hitEnemyUuids: new Set(),
+      sourceTower: tower,
     });
     spawnGunMuzzleFlash(tempVecA);
     tower.gunMuzzleFlashTimer = Math.max(0, Number(GUN_TOWER_CONFIG.muzzleFlashDuration) || 0.08);
@@ -5332,6 +5368,55 @@ export function createTowerSystem({
     notifyBlockedCellsChanged();
   }
 
+  function removeTowerEntry(towerEntry) {
+    if (!towerEntry || typeof towerEntry !== "object") {
+      return false;
+    }
+    const towerIndex = towers.indexOf(towerEntry);
+    if (towerIndex < 0) {
+      return false;
+    }
+
+    for (let i = gunProjectiles.length - 1; i >= 0; i -= 1) {
+      if (gunProjectiles[i]?.sourceTower !== towerEntry) {
+        continue;
+      }
+      destroyGunProjectile(gunProjectiles[i]);
+      gunProjectiles.splice(i, 1);
+    }
+
+    for (let i = mortarProjectiles.length - 1; i >= 0; i -= 1) {
+      if (mortarProjectiles[i]?.sourceTower !== towerEntry) {
+        continue;
+      }
+      if (mortarProjectiles[i]?.mesh?.parent) {
+        mortarProjectiles[i].mesh.parent.remove(mortarProjectiles[i].mesh);
+      }
+      mortarProjectiles.splice(i, 1);
+    }
+
+    const buildEffectIndex = activeBuildEffects.indexOf(towerEntry);
+    if (buildEffectIndex >= 0) {
+      activeBuildEffects.splice(buildEffectIndex, 1);
+    }
+    if (towerEntry.buildFxState) {
+      restoreTowerBuildMaterialStates(towerEntry.buildFxState.materialStates || []);
+      disposeTowerBuildFxState(towerEntry.buildFxState);
+      towerEntry.buildFxState = null;
+    }
+    towerEntry.isOperational = false;
+
+    const mesh = towerEntry.mesh;
+    if (mesh?.parent) {
+      mesh.parent.remove(mesh);
+    }
+    disposeMeshResources(mesh);
+
+    towers.splice(towerIndex, 1);
+    notifyBlockedCellsChanged();
+    return true;
+  }
+
   function dispose() {
     clearAllTowers();
 
@@ -5496,6 +5581,143 @@ export function createTowerSystem({
     return !!result.success;
   }
 
+  function getSellCandidateFromAim(options = {}) {
+    if (!camera || !scene || towers.length === 0) {
+      return null;
+    }
+    const aimDistanceLimit = Number.isFinite(Number(options?.maxAimDistance))
+      ? Math.max(0.5, Number(options.maxAimDistance))
+      : DEFAULT_SELL_AIM_MAX_DISTANCE;
+    const playerDistanceLimit = Number.isFinite(Number(options?.maxPlayerDistance))
+      ? Math.max(0.5, Number(options.maxPlayerDistance))
+      : DEFAULT_SELL_PLAYER_MAX_DISTANCE;
+    const playerPosition = options?.playerPosition && typeof options.playerPosition === "object"
+      ? options.playerPosition
+      : null;
+
+    const towerRoots = [];
+    const towerByRootUuid = new Map();
+    for (const tower of towers) {
+      if (!tower?.mesh) {
+        continue;
+      }
+      towerRoots.push(tower.mesh);
+      towerByRootUuid.set(tower.mesh.uuid, tower);
+    }
+    if (towerRoots.length === 0) {
+      return null;
+    }
+
+    raycaster.setFromCamera(aimPoint, camera);
+    const intersections = raycaster.intersectObjects(towerRoots, true);
+    if (!Array.isArray(intersections) || intersections.length === 0) {
+      return null;
+    }
+
+    const playerDistanceLimitSq = playerDistanceLimit * playerDistanceLimit;
+    for (const hit of intersections) {
+      const hitDistance = Number(hit?.distance);
+      if (!Number.isFinite(hitDistance) || hitDistance > aimDistanceLimit) {
+        continue;
+      }
+      let node = hit.object ?? null;
+      let tower = null;
+      while (node) {
+        tower = towerByRootUuid.get(node.uuid) ?? null;
+        if (tower) {
+          break;
+        }
+        node = node.parent ?? null;
+      }
+      if (!tower?.mesh) {
+        continue;
+      }
+      if (
+        playerPosition
+        && Number.isFinite(Number(playerPosition.x))
+        && Number.isFinite(Number(playerPosition.y))
+        && Number.isFinite(Number(playerPosition.z))
+      ) {
+        const distSq = tower.mesh.position.distanceToSquared(
+          tempVecK.set(playerPosition.x, playerPosition.y, playerPosition.z)
+        );
+        if (distSq > playerDistanceLimitSq) {
+          continue;
+        }
+      }
+
+      const targetId = getTowerTargetId(tower);
+      if (!targetId) {
+        continue;
+      }
+      const towerType = normalizeTowerType(tower.towerType);
+      if (!towerType) {
+        continue;
+      }
+      const refundAmount = getTowerCost(towerType);
+      const topY = tower.baseY + Math.max(0.1, Number(tower.height) || gridCellSize);
+      tempVecJ.set(
+        tower.mesh.position.x,
+        topY + DEFAULT_SELL_ANCHOR_Y_OFFSET,
+        tower.mesh.position.z
+      );
+      return {
+        targetId,
+        towerType,
+        ownerId: normalizeOwnerId(tower.ownerId),
+        worldAnchor: tempVecJ.clone(),
+        refundAmount,
+      };
+    }
+
+    return null;
+  }
+
+  function sellTowerById(targetId, options = {}) {
+    const tower = findTowerByTargetId(targetId);
+    if (!tower) {
+      return {
+        success: false,
+        targetId: typeof targetId === "string" ? targetId : null,
+        towerType: null,
+        refundAmount: 0,
+        sellerId: normalizeOwnerId(options?.sellerId),
+      };
+    }
+
+    const towerType = normalizeTowerType(tower.towerType);
+    const resolvedTargetId = getTowerTargetId(tower);
+    const sellerId = normalizeOwnerId(options?.sellerId);
+    const refundAmount = towerType ? getTowerCost(towerType) : 0;
+    const applyRefund = options?.applyRefund !== false;
+    const didRemove = removeTowerEntry(tower);
+    if (!didRemove) {
+      return {
+        success: false,
+        targetId: resolvedTargetId,
+        towerType,
+        refundAmount: 0,
+        sellerId,
+      };
+    }
+
+    if (applyRefund && refundAmount > 0) {
+      if (typeof refundMoney === "function") {
+        refundMoney(refundAmount, towerType);
+      } else if (typeof spendMoney === "function") {
+        spendMoney(-refundAmount, towerType);
+      }
+    }
+
+    return {
+      success: true,
+      targetId: resolvedTargetId,
+      towerType,
+      refundAmount,
+      sellerId,
+    };
+  }
+
   function getTowerSnapshots() {
     const snapshots = [];
     for (const tower of towers) {
@@ -5616,6 +5838,8 @@ export function createTowerSystem({
     getCurrentPreviewPayload,
     canPlaceTowerFromPayload,
     placeTowerFromPayload,
+    getSellCandidateFromAim,
+    sellTowerById,
     getTowerSnapshots,
     setPeerPreview,
     clearPeerPreview,

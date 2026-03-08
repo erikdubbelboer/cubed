@@ -14,7 +14,7 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Lobby size: 2 players max. Host is authoritative.
 - Host authority includes wave progression, pause/speed, enemy spawn/damage/death outcomes.
 - Channel split:
-  - Reliable: `state_sync`, `wave_cmd`, `speed_pause_cmd`, `tower_place_commit`, `tech_choice_commit`, `weapon_choice_commit`, `enemy_spawn`, `enemy_damage`, `enemy_death`, `host_ended`
+  - Reliable: `state_sync`, `wave_cmd`, `speed_pause_cmd`, `tower_place_commit`, `tower_sell_commit`, `tech_choice_commit`, `weapon_choice_commit`, `enemy_spawn`, `enemy_damage`, `enemy_death`, `host_ended`
   - Unreliable: `player_transform`, `tower_preview`
 - Health scaling: solo `1x`, co-op `2x`; on join/leave, alive enemies rescale immediately while preserving health ratio.
 - Join-in-progress snapshot must include: wave/speed/pause, placed towers (`ownerId`), and active enemies (stable `enemyId` + current state).
@@ -24,6 +24,8 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Ownership model:
   - Money, weapon choice, and tech progression are per-player.
   - Tower placements carry `ownerId`; owner-scoped tech applies only to that owner's towers.
+  - Tower selling is allowed for either player on any tower; host validates and commits the sell.
+  - Sell refunds are always full tower cost and are credited to the player that completed the sell hold.
   - Host death events spawn drops for both clients; each client collects into its own money total.
 - Remote player is visual-only and must not be included in movement collision obstacles.
 - Co-op tech selection is non-pausing (local modal while simulation continues).
@@ -100,6 +102,10 @@ Capture project decisions that are easy to regress but not always obvious from l
 ## Input, Collision, and Viewport Invariants
 - Desktop mouse input path is gated off on touch devices; touch gameplay uses pointer events.
 - In build mode on touch, primary action confirms placement only; firing must stay suppressed until release.
+- Tower sell input is hold-based on both platforms:
+  - Desktop: hold `E` while close and aiming at a valid tower.
+  - Mobile: hold floating on-tower sell button.
+  - Hold must remain uninterrupted on the same target (`0.90s`) and resets on release/target invalidation/state transitions.
 - `resetMobileInputState()` must clear active pointer/button/jump-hold state on pause/blur/focus transitions.
 - Viewport sync is centralized in `main.js` and coalesced per animation frame.
 - Touch resize resets should be orientation-bucket based to avoid minor viewport jitter resets.

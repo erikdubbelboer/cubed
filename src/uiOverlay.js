@@ -1016,6 +1016,15 @@ export function createUiOverlay({
       primaryAlt: false,
       jump: false,
       cancel: false,
+      sell: false,
+    },
+    sellPrompt: {
+      visible: false,
+      x: 0,
+      y: 0,
+      progress: 0,
+      refund: 0,
+      keyHint: "",
     },
   };
 
@@ -1181,6 +1190,17 @@ export function createUiOverlay({
         primaryAlt: !!partialState.pressedActions.primaryAlt,
         jump: !!partialState.pressedActions.jump,
         cancel: !!partialState.pressedActions.cancel,
+        sell: !!partialState.pressedActions.sell,
+      };
+    }
+    if (partialState.sellPrompt && typeof partialState.sellPrompt === "object") {
+      state.sellPrompt = {
+        visible: partialState.sellPrompt.visible === true,
+        x: Number.isFinite(Number(partialState.sellPrompt.x)) ? Number(partialState.sellPrompt.x) : 0,
+        y: Number.isFinite(Number(partialState.sellPrompt.y)) ? Number(partialState.sellPrompt.y) : 0,
+        progress: clamp(Number(partialState.sellPrompt.progress) || 0, 0, 1),
+        refund: Math.max(0, Math.floor(Number(partialState.sellPrompt.refund) || 0)),
+        keyHint: typeof partialState.sellPrompt.keyHint === "string" ? partialState.sellPrompt.keyHint : "",
       };
     }
   }
@@ -2204,6 +2224,106 @@ export function createUiOverlay({
     drawCtx.textBaseline = "alphabetic";
   }
 
+  function drawSellPrompt() {
+    const prompt = state.sellPrompt;
+    if (!prompt?.visible || state.menuOpen) {
+      return;
+    }
+
+    const minDim = Math.min(viewportWidth, viewportHeight);
+    const radius = state.showTouchControls
+      ? clamp(minDim * 0.06, 30, 50)
+      : clamp(minDim * 0.043, 24, 38);
+    const cx = clamp(prompt.x, radius + 6, viewportWidth - radius - 6);
+    const cy = clamp(prompt.y, radius + 6, viewportHeight - radius - 6);
+    const progress = clamp(prompt.progress, 0, 1);
+    const pressed = !!state.pressedActions?.sell;
+
+    drawCtx.beginPath();
+    drawCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+    drawCtx.fillStyle = pressed ? "rgba(123, 76, 46, 0.88)" : "rgba(28, 38, 52, 0.8)";
+    drawCtx.fill();
+    drawCtx.lineWidth = pressed ? 2.8 : 1.8;
+    drawCtx.strokeStyle = pressed ? "rgba(255, 204, 147, 0.96)" : "rgba(205, 222, 242, 0.72)";
+    drawCtx.stroke();
+
+    drawCtx.beginPath();
+    drawCtx.arc(cx, cy, radius * 0.66, 0, Math.PI * 2);
+    drawCtx.fillStyle = "rgba(8, 13, 21, 0.58)";
+    drawCtx.fill();
+
+    if (progress > 0) {
+      const startAngle = -Math.PI * 0.5;
+      const endAngle = startAngle + (Math.PI * 2 * progress);
+      drawCtx.beginPath();
+      drawCtx.arc(cx, cy, radius * 0.89, startAngle, endAngle, false);
+      drawCtx.lineWidth = Math.max(3, radius * 0.16);
+      drawCtx.strokeStyle = "rgba(120, 255, 176, 0.98)";
+      drawCtx.lineCap = "round";
+      drawCtx.stroke();
+      drawCtx.lineCap = "butt";
+    }
+
+    drawCtx.fillStyle = "rgba(242, 255, 247, 0.98)";
+    drawCtx.textAlign = "center";
+    drawCtx.textBaseline = "middle";
+    drawCtx.font = `800 ${clamp(radius * 0.72, 15, 26)}px ${FONT_STACK}`;
+    drawCtx.fillText("$", cx, cy - (radius * 0.02));
+
+    const labelText = prompt.refund > 0 ? `Sell $${prompt.refund}` : "Sell";
+    const labelFont = clamp(radius * 0.34, 11, 16);
+    drawCtx.font = `700 ${labelFont}px ${FONT_STACK}`;
+    const labelWidth = clamp(drawCtx.measureText(labelText).width + 20, 56, radius * 4);
+    const labelHeight = clamp(labelFont * 1.55, 20, 28);
+    const labelX = clamp(cx - (labelWidth * 0.5), 6, viewportWidth - labelWidth - 6);
+    const labelY = clamp(cy + radius + 6, 6, viewportHeight - labelHeight - 6);
+    drawPanel(
+      drawCtx,
+      labelX,
+      labelY,
+      labelWidth,
+      labelHeight,
+      clamp(labelHeight * 0.36, 6, 10),
+      "rgba(10, 21, 34, 0.86)",
+      "rgba(174, 255, 213, 0.7)",
+      1.2
+    );
+    drawCtx.fillStyle = "rgba(214, 255, 228, 0.98)";
+    drawCtx.fillText(labelText, labelX + labelWidth * 0.5, labelY + labelHeight * 0.55);
+
+    if (!state.showTouchControls && prompt.keyHint) {
+      const keyFont = clamp(radius * 0.3, 10, 14);
+      drawCtx.font = `700 ${keyFont}px ${FONT_STACK}`;
+      const keyText = prompt.keyHint;
+      const keyWidth = clamp(drawCtx.measureText(keyText).width + 16, 42, radius * 3);
+      const keyHeight = clamp(keyFont * 1.5, 18, 24);
+      const keyX = clamp(cx - (keyWidth * 0.5), 6, viewportWidth - keyWidth - 6);
+      const keyY = clamp(cy - radius - keyHeight - 6, 6, viewportHeight - keyHeight - 6);
+      drawPanel(
+        drawCtx,
+        keyX,
+        keyY,
+        keyWidth,
+        keyHeight,
+        clamp(keyHeight * 0.32, 5, 9),
+        "rgba(9, 16, 28, 0.9)",
+        "rgba(191, 232, 255, 0.72)",
+        1.2
+      );
+      drawCtx.fillStyle = "rgba(227, 242, 255, 0.98)";
+      drawCtx.fillText(keyText, keyX + keyWidth * 0.5, keyY + keyHeight * 0.55);
+    }
+
+    if (state.showTouchControls) {
+      touchActionZones.push({ action: "sell", cx, cy, radius });
+      pushTouchBlockedRect(cx - radius, cy - radius, radius * 2, radius * 2);
+      pushTouchBlockedRect(labelX, labelY, labelWidth, labelHeight);
+    }
+
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "alphabetic";
+  }
+
   function drawCardMenu() {
     menuOptionRects = [];
     if (!state.menuOpen) {
@@ -2741,6 +2861,7 @@ export function createUiOverlay({
     drawBuildModeHint();
     drawCrosshair();
     drawTouchControls();
+    drawSellPrompt();
     drawMenuOverlay();
     touchControlLayout.blockedRects = touchBlockedRects.slice();
 
