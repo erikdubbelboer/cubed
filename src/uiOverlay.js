@@ -1162,13 +1162,15 @@ export function createUiOverlay({
       state.moveStickY = clamp(partialState.moveStickY, -1, 1);
     }
     if (Object.prototype.hasOwnProperty.call(partialState, "movePadCenterX")) {
-      state.movePadCenterX = Number.isFinite(Number(partialState.movePadCenterX))
-        ? Number(partialState.movePadCenterX)
+      state.movePadCenterX = typeof partialState.movePadCenterX === "number"
+        && Number.isFinite(partialState.movePadCenterX)
+        ? partialState.movePadCenterX
         : null;
     }
     if (Object.prototype.hasOwnProperty.call(partialState, "movePadCenterY")) {
-      state.movePadCenterY = Number.isFinite(Number(partialState.movePadCenterY))
-        ? Number(partialState.movePadCenterY)
+      state.movePadCenterY = typeof partialState.movePadCenterY === "number"
+        && Number.isFinite(partialState.movePadCenterY)
+        ? partialState.movePadCenterY
         : null;
     }
     if (partialState.pressedActions && typeof partialState.pressedActions === "object") {
