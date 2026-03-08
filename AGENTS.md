@@ -1,528 +1,125 @@
 # AGENTS.md
 
-## Project Learnings (Do Not Forget)
+## Purpose
+Capture project decisions that are easy to regress but not always obvious from local code context.
 
-### Runtime and Structure
-- This project is an npm + Vite browser game using native ES modules in source.
-- `index.html` loads `/src/main.js`; `three` and `three/addons` resolve from npm dependencies through Vite.
-- Source files live in `src/`; `src/main.js` is the orchestration layer for systems (`grid`, `player`, `enemies`, `towers`, `uiOverlay`) and owns wave state, menu state, and economy state.
+## Runtime Architecture
+- Stack: npm + Vite + native ES modules.
+- Entry flow: `index.html` -> `src/main.js`.
+- `src/main.js` is the orchestrator and state owner for wave/menu/economy and system wiring (`grid`, `player`, `enemies`, `towers`, `uiOverlay`, `multiplayer`).
 
-### Coop Multiplayer (Latest, Override)
-- Netcode uses `@poki/netlib` through `src/multiplayer.js`, with fixed game ID `ed698dfc-1c2f-482e-a733-22339afeeb55`.
-- Lobbies are capped at 2 players (`maxPlayers: 2`); host role is the lobby creator.
-- Authority model is host-authoritative for wave flow, pause/speed state, and enemy outcomes (spawn/damage/death).
-- Channel split is contractual:
-  - reliable: `state_sync`, `wave_cmd`, `speed_pause_cmd`, `tower_place_commit`, `tech_choice_commit`, `weapon_choice_commit`, `enemy_spawn`, `enemy_damage`, `enemy_death`, `host_ended`
-  - unreliable: `player_transform`, `tower_preview`
-- Enemy health scaling contract:
-  - solo = `1x`, 2-player coop = `2x`
-  - on join/leave, alive enemies are rescaled immediately while preserving current health ratio.
-- Join-in-progress contract:
-  - host must send snapshot with current wave/speed/pause, all placed towers (with `ownerId`), and active enemies (stable `enemyId` + current state).
-- Leave contract:
-  - guest leave => host continues as solo (health scale returns to `1x`)
-  - host leave => guest session is terminated (`host_ended`/disconnect path).
-- Ownership contract:
-  - money, weapon choice, and personal tech-tree progression are per-player and not shared
-  - coin drops are spawned for both clients from host death events; each client collects into its own money total.
-- Tower ownership contract:
-  - tower placements carry `ownerId`
-  - tower tech modifiers are owner-scoped and applied to that owner’s towers.
-- Visual/network UX contract:
-  - remote player avatar is a tall black block
-  - remote players are visuals only and must not enter player collision obstacle lists
-  - other player’s in-progress tower placement is shown as a remote ghost preview (`tower_preview` stream).
-- Coop tech-menu contract:
-  - in coop, level-up tech selection is non-pausing (local modal while world simulation continues).
-- Share UX contract:
-  - in-game `Share` button creates a lobby when needed
-  - share panel shows current page URL with `?lobby=<code>`
-  - adjacent native-share button uses `navigator.share({ url })` when available.
+## Multiplayer Contracts (Co-op)
+- Transport: `@poki/netlib` via `src/multiplayer.js`.
+- Fixed game ID: `ed698dfc-1c2f-482e-a733-22339afeeb55`.
+- Lobby size: 2 players max. Host is authoritative.
+- Host authority includes wave progression, pause/speed, enemy spawn/damage/death outcomes.
+- Channel split:
+  - Reliable: `state_sync`, `wave_cmd`, `speed_pause_cmd`, `tower_place_commit`, `tech_choice_commit`, `weapon_choice_commit`, `enemy_spawn`, `enemy_damage`, `enemy_death`, `host_ended`
+  - Unreliable: `player_transform`, `tower_preview`
+- Health scaling: solo `1x`, co-op `2x`; on join/leave, alive enemies rescale immediately while preserving health ratio.
+- Join-in-progress snapshot must include: wave/speed/pause, placed towers (`ownerId`), and active enemies (stable `enemyId` + current state).
+- Leave behavior:
+  - Guest leaves: host continues solo and scaling returns to `1x`.
+  - Host leaves: guest session terminates (`host_ended`/disconnect).
+- Ownership model:
+  - Money, weapon choice, and tech progression are per-player.
+  - Tower placements carry `ownerId`; owner-scoped tech applies only to that owner's towers.
+  - Host death events spawn drops for both clients; each client collects into its own money total.
+- Remote player is visual-only and must not be included in movement collision obstacles.
+- Co-op tech selection is non-pausing (local modal while simulation continues).
 
-### Economy System Contract
-- Money is owned in `main.js` (`playerMoney`), initialized from `GAME_CONFIG.economy.startingCash`.
-- Tower placement spending is delegated to `towers.js` through callbacks passed into `createTowerSystem({ getCurrentMoney, spendMoney, refundMoney })`.
-- Enemy kill rewards are emitted from `enemies.js` only on real death (inside `applyDamage` when health reaches 0), via `onEnemyDefeated(cashReward, enemyType, dropPosition)`.
-- Enemies that simply reach path end are removed but do not grant money.
-
-### Money Drop Pickup Economy (Latest)
-- Enemy death cash is no longer granted instantly; `main.js` now spawns collectible money-cube drops at the provided enemy `dropPosition`.
-- Drop denomination rules:
-  - every reward point initially spawns as one `$1` cube
-  - settle-time merge combines nearby equal-value settled cubes:
-    - `10 x $1 -> 1 x $10`
-    - `10 x $10 -> 1 x $100`
-  - merge is now two-stage visualized:
-    - selected source cubes first move toward their shared merge center
-    - only after all selected sources arrive is the single higher-value cube spawned
-  - merge cap is `$100` (no `$1000+` tiers)
-- Pickup flow now has two stages:
-  - entering pickup range (horizontal/XZ) starts coin homing toward player feet.
-  - money is granted only once a coin reaches the feet target (`pickupArrivalDistance` threshold), not immediately on range entry.
-- Economy pickup tuning lives in `GAME_CONFIG.economy.pickups` (range, physics, homing speed/arrival threshold, merge radius, merge-converge speed/arrival threshold, denomination colors).
-- New repeatable upgrade grant `grants.pickupRangeAdd` increases money-cube pickup radius.
-
-### Tower Unlock + Purchase Rules
-- Tower availability is unlock-based, not stock-based.
-- `towers.js` unlock state comes from `GAME_CONFIG.economy.startingUnlockedTowers`, with a hard fallback that always ensures `gun` is unlocked.
-- `GAME_CONFIG.towers.types.<type>.cost` is the purchase price per placement.
-- `towerSystem.selectTower(type)` returns `false` if the tower is locked or unaffordable.
-- `towerSystem.placeSelectedTower()` spends cash through `spendMoney` and cancels build mode if post-purchase money is insufficient for another of that type.
-
-### New Tower Archetypes (Latest)
-- New unlockable tower types are now:
-  - `laserSniper`, `mortar`, `tesla`, `spikes`, `plasma`, `buff`
-- Unlock flow remains upgrade-driven:
-  - first forced menu pick is still `tower_aoe_unlock`.
-  - six new unlock upgrades exist:
-    - `tower_laser_sniper_unlock`
-    - `tower_mortar_unlock`
-    - `tower_tesla_unlock`
-    - `tower_spikes_unlock`
-    - `tower_plasma_unlock`
-    - `tower_buff_unlock`
-- Plasma tower placement contract:
-  - plasma is wall-mounted and only valid on **terrain wall side faces**.
-  - gameplay uses `grid.raycastWallAnchor(ray)` for placement hit data (`point`, horizontal `normal`, wall voxel `cellX/cellY/cellZ`).
-  - `raycastWallAnchor` now resolves explicit side-plane intersections (X/Z faces), improving placement reliability from oblique camera angles.
-  - plasma anchor uniqueness is keyed by wall voxel + face normal.
-  - plasma occupies no build cells, so it does **not** path-block enemy routes.
-  - plasma affects exactly one adjacent outward grid cube from its mounted face.
-  - plasma visuals are now a large wall panel (covering > half of a wall tile face) with reduced depth/protrusion; mount gap to wall face is minimal.
-  - plasma no longer has a barrel/shot burst: it renders a constant forward flame volume using a shader plus animated additive particles.
-  - plasma damage is continuous DPS in the target cube (`baseDamage / fireInterval`, scaled by damage buffs and fire-rate interval factor).
-  - plasma flame width/height are tuned to cover almost the full wall tile area.
-- Player collision exclusions (latest):
-  - `spikes` and `plasma` towers no longer block player movement/collision.
-  - Implementation detail: tower entries expose `collidesWithPlayer`; `player.js:updateMovement` filters obstacles by this flag.
-  - Player projectile-vs-obstacle collision path remains unchanged (still uses full obstacle list from `getMovementObstacles()`).
-- Buff tower stacking contract:
-  - buff towers apply additive bonuses per in-range buff source.
-  - bonuses apply to **non-buff towers only** (buff towers do not buff buff towers).
-  - additive defaults: `+25% damage` and `+20% fire-rate` per buff tower in range.
-- New combat behavior contracts:
-  - `laserSniper`: map-wide LOS-gated hitscan beam burst.
-  - `mortar`: steep high-arc projectile with splash detonation on ground/timeout/obstacle hit.
-  - mortar launch tuning uses high initial vertical speed plus stronger gravity for an almost-straight-up lob that still lands quickly in-range.
-  - mortar launch angle is now dynamic per shot using a ballistic solve from muzzle->impact point; close targets force steeper pitch so shots do not sail over nearby enemies.
-  - mortar visuals now yaw + pitch to match solved shot direction (`mortarYawNode` + `mortarBarrelPivot`) before preview/firing.
-  - mortar barrel defaults to an upward idle angle in preview/placed mesh creation (`barrelPivot.rotation.x` negative), so build-mode mortar visuals start pointing up instead of horizontal.
-  - `plasma`: continuous wall-mounted flame volume with shader distortion + particles; deals continuous DPS in the adjacent target cube (not burst shots).
-  - `tesla`: chain lightning up to 3 unique enemies per attack.
-  - `spikes`: periodic raise/retract trap that damages enemies overlapping its cell during active window.
-  - `spikes` remain cell-snapped for placement occupancy, but are excluded from blocked-cell pathfinding so enemies still walk over them.
-  - spike tower base slab visual is intentionally very thin (`0.03` high, slight lift) so pickups/enemy cubes read on top instead of appearing embedded.
-  - spike meshes are laid out as an interleaved square grid (row-offset lattice) across the tile, not a circular ring.
-  - spike cone geometry is bottom-pivoted and positioned from the plate top, so retract/extend scaling keeps spikes seated on the base (no hover gap).
-- Spawn target-gating rule (latest):
-  - Towers should only target/damage enemies whose full body is outside spawn marker cubes.
-  - Enemies still intersecting a spawn cube are ignored by tower targeting and tower point/splash damage paths.
-- Ramp LOS rule (latest):
-  - Tower LOS checks now include ramp wedge volume blocking (base-to-slope shape), not only terrain cube AABBs.
-  - This prevents LOS towers (including sniper) from shooting through visible ramp mass while preserving empty-space-over-low-side sight lines.
-- Laser sniper targeting/cadence detail (latest):
-  - LOS origin uses the sniper emitter node (not mesh base position) to avoid false terrain-blocked shots.
-  - Target selection is unlimited-range LOS scan over all damageable enemies.
-  - Base fire interval is now `2.0s`.
-
-### Gun Tower Replacement (Latest, Override)
-- The default starter tower type is now `gun` (the old `laser` tower type was fully replaced).
-- `GAME_CONFIG.economy.startingUnlockedTowers` should include `gun`; `towers.js` fallback also ensures `gun` is always unlocked.
-- Gun tower footprint is fixed 1x2 (Z-axis depth) and non-rotatable:
-  - placement resolves from aimed cell hit-side:
-    - front-half hit => occupied cells `(x,z)` + `(x,z+1)`
-    - back-half hit => occupied cells `(x,z-1)` + `(x,z)`
-  - placement is invalid unless both occupied cells are buildable, unreserved, unoccupied, inside level bounds, and at the same build-surface height.
-- Path blocking is multi-cell/atomic for gun placement:
-  - enemy system exposes `canBlockCells(cells)` and `canBlockCell` remains as wrapper compatibility.
-  - tower preview cache keys by `(footprintKey, blockedRevision)` instead of single cell.
-  - post-placement preview suppression is footprint-key based (same footprint only).
-- Gun combat contract:
-  - tower top rotates in yaw toward target.
-  - turret fires traveling cube projectiles from muzzle node (no beam visuals).
-  - projectile hit checks should use enemy-system body-aware checks (`isPointNearEnemyMesh` when available), apply single hit damage, then despawn.
-- Tower obstacle geometry now supports rectangular extents (`halfSizeX`, `halfSizeZ`) and should be used by LOS and player collision paths (with `halfSize` fallback for legacy obstacles).
-- UI tower tray now maps the default tower icon to `tower_gun` (with `tower_laser` icon IDs still aliased for compatibility in `uiOverlay.js`).
-
-### Tower Build Teleport FX (Latest)
-- Newly placed towers now run a teleport/materialization build effect before becoming combat-active.
-- Activation timing contract:
-  - Placement spending is immediate.
-  - Cell blocking/path reroute (`notifyBlockedCellsChanged` -> enemy reroute) is immediate.
-  - Tower attacking is delayed until build FX completes.
-- Build FX runtime lives in `towers.js`:
-  - `activeBuildEffects[]` tracks in-progress tower materialization.
-  - Each tower entry has `isOperational` and `buildFxState`.
-  - `updateTowerBuildEffects(deltaSeconds)` advances tower rise/scale/material fade and teleport visuals.
-- Build FX config lives in `GAME_CONFIG.towers.buildFx`:
-  - `enabled`
-  - `durationSeconds`
-  - `startScale`
-  - `startYOffset`
-  - `startOpacity`
-  - `teleportRadiusCellScale`
-  - `teleportHeightCellScale`
-  - `teleportOpacity`
-  - `teleportColorA`
-  - `teleportColorB`
-  - `teleportEdgeColor`
-  - `ringMaxScale`
-  - `ringThickness`
-- Build-mode ghost suppression after placement:
-  - After a successful tower placement (when build mode remains active), the preview ghost is hidden while aiming at that same placed footprint.
-  - The ghost reappears only after the aim resolves to a different footprint key.
-- `forcePlaceTower(...)` uses the same build FX/activation timing as normal placement.
-
-### Tower Footprint Outline (Latest)
-- AOE and Slow tower meshes now include a cube-edge footprint outline sized to the grid build cube (cell-sized), not the inner orb visuals.
-- For current tuning (`grid.cellSize = 4`), `footprintOutlineInset: 0.04` yields outlines that are 98% of the grid cube per axis.
-- AOE mesh upscaling is now config-driven through `GAME_CONFIG.towers.types.aoe.visualScale` (currently `2` for a 2x larger orb/spike/aura look).
-- `visualScale` affects AOE mesh size, hover height/bobbing amplitude, glow light distance, and AOE tower obstacle extents (`halfSize`/`radius`) used by player collision and LOS.
-- `visualScale` does **not** change build/path blocking cell occupancy (AOE still occupies one build cell for placement/pathing).
-- Outline is visual-only; path blocking remains cell-based for enemies and uses existing tower obstacle data for player/tower LOS checks.
-- Outline appears in both preview and placed meshes for AOE/Slow.
-- Preview validity coloring also updates outline color (`previewGlow` when valid, `previewInvalidGlow` when invalid).
-- Tuning keys live in `GAME_CONFIG.towers.types.aoe|slow`:
-  - `visualScale` (AOE + Slow)
-  - `footprintOutlineInset`
-  - `footprintOutlineOpacity`
-
-### Slow Tower Visual Style (Latest)
-- Slow tower now uses a `Cryo Prism` silhouette:
-  - short pedestal
-  - faceted elongated crystal core
-  - two offset halo rings that counter-rotate
-- Slow tower mesh scale is now config-driven via `GAME_CONFIG.towers.types.slow.visualScale` (currently `1.9`) so the model reads larger in a 1x1 cell.
-- Cryo Prism pedestal footprint now applies `pedestalDiameterScale: 1.75` (diameter 1.75x wider than the prior pedestal) before bottom taper (`pedestalRadiusBottom ~= top * 1.4`) so same-cell blocking reads clearly at a glance.
-- Slow tower collision box now matches the widened pedestal visual: `towerSpecs.slow.halfSize/radius` are derived from `pedestalRadiusBottom * visualScale` (not legacy `config.halfSize`).
-- Slow tower is grounded: the pedestal now sits directly on the tile surface (no vertical hover offset / float).
-- Preview/invalid-state coloring updates all prism materials (`slowBodyMaterial`, `slowAccentMaterial`, ring band material, glow light).
-- Runtime animation contract:
-  - no vertical bob/hover translation; motion comes from crystal pulse + ring rotation only.
-  - upper/lower rings rotate in opposite directions continuously.
-  - `slowProcFlash` is triggered on each successful slow application; it boosts crystal pulse scale/emissive intensity, ring opacity/rotation speed, and glow-light intensity briefly.
-
-### Upgrade System Rules
-- Upgrades are config-driven (`GAME_CONFIG.upgrades[]`), not hardcoded lists.
-- Upgrade availability is gated by:
-  - `maxCount` (tracked in `main.js` via `upgradeCountsById`), and
-  - unlock collisions (upgrade with `grants.unlockTowerType` is filtered out if already unlocked).
-- The first upgrade menu always forces `tower_aoe_unlock` when that upgrade is still available; remaining options are random from the filtered pool.
-- If no upgrades are available, `showUpgradeMenu()` must gracefully exit via `finishUpgradeMenuChoice()` instead of leaving the game stuck in `MENU`.
-- Menu flow supports two modes:
-  - advance to next wave on choice, or
-  - resume current `PLAYING/DELAY/BUILD` state (used by pause overlay flow).
-- Between-wave flow now includes a build phase:
+## Economy + Upgrade Rules
+- Money state lives in `main.js` (`playerMoney`) and starts from `GAME_CONFIG.economy.startingCash`.
+- Tower spending/refunds are delegated through `createTowerSystem({ getCurrentMoney, spendMoney, refundMoney })` callbacks.
+- Enemy rewards are emitted only on real death via `onEnemyDefeated(...)`; reaching path end gives no money.
+- Rewards are paid through pickup drops, not immediate cash grant:
+  - Drops start as `$1` cubes.
+  - Settled merge: `10x $1 -> $10`, `10x $10 -> $100` (cap at `$100`).
+  - Cash is granted on pickup arrival, not on range entry.
+- `grants.pickupRangeAdd` increases pickup radius.
+- Tower availability is unlock-based (not stock). `gun` must always be unlocked as fallback.
+- Upgrade system is config-driven (`GAME_CONFIG.upgrades[]`) with:
+  - `maxCount` gating,
+  - unlock-collision filtering for unlock grants,
+  - forced first pick `tower_aoe_unlock` while available,
+  - graceful no-options exit via `finishUpgradeMenuChoice()`.
+- Wave flow includes build phase:
   - `PLAYING -> DELAY -> MENU -> BUILD -> PLAYING(next wave)`.
-  - Build phase duration is config-driven via `GAME_CONFIG.waves.buildPhaseDurationSeconds` (default 300s).
-  - Session start now enters `BUILD` before wave 1 begins.
-  - `Start Wave` HUD action can skip the remaining build timer.
-- New grant wiring reminder:
-  - Add grant data in `GAME_CONFIG.upgrades[]`.
-  - Wire grant handling in `main.js:applyUpgradeGrants()`.
-  - Implement the target method on `player`, `towerSystem`, or `enemySystem`.
-  - Add a matching icon in `uiOverlay.js` (or fallback icon is shown).
+  - Session starts in `BUILD` before wave 1.
+  - `Start Wave` can skip remaining build timer.
+- Grant wiring contract:
+  - Define grant in config.
+  - Handle in `main.js:applyUpgradeGrants()`.
+  - Implement target method on `player`, `towerSystem`, or `enemySystem`.
 
-### Player Weapon Contract (Latest)
-- Player weapon is charge-based (not cooldown-per-shot):
-  - `player.weapon.baseMaxCharges` sets cap.
-  - `player.weapon.startingCharges` sets initial charge count (currently starts at `1`).
-  - Charges regenerate one at a time based on `currentFireCooldown`.
-- Burst firing has an explicit per-shot delay while holding fire:
-  - `player.weapon.burstShotDelay` is enforced through `shotDelayRemaining`.
-  - This prevents multiple charges from firing on consecutive frames.
-  - Fire-rate upgrades scale both recharge interval and burst delay.
-- `player_weapon_charge_capacity` multiplies max charges and immediately refills to the new cap.
-- Weapon charge HUD placement contract:
-  - Desktop: full-length reload bar with charge dots above the bar.
-  - Mobile: half-length reload bar, still anchored from the same left side so it does not drift into the weapon.
-  - Mobile dot ordering must grow leftward from the first dot (toward screen-left), not into the gun mesh.
-  - Dot count rebuilds when max charges change.
+## Tower + Combat Contracts
+- Starter/default tower is `gun` (legacy `laser` replaced).
+- Gun tower placement is fixed non-rotatable 1x2 footprint (Z-axis), validated atomically across both occupied cells.
+- Path blocking supports multi-cell placement (`canBlockCells`) and uses blocked-revision-aware preview caching.
+- Gun combat uses projectile cubes from muzzle node (not beam/hitscan).
+- Plasma tower:
+  - Wall-mounted only on terrain side faces via `grid.raycastWallAnchor(ray)`.
+  - Anchor key: wall voxel + face normal.
+  - Occupies no build cells and does not path-block.
+  - Applies continuous DPS to exactly one adjacent outward cube.
+- `spikes` and `plasma` do not block player movement; `spikes` also do not block enemy pathing.
+- Buff towers stack additively per in-range buff source on non-buff towers only.
+- Tower build FX exists: spending and path blocking are immediate, tower attacking starts only after build FX completes.
+- Tower targeting/damage must ignore enemies still intersecting spawn marker cubes.
+- LOS checks include ramp wedge blocking (not only terrain cube AABBs).
 
-### Projectile Hit + Pierce Contract
-- Projectile hit logic is single-target-per-contact (not radial splash):
-  - It checks damageable enemy meshes and applies damage to one closest valid target at contact.
-- Collision shape rule (latest, overrides older sphere assumptions):
-  - Enemy contact should be validated against the cube body volume, not only center-distance to `mesh.position`.
-  - Prefer `enemySystem.isPointNearEnemyMesh(enemyMesh, point, radius)` for projectile contact checks.
-  - Treat `enemyMesh.userData.bodyHalfSize` as primary cube size; `hitSphereRadius` is legacy/fallback.
-- Per-projectile anti-duplicate hit tracking is mandatory:
-  - Each projectile stores hit enemy mesh UUIDs.
-  - A projectile can never damage the same enemy twice.
-- Pierce behavior:
-  - `remainingPierceHits` starts from weapon pierce stat.
-  - Each enemy contact consumes one pierce allowance.
-  - When allowance is exhausted, projectile despawns on next enemy hit.
-- Tower/environment collision still immediately despawns the projectile.
-- Ramp environment collision (latest):
-  - Player projectiles must use ramp wedge volume checks (along/across + slope height), not full ramp AABB prism checks.
-  - A projectile on a ramp cell should only collide at/under the local ramp surface (plus padding), so empty space above the low ramp side stays shoot-through.
-- New upgrade: `player_weapon_pierce` adds `+1` pierce via `grants.weaponPierceAdd`.
+## Weapon + Hit Geometry Contracts
+- Player weapon is charge-based (not shot cooldown-based).
+- Burst fire enforces per-shot delay while holding fire.
+- Projectile contact is single-target and body-aware:
+  - Prefer `enemySystem.isPointNearEnemyMesh(...)` and enemy body extents over center-distance assumptions.
+  - Per-projectile duplicate-hit prevention is required (no double-hit on same enemy).
+- Pierce is per-contact consumption; projectile despawns once allowance is exhausted.
+- Projectile environment checks must use ramp wedge collision, not full ramp AABB prism.
+- Enemy hit geometry assumptions must stay aligned across `player.js`, `towers.js`, and `enemies.js`.
 
-### Enemy Offset + Hitbox Alignment (Latest)
-- Stacking visuals:
-  - Enemies move along a centerline path state (`pathCenter` / `pathForward`) but render with a small lateral offset (`pathOffsetLateral`) so stacked cubes do not perfectly overlap.
-  - Keep offset application in `setEnemyWorldPosition(...)` and movement-to-render sync in `updateEnemyTransformFromPath(...)`.
-- Visual/collision alignment:
-  - Enemy body center is `mesh.position + bodyCenterOffsetY`; use this for center-based distance checks and aiming.
-  - Point/radius damage for towers should go through enemy-system body-aware checks (`applyDamageAtPoint` now uses cube-body distance), not naive sphere checks.
-  - Cube collision extents should respect `visualRoot.scale` so hit pulses still align with what is rendered.
-- Cross-system consistency:
-  - `player.js`, `towers.js`, and `enemies.js` must agree on enemy hit geometry; if one side changes hit shape, update all three together.
+## Grid, Pathfinding, and Blocking Contracts
+- Level source is sparse object data: `GAME_CONFIG.grid.levelObjects`.
+- Object schema: `{ type, position: { x, y, z }, rotation }`.
+- Supported marker/object types: `wall`, `spawn`, `end`, `playerSpawn`, `ramp` (`path` allowed as legacy visual marker).
+- Ramp rotation mapping (low -> high): `0:+Z`, `90:+X`, `180:-Z`, `270:-X`; ramp anchor is low-end cell.
+- Grid exposes marker-centric/runtime helpers (spawn/end/player spawn, buildability, ramp data, world<->cell mapping).
+- Endpoint collision contract:
+  - Spawn/end cubes are movement/projectile obstacles.
+  - Keep them out of `heightObstacles` so tower LOS/build-surface behavior is unchanged.
+- Enemy navigation:
+  - Cardinal-only neighbors.
+  - Normal cells require equal height.
+  - Ramp traversal allowed only through valid ramp ends (no side entry/exit).
+- Blocking contract:
+  - `canBlockCell`/`canBlockCells` must preserve at least one route from every spawn to `end`.
+  - `setBlockedCells` commits blockers and reroutes active enemies immediately.
+- Enemy completion at endpoint requires full body inside end volume.
+- Tower placement is grid-snapped; spawn/end/ramp cells are not buildable.
 
-### Gun Turret Targeting/Projectile Behavior (Latest)
-- Gun targeting should prefer damageable enemies (`getDamageableEnemies`) so dying/non-damageable enemies are dropped immediately.
-- Gun turret top rotates in yaw toward the target; projectiles originate from the muzzle node on the turret.
-- Gun projectiles are traveling cube meshes (not hitscan/beam), apply damage on first enemy body contact, and despawn immediately on hit or lifetime expiry.
+## Input, Collision, and Viewport Invariants
+- Desktop mouse input path is gated off on touch devices; touch gameplay uses pointer events.
+- In build mode on touch, primary action confirms placement only; firing must stay suppressed until release.
+- `resetMobileInputState()` must clear active pointer/button/jump-hold state on pause/blur/focus transitions.
+- Viewport sync is centralized in `main.js` and coalesced per animation frame.
+- Touch resize resets should be orientation-bucket based to avoid minor viewport jitter resets.
+- Top-support and horizontal side-collision are separate concerns; do not conflate fixes.
+- Terrain obstacles use `topInsetFromRadius: 0`; terrain edge side-collision grace applies only to terrain-like obstacles.
+- Ramps expose obstacle/surface helpers for movement support and side blocking.
+- Player X/Z movement is clamped to level bounds; boundary wall visuals are visual-only and must not affect physics.
 
-### UI Data Contract
-- `uiOverlay.setState(...)` expects `money` from `main.js` for cash HUD.
-- Tower tray entries are affordability-driven:
-  - `towerInventory[]` items should include `type`, `label`, `iconId`, `hotkey`, `affordable`, `cost`, and `remaining`.
-  - In current behavior, `remaining` is effectively an affordability sentinel (`1`/`0`), not inventory stock.
-- Tower tray visual contract (latest):
-  - Tray buttons no longer render tower name text (icon-only + cost badge + optional hotkey badge).
-  - Tower icons are centered in slot buttons and intentionally larger for quick recognition.
-  - On mobile portrait, tray is a vertical column under the top-right money panel.
-- If changing tray semantics, update both `towers.js:getTowerInventory()` and `uiOverlay.js:normalizeTowerInventory()` together.
+## Level Editor Contracts
+- Editor mode toggles with `N` (`waveState === "EDITOR"`) and rebuilds grid in editor mode.
+- Editor mutates level object model (`src/levelEditor.js`) and rebuilds preview/pathing after edits.
+- `end` and `playerSpawn` are unique markers; `spawn` is multi-place.
+- Marker `y` values are authoritative and must match traversable surface; invalid markers fail path system validation.
+- Player spawn facing uses `playerSpawn.rotation` cardinal mapping (same mapping as ramp cardinal conventions).
+- Exiting editor validates playability before returning to gameplay.
+- Export API: `window.exportLevel()` returns current level objects (editor model while in editor, runtime grid otherwise).
 
-### Config Expectations
-- Economy tuning lives in:
-  - `GAME_CONFIG.economy.startingCash`
-  - `GAME_CONFIG.economy.startingUnlockedTowers`
-  - `GAME_CONFIG.towers.types.<type>.cost`
-  - `GAME_CONFIG.enemies.types.<enemy>.cashReward`
-- Enemy reward fallback behavior exists in code: if `cashReward` is absent/non-numeric, it falls back to enemy max health.
-- Mobile control tuning lives in `GAME_CONFIG.ui.mobile` (button sizes, edge margins, move-stick activation scale, look-zone padding, look sensitivity).
-- Gun/HUD mobile offsets and scale tuning live in `GAME_CONFIG.player.gun.*mobile*` fields (weapon transform + reload bar offsets).
+## Debug + Validation
+- Runtime debug helpers are exposed via `window.gameDebug` (economy/tower/enemy/path/touch-control helpers).
+- Primary validation workflows: `npm run dev` and `npm run build`.
 
-### Mobile Controls + Touch Routing (Latest, Override)
-- Desktop mouse listeners are explicitly gated by `!isTouchDevice`; keep desktop and touch paths separate.
-- Touch gameplay uses pointer events on `renderer.domElement` (`pointerdown/move/up/cancel`) with `passive: false`.
-- Pointer routing priority on touch down:
-  - upgrade menu card hit-test
-  - tower tray hit-test
-  - touch action buttons (`primary`, `jump`, `cancel`)
-  - move-stick activation circle
-  - look pointer claim (only if not in blocked UI rects / look-zone top exclusion)
-- Build-mode primary behavior must not leak into weapon fire:
-  - action-button tap in build mode schedules placement confirm only (`pendingBuildConfirm`)
-  - suppress hold-to-fire until that touch is released (`suppressPrimaryFireUntilRelease`)
-  - outside build mode, primary supports hold-to-fire.
-- `resetMobileInputState()` must clear move/look pointer ids, pressed buttons, and jump hold on pause/blur/focus transitions.
-- `player.setJumpHeld(bool)` is the mobile-safe jump/jetpack input path; rising edge triggers one jump, hold powers jetpack.
-
-### Viewport Resize Handling (Latest)
-- Viewport sync is centralized in `main.js` via `getViewportMetrics()` + `applyViewportMetrics()` + `scheduleViewportSync()`.
-- Metrics prefer `window.visualViewport.width/height` when available, with fallback to `window.innerWidth/innerHeight`.
-- Resize events are coalesced to one update per animation frame:
-  - `window.resize`
-  - `window.orientationchange`
-  - `window.visualViewport.resize` (when supported)
-- `applyViewportMetrics()` updates camera aspect/projection, renderer size, renderer pixel ratio, UI overlay size, and virtual cursor clamps.
-- Mobile/touch input reset on resize is orientation-bucket based (portrait vs landscape) and only runs when touch controls are active (`isTouchDevice || forceTouchControls`), avoiding resets on minor viewport shifts (e.g. browser chrome show/hide).
-
-### HUD + Menu Layout Contracts (Latest, Override)
-- Money HUD (top-right) shows only `$amount` now; the `"Cash"` label was removed and the panel is sized tighter.
-- Wave counter HUD now renders as a compact `Wave N` panel directly below the top-right money panel.
-- Wave counter value contract:
-  - during `BUILD`, show the queued/upcoming wave number.
-  - outside `BUILD`, show the active/current wave number.
-- Mobile tower tray top anchor is the stacked top-right HUD bottom (money + wave counter), not money-only bottom.
-- Desktop build hint text is exactly `Q to cancel`, auto-sized to text, and anchored above the build tray.
-- Touch primary action button label/icon swaps by mode:
-  - normal gameplay: `Fire`
-  - build mode: `Place`
-- Upgrade option labels are intentionally short (config labels like `+1 tower dmg`, `x2 charges`) to avoid clipping.
-- Upgrade menu in mobile portrait is top-shifted and compacted (padding/card sizes/gaps) so all options fit without overlap.
-- Jetpack fuel HUD rules:
-  - hide fuel HUD at 100%
-  - desktop and mobile portrait use a small vertical side bar on the left side (away from the top-left build timer/FPS stack).
-  - touch landscape keeps the compact horizontal top-left bar.
-- Build-phase HUD rules:
-  - show `Build: mm:ss` timer while `waveState === "BUILD"`.
-  - show a `Start Wave` utility button during build phase to launch queued wave immediately.
-  - mobile/touch build phase hides the `Pause` HUD button (only `Start Wave` is shown in utility controls).
-  - build phase replaces the `1x/2x` speed button with `Start Wave`.
-  - desktop `F` key starts the queued wave during build phase (outside build it still toggles speed).
-- FPS counter:
-  - HUD renders tiny plain `FPS <value>` text at the top-left screen edge.
-  - FPS text color is high-contrast black for readability on bright/white levels.
-  - FPS uses no panel/border/background and does not reserve touch-blocked UI space.
-
-### Debug Hooks Useful for Iteration
-- `window.gameDebug` exposes useful runtime helpers:
-  - `addMoney(amount)`, `getMoney()`, `unlockTower(type)`
-  - `placeBasicTower(x, z)`, `spawnEnemy(type)`
-  - `getPathfindingPerf()` to inspect pathfinding timing/cache counters
-  - `setForceTouchControls(bool)` for mobile UI testing on desktop
-
-### Quick Validation Notes
-- `node --check` is useful for fast syntax checks on edited files, but it is not a full runtime validation.
-- Primary workflow checks are `npm run dev` for local runtime and `npm run build` for production bundling.
-
-### Terrain Collision Seam + Edge Egress (Latest, Override)
-- Raised terrain (`grid.heightObstacles`) now carries optional per-obstacle support metadata:
-  - `topInsetFromRadius` is supported by player movement checks.
-  - Terrain blocks set `topInsetFromRadius: 0` in `grid.js` so adjacent raised cells are continuously walkable with no support seam gap.
-- Ramp movement support now comes through `grid.rampObstacles`:
-  - Ramps expose `kind: "ramp"` + `getSurfaceYAtWorld(x, z)` for slope support checks.
-  - Player uses ramp-specific side-face collision (oriented along/across checks) so ramp vertical sides block movement.
-  - Ramp side collision is entry-sensitive (uses previous-frame lateral position) to prevent side tunneling while preserving smooth on-ramp traversal.
-- Small ledge auto-step support:
-  - `player.collision.stepUpHeight` allows stepping up short lips without jumping (terrain-style obstacles only).
-  - Used to smooth ramp-to-top transitions where side collision would otherwise snag.
-- Player top-support resolution is now obstacle-aware:
-  - In `player.js:getSupportCameraYAtPosition(...)`, support inset uses:
-    - obstacle override when `obstacle.topInsetFromRadius` is finite.
-    - fallback to `player.collision.towerTopInsetFromRadius` for towers/legacy obstacles.
-  - Support bounds include `player.collision.supportEdgeEpsilon` to avoid floating-point boundary misses at block edges.
-- Important distinction (do not regress):
-  - Top support logic and horizontal side-collision logic are separate.
-  - Fixing seam support alone can still create small edge depenetration pops when stepping off terrain lips.
-- Terrain step-off smoothing (latest behavior):
-  - `player.collision.terrainEdgeSideCollisionGrace` defines a shallow vertical band near terrain tops where side push is ignored for terrain obstacles only.
-  - Terrain-only detection is keyed from `topInsetFromRadius <= 0` (current terrain obstacle contract).
-  - This keeps tower side collision behavior unchanged while removing the noticeable micro-teleport on terrain edge egress.
-- Current collision tuning values in config:
-  - `supportEdgeEpsilon: 1e-4`
-  - `terrainEdgeSideCollisionGrace: 0.12`
-  - `stepUpHeight: 0.35`
-- If edge feel tuning is needed later:
-  - Reduce `terrainEdgeSideCollisionGrace` for stronger edge blocking.
-  - Increase it for smoother step-off with less side-pop.
-
-### Dynamic Enemy Pathfinding + Grid Build Blocking (Latest, Override)
-- Path-following via `grid.pathWaypoints` was removed.
-- Level data is now sparse object JSON in config (`GAME_CONFIG.grid.levelObjects`), not ASCII rows.
-  - Entry schema: `{ type, position: { x, y, z }, rotation }`
-  - Supported `type`: `wall`, `spawn`, `end`, `playerSpawn`, `ramp` (`path` still allowed as visual-only legacy marker).
-  - Ramp rotation contract (low->high): `0 => +Z`, `90 => +X`, `180 => -Z`, `270 => -X`.
-  - Ramp anchor position is the **low-end** cell.
-- `createGrid(scene)` now exposes marker-centric data:
-  - `spawnCells[]`, `endCell`, `playerSpawnCell`
-  - `getCellHeight(cellX, cellZ)`, `getCellSurfaceY(cellX, cellZ)`, `isCellInsideLevel(cellX, cellZ)`
-  - `isCellBuildable(cellX, cellZ)` returns false for ramp cells.
-  - `isRampCell(cellX, cellZ)` / `getRampCellData(cellX, cellZ)` expose ramp occupancy + connectivity metadata.
-  - `rampObstacles[]` exposes ramp movement/surface helpers for player collision support.
-  - `endpointObstacles[]` exposes spawn/end marker cubes as wall-like collision blocks for player movement/projectile collision only.
-  - `worldToCell(...)` / `cellToWorldCenter(...)` still drive build snap + navigation.
-- Collision scope contract for endpoints:
-  - `main.js:getMovementObstacles()` includes `grid.endpointObstacles` so player movement collides with `spawn`/`end` like terrain blocks.
-  - Keep endpoint cubes out of `grid.heightObstacles` so tower LOS/build-surface raycast behavior remains unchanged.
-- Enemy movement is now navigation-graph based in `enemies.js`:
-  - Cardinal neighbors only (no diagonals), so no corner cutting.
-  - Height rule for normal cells: neighbors are traversable only when `getCellHeight` is exactly equal (no wall climbing).
-  - Ramp rule: enemies can only enter/exit ramps from valid forward/backward ends, never from ramp sides; they must traverse full ramp cells.
-  - Pathfinding performance architecture (latest):
-    - A static per-cell navigation graph is prebuilt once (outgoing + incoming adjacency).
-    - Blocker validation uses a single reverse distance-field rebuild from `end` (`canBlockCell` simulates one extra blocked node).
-    - `canBlockCell` results are memoized per candidate cell and invalidated when blocked revision changes.
-    - `setBlockedCells` commits blockers only after one reachability rebuild confirms every spawn is still connected.
-  - Route variety is now two-stage:
-    - Stage A (sync): route index `0` (shortest) is rebuilt immediately for each spawn.
-    - Stage B (async): extra variants are built incrementally each frame under `GAME_CONFIG.enemies.pathVariantBuildBudgetMs`.
-    - `GAME_CONFIG.enemies.pathCandidatePoolSize` now acts as per-spawn adaptive variant attempt budget (not Yen candidate pool size).
-  - Spawn alternation is round-robin across `spawnCells` per wave (`0,1,0,1...`), reset on `startWave`.
-  - Endpoint behavior: enemies despawn only once their full body is inside the end cube volume.
-  - Enemies still do **not** collide with each other.
-  - Enemy visuals now pitch from front/back bottom contact sampling while preserving yaw facing.
-  - Ramp tilt is contact-gated (`frontOnRamp || backOnRamp`) so cubes stay flat until a body end is actually on the ramp.
-  - Pitch angle uses `asin(surfaceDelta / bodyLength)` + vertical offset correction so bottoms scrape ramps cleanly through entry/exit transitions.
-  - `GAME_CONFIG.enemies.hoverHeight` adds a uniform visual hover gap above both flat and ramp surfaces.
-  - Enemy world Y now samples `grid.getBuildSurfaceYAtWorld(x, z)` during movement so body offset above surface stays consistent on ramps/crests and at ramp exits.
-- Tower placement is grid-snapped in `towers.js`:
-  - Preview and placement snap to the hovered cell center.
-  - One tower per cell (`cellX/cellZ` stored on tower entries).
-  - `S`/`E` cells are reserved and cannot be built on.
-  - Ramp cells are non-buildable via `grid.isCellBuildable(...)`.
-  - Towers can still be built on raised terrain/wall blocks.
-- Path blocking contract between towers and enemies:
-  - `enemySystem.canBlockCell(cellX, cellZ)` validates that **every** spawn still has a route to `E`.
-  - `enemySystem.setBlockedCells(cells)` applies tower blockers and immediately reroutes active enemies.
-  - `enemySystem.getBlockedRevision()` increments when blocked tower cells change.
-  - `enemySystem.getRoutePreviewPaths()` exposes current per-spawn route pools for build-phase route-trail rendering.
-  - `enemySystem.getPathfindingPerfStats()` exposes timing/cache counters for manual perf checks.
-  - `createTowerSystem(...)` now accepts callbacks:
-    - `canBlockCell`
-    - `getBlockedRevision`
-    - `onBlockedCellsChanged`
-- Tower build preview path-checking contract (latest):
-  - `towers.js` caches path-block validity by `(cellX, cellZ, blockedRevision)` to avoid repeated checks while hovering the same cell.
-  - Placement click no longer performs a second redundant `isPlacementValid(...)` pass after `updatePreviewFromCamera()`.
-- Reroute mode decision:
-  - Active enemies reroute immediately after each blocker change (mid-run, no waiting for next cell).
-- Build-phase path preview contract:
-  - Route preview visuals render only during `BUILD` as small moving arrow meshes.
-  - Preview uses only the single most optimal route per spawn (`routeIndex === 0` from `enemySystem.getRoutePreviewPaths()`).
-  - Arrows are spaced by roughly two grid blocks and move start->end at higher speed (1.5x faster than previous arrow tune).
-  - Arrows are pre-distributed across each route when build phase starts (no warmup from spawn point only).
-  - Arrow height is around enemy cube center height (`enemyPathYOffset + bodyYOffset + size/2`) with slight per-arrow vertical jitter.
-  - Preview refreshes when entering build phase and after tower blocker changes during build.
-- Level containment:
-  - Player movement is clamped to level bounds in `player.js` via `movementBounds`.
-  - This acts as an infinite-height invisible wall in X/Z (jetpack cannot bypass map bounds).
-  - A visual-only holodeck boundary overlay now exists in `grid.js`:
-    - `grid.updateBoundaryWallVisual(playerPosition)` updates a faint transparent grid effect near boundaries.
-    - Full perimeter wall grids remain static in world space; only reveal masking changes with player movement.
-    - Reveal patch is circular (wall-plane circle), centered from player projection onto each wall.
-    - Circle center now tracks the camera/player world position directly on each wall projection (no radius-based center clamping).
-    - Only the 4 vertical perimeter walls are rendered (no ceiling/floor shell).
-    - Reveal is proximity-based with config-driven fade (`GAME_CONFIG.grid.boundaryWall`); pulse controls were removed.
-    - Boundary grid lines are rendered as mesh strips (not `LineSegments`) so `boundaryWall.lineThickness` visibly works across WebGL platforms.
-    - Wall visibility uses shader mask uniforms; `diameter` controls circular reveal size and `patchFeather` controls edge softness.
-    - Boundary wall visual height is auto-derived from terrain + player vertical mobility (jump/jetpack), not config-driven `height`.
-    - Wall material ignores scene fog so `maxOpacity`/color remain readable on bright white scenes.
-    - `boundaryWall.color` is config-driven; use high-contrast values against the bright floor/background.
-    - Collision/containment remains clamp-only in `player.js`; boundary visuals must not change physics.
-  - Enemy routing is level-cell bounded, so enemies cannot leave the level either.
-
-### Level Editor Mode (Latest, Override)
-- Desktop-only editor mode is toggled with `N` in `main.js` (`waveState === "EDITOR"`).
-- Entering editor:
-  - tears down tower/enemy systems, removes active enemies, and stops pending spawns.
-  - rebuilds grid with `createGrid(scene, { levelObjects, allowIncompleteMarkers: true, editorMode: true })`.
-  - disables tower build tray/actions (editor uses dedicated tools instead).
-- Editor controls:
-  - `1` eraser, `2` wall, `3` spawn, `4` end, `5` ramp, `6` playerSpawn.
-  - `Enter` and desktop LMB (while pointer lock is active) apply the current tool.
-  - Mouse wheel rotates the selected rotatable tool in 90-degree steps (`ramp` and `playerSpawn`).
-  - Editor tool selection is mirrored in the bottom tray (same slot UI as towers) with dedicated editor icon IDs and hotkeys `1..6`.
-- Editor mutation model lives in `src/levelEditor.js` and is rebuilt back into grid objects after each change.
-  - Wall editing is sparse voxel based (exact `(x,y,z)` add/remove), not column-trim based.
-  - Editor apply action now re-samples the placement candidate at click/Enter time (not only previous-frame cache) so wheel-rotations/tool/aim changes never apply one-frame stale placement data.
-  - Eraser removes the directly hit object (inside target), not an adjacent placement cell.
-  - `end` and `playerSpawn` are unique markers (new placement replaces old); `spawn` is multi-place.
-  - `playerSpawn` keeps/exports cardinal `rotation` (0/90/180/270) and supports in-place rotation edits on the same cell.
-  - Player-spawn preview facing arrow uses pre-rotated cone geometry + yaw-only mesh rotation; do not combine X+Y Euler rotation on the mesh for facing because it can make wheel yaw look unchanged.
-  - Ramps are anchored at their low cell with 0/90/180/270 rotations and cannot overlap ramp-occupied cells or walls.
-  - Voxel preview center uses `y + 0.5` cell height so editor preview aligns exactly with placed cube centers (fixes half-block vertical offset).
-  - Ramp preview uses a wedge mesh positioned at the ramp low-base world `y` (not cube-center averaging), matching runtime ramp placement transform.
-- Grid/editor data model updates:
-  - `createGrid(scene, options)` supports `levelObjects`, `allowIncompleteMarkers`, and `editorMode`.
-  - Grid now tracks explicit sparse wall voxels and marker `y` values (`spawn/end/playerSpawn`) in runtime/export state.
-  - `grid.getEditorRaycastTargets()` exposes editor-hit meshes; `grid.getLevelObjects()` returns normalized export objects; `grid.dispose()` tears down all grid-owned scene resources.
-  - In editor mode only, `playerSpawn` is rendered as a green transparent marker cube with a forward arrow indicator that reflects marker rotation.
-- Marker `y` semantics are authoritative:
-  - Marker positions keep explicit `y` in level objects and runtime grid state.
-  - Enemy system validates spawn/end markers at init: marker `y` must equal traversable surface level (`grid.getCellHeight(x,z)`), otherwise enemy init fails with explicit error.
-- Player spawn facing contract (latest):
-  - Runtime spawn camera facing now uses `playerSpawn.rotation` cardinal mapping from level data (`0 => +Z`, `90 => +X`, `180 => -Z`, `270 => -X`) instead of always looking toward world origin.
-  - This mapping must match editor preview/marker facing arrows so exported/imported levels keep identical spawn-facing behavior.
-- Editor path preview:
-  - Build-style route arrows are reused in editor mode.
-  - Preview is rebuilt from a temporary enemy-system init after each edit.
-  - If marker/path validation fails, preview arrows are cleared.
-- Exiting editor with `N`:
-  - validates playability by initializing enemy/path system on edited level.
-  - invalid level: stay in editor and log clear warning reason.
-  - valid level: rebuild gameplay grid (`allowIncompleteMarkers: false`, `editorMode: false`), recreate tower/enemy systems, reset run state, and restart at build phase wave 1.
-- Global export API:
-  - `window.exportLevel()` returns `[...]`.
-  - While editor is active it returns editor model payload; otherwise it exports from current gameplay grid.
-  - Intended workflow: `copy(JSON.stringify(window.exportLevel()))`.
-
-### AGENTS.md
-
-Make sure to update AGENTS.md to reflect any important changes that you need to remember for later.
-Not only where things are located and how they work, but also design decissions taken during conversations that aren't directly clear from the code and comments.
+## Maintenance Rule
+- Update this file when introducing cross-system contracts or design decisions that are not obvious from code/comments alone.
