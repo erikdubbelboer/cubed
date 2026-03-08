@@ -133,6 +133,12 @@ const MULTIPLAYER_MESSAGE_TYPE = {
 };
 const MULTIPLAYER_DEBUG = new URLSearchParams(window.location.search).get("mplog") !== "0";
 const MULTIPLAYER_UNRELIABLE_STATS_LOG_INTERVAL_MS = 3000;
+const MAIN_LOOP_MODE_RAF = "raf";
+const MAIN_LOOP_MODE_INTERVAL = "interval";
+const HIDDEN_COOP_INTERVAL_FPS = 60;
+const HIDDEN_COOP_INTERVAL_MS = 1000 / HIDDEN_COOP_INTERVAL_FPS;
+const BACKGROUND_KEEPALIVE_FREQUENCY_HZ = 20000;
+const BACKGROUND_KEEPALIVE_GAIN = 0.001;
 
 function mpLog(message, details) {
   if (!MULTIPLAYER_DEBUG) {
@@ -1472,6 +1478,16 @@ const clock = new THREE.Clock();
 let isPaused = false;
 let manualPauseRequested = false;
 let gameSpeedMultiplier = GAME_SPEED_NORMAL;
+let mainLoopStarted = false;
+let mainLoopMode = MAIN_LOOP_MODE_RAF;
+let mainLoopRafId = null;
+let mainLoopIntervalId = null;
+let hasGlobalUserGesture = false;
+let backgroundAudioContext = null;
+let backgroundAudioGainNode = null;
+let backgroundKeepAliveOscillatorA = null;
+let backgroundKeepAliveOscillatorB = null;
+let backgroundKeepAliveRunning = false;
 let suppressNextDesktopCanvasClick = false;
 let pokiIntegrationDisabled = false;
 let pokiLoadingFinishedReported = false;
@@ -1563,8 +1579,136 @@ function syncPokiGameplayState() {
   callPokiSdkMethod(shouldReportActive ? "gameplayStart" : "gameplayStop");
 }
 
-window.addEventListener("pointerdown", markPokiUserInteraction, { capture: true, passive: true });
-window.addEventListener("click", markPokiUserInteraction, { capture: true, passive: true });
+function isBackgroundKeepAliveRequired() {
+  return isMultiplayerWithPeer();
+}
+
+function ensureBackgroundAudioContext() {
+  if (backgroundAudioContext) {
+    return backgroundAudioContext;
+  }
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (typeof AudioContextCtor !== "function") {
+    return null;
+  }
+  try {
+    backgroundAudioContext = new AudioContextCtor();
+  } catch (error) {
+    mpWarn("Failed to create background audio context", error);
+    backgroundAudioContext = null;
+  }
+  return backgroundAudioContext;
+}
+
+function ensureBackgroundAudioGainNode(audioContext) {
+  if (!audioContext) {
+    return null;
+  }
+  if (backgroundAudioGainNode) {
+    return backgroundAudioGainNode;
+  }
+  const gainNode = audioContext.createGain();
+  gainNode.gain.setValueAtTime(BACKGROUND_KEEPALIVE_GAIN, audioContext.currentTime);
+  gainNode.connect(audioContext.destination);
+  backgroundAudioGainNode = gainNode;
+  return backgroundAudioGainNode;
+}
+
+function stopBackgroundKeepAliveOscillators() {
+  const oscillators = [backgroundKeepAliveOscillatorA, backgroundKeepAliveOscillatorB];
+  for (const oscillator of oscillators) {
+    if (!oscillator) {
+      continue;
+    }
+    try {
+      oscillator.stop();
+    } catch {
+      // Ignore stop races if already stopped.
+    }
+    try {
+      oscillator.disconnect();
+    } catch {
+      // Ignore disconnect races during teardown.
+    }
+  }
+  backgroundKeepAliveOscillatorA = null;
+  backgroundKeepAliveOscillatorB = null;
+  backgroundKeepAliveRunning = false;
+}
+
+function startBackgroundKeepAliveOscillators(audioContext) {
+  if (!audioContext || backgroundKeepAliveRunning) {
+    return;
+  }
+  const gainNode = ensureBackgroundAudioGainNode(audioContext);
+  if (!gainNode) {
+    return;
+  }
+  const oscillatorA = audioContext.createOscillator();
+  oscillatorA.type = "sine";
+  oscillatorA.frequency.setValueAtTime(BACKGROUND_KEEPALIVE_FREQUENCY_HZ, audioContext.currentTime);
+  oscillatorA.connect(gainNode);
+  oscillatorA.start();
+
+  const oscillatorB = audioContext.createOscillator();
+  oscillatorB.type = "sine";
+  oscillatorB.frequency.setValueAtTime(BACKGROUND_KEEPALIVE_FREQUENCY_HZ, audioContext.currentTime);
+  oscillatorB.connect(gainNode);
+  oscillatorB.start();
+
+  backgroundKeepAliveOscillatorA = oscillatorA;
+  backgroundKeepAliveOscillatorB = oscillatorB;
+  backgroundKeepAliveRunning = true;
+}
+
+function refreshBackgroundKeepAlive() {
+  if (!isBackgroundKeepAliveRequired()) {
+    stopBackgroundKeepAliveOscillators();
+    return;
+  }
+  if (!hasGlobalUserGesture) {
+    return;
+  }
+  const audioContext = ensureBackgroundAudioContext();
+  if (!audioContext) {
+    return;
+  }
+  if (audioContext.state !== "running") {
+    stopBackgroundKeepAliveOscillators();
+    return;
+  }
+  startBackgroundKeepAliveOscillators(audioContext);
+}
+
+function unlockBackgroundAudioContextFromGesture() {
+  hasGlobalUserGesture = true;
+  const audioContext = ensureBackgroundAudioContext();
+  if (!audioContext) {
+    return;
+  }
+  const finalize = () => {
+    refreshBackgroundKeepAlive();
+    refreshMainLoopMode();
+  };
+  if (audioContext.state === "running") {
+    finalize();
+    return;
+  }
+  const resumeResult = typeof audioContext.resume === "function" ? audioContext.resume() : null;
+  if (resumeResult && typeof resumeResult.then === "function") {
+    resumeResult.then(finalize).catch(() => {});
+    return;
+  }
+  finalize();
+}
+
+function handleGlobalUserInteraction() {
+  markPokiUserInteraction();
+  unlockBackgroundAudioContextFromGesture();
+}
+
+window.addEventListener("pointerdown", handleGlobalUserInteraction, { capture: true, passive: true });
+window.addEventListener("click", handleGlobalUserInteraction, { capture: true, passive: true });
 initPokiSdkEarly();
 
 function getAutoPauseRequested() {
@@ -2127,9 +2271,15 @@ function handleHudButtonAction(buttonId) {
   return false;
 }
 
-document.addEventListener("visibilitychange", updatePauseState);
-window.addEventListener("blur", updatePauseState);
-window.addEventListener("focus", updatePauseState);
+function handleVisibilityOrFocusChange() {
+  updatePauseState();
+  refreshBackgroundKeepAlive();
+  refreshMainLoopMode();
+}
+
+document.addEventListener("visibilitychange", handleVisibilityOrFocusChange);
+window.addEventListener("blur", handleVisibilityOrFocusChange);
+window.addEventListener("focus", handleVisibilityOrFocusChange);
 updatePauseState();
 
 document.addEventListener("contextmenu", (event) => {
@@ -4504,6 +4654,9 @@ function handleHostEndedSession() {
   currentMenuTitle = "Session Ended";
   currentMenuSubtitle = "Host left the match";
   currentWeaponOptions = [];
+  stopBackgroundKeepAliveOscillators();
+  refreshBackgroundKeepAlive();
+  refreshMainLoopMode();
 }
 
 function notifyPeersHostEndedSession() {
@@ -4777,6 +4930,8 @@ function handleMultiplayerLobbyChanged() {
     mpLog("Host entered lobby and is broadcasting initial state sync");
     broadcastHostStateSync(true);
   }
+  refreshBackgroundKeepAlive();
+  refreshMainLoopMode();
 }
 
 function handleMultiplayerLeftLobby() {
@@ -4790,6 +4945,8 @@ function handleMultiplayerLeftLobby() {
   towerSystem?.clearAllPeerPreviews?.();
   applyMultiplayerAuthorityForCurrentSystems();
   updateShareOverlayFromLobbyState();
+  refreshBackgroundKeepAlive();
+  refreshMainLoopMode();
 }
 
 function handleMultiplayerPeerConnected(peer) {
@@ -4807,6 +4964,8 @@ function handleMultiplayerPeerConnected(peer) {
     sendHostSnapshotToPeer(peer.id);
     broadcastHostStateSync(true);
   }
+  refreshBackgroundKeepAlive();
+  refreshMainLoopMode();
 }
 
 function handleMultiplayerPeerDisconnected(peer) {
@@ -4817,6 +4976,8 @@ function handleMultiplayerPeerDisconnected(peer) {
     towerSystem?.clearPeerPreview?.(peer.id);
   }
   applyMultiplayerAuthorityForCurrentSystems();
+  refreshBackgroundKeepAlive();
+  refreshMainLoopMode();
   if (isMultiplayerHost()) {
     broadcastHostStateSync(true);
     return;
@@ -5464,7 +5625,7 @@ function startWave(wave) {
   enemySystem.startWave({ red: redCount, blue: blueCount });
 }
 
-function animate() {
+function runGameFrame({ renderFrame = true } = {}) {
   const rawDeltaSeconds = clock.getDelta();
   const simulationDeltaSeconds = rawDeltaSeconds * gameSpeedMultiplier;
   if (rawDeltaSeconds > 0 && Number.isFinite(rawDeltaSeconds)) {
@@ -5520,7 +5681,7 @@ function animate() {
     }
   }
 
-  if (typeof grid.updateBoundaryWallVisual === "function") {
+  if (renderFrame && typeof grid.updateBoundaryWallVisual === "function") {
     grid.updateBoundaryWallVisual(camera.position);
   }
 
@@ -5558,6 +5719,10 @@ function animate() {
 
   flushUnreliableMultiplayerStatsLog(false);
   updateSellHoldFromAim(rawDeltaSeconds);
+
+  if (!renderFrame) {
+    return;
+  }
 
   const towerInventory = waveState === "EDITOR"
     ? EDITOR_TOOL_INVENTORY.map((entry) => ({
@@ -5660,7 +5825,98 @@ function animate() {
   renderer.render(scene, camera);
   renderer.clearDepth();
   renderer.render(uiOverlay.scene, uiOverlay.camera);
-  requestAnimationFrame(animate);
+}
+
+function shouldUseHiddenIntervalLoop() {
+  return document.visibilityState === "hidden" && isMultiplayerWithPeer();
+}
+
+function cancelMainLoopRaf() {
+  if (mainLoopRafId == null) {
+    return;
+  }
+  window.cancelAnimationFrame(mainLoopRafId);
+  mainLoopRafId = null;
+}
+
+function cancelMainLoopInterval() {
+  if (mainLoopIntervalId == null) {
+    return;
+  }
+  window.clearInterval(mainLoopIntervalId);
+  mainLoopIntervalId = null;
+}
+
+function scheduleMainLoopRaf() {
+  if (!mainLoopStarted || mainLoopMode !== MAIN_LOOP_MODE_RAF || mainLoopRafId != null) {
+    return;
+  }
+  mainLoopRafId = window.requestAnimationFrame(() => {
+    mainLoopRafId = null;
+    if (!mainLoopStarted || mainLoopMode !== MAIN_LOOP_MODE_RAF) {
+      return;
+    }
+    runGameFrame({ renderFrame: true });
+    scheduleMainLoopRaf();
+  });
+}
+
+function startMainLoopInterval() {
+  if (!mainLoopStarted || mainLoopMode !== MAIN_LOOP_MODE_INTERVAL || mainLoopIntervalId != null) {
+    return;
+  }
+  mainLoopIntervalId = window.setInterval(() => {
+    if (!mainLoopStarted || mainLoopMode !== MAIN_LOOP_MODE_INTERVAL) {
+      return;
+    }
+    runGameFrame({ renderFrame: false });
+  }, HIDDEN_COOP_INTERVAL_MS);
+}
+
+function refreshMainLoopMode() {
+  const nextMode = shouldUseHiddenIntervalLoop()
+    ? MAIN_LOOP_MODE_INTERVAL
+    : MAIN_LOOP_MODE_RAF;
+  if (mainLoopMode === nextMode) {
+    if (nextMode === MAIN_LOOP_MODE_RAF) {
+      scheduleMainLoopRaf();
+    } else {
+      startMainLoopInterval();
+    }
+    return;
+  }
+
+  mainLoopMode = nextMode;
+  clock.getDelta();
+  if (nextMode === MAIN_LOOP_MODE_INTERVAL) {
+    cancelMainLoopRaf();
+    startMainLoopInterval();
+    return;
+  }
+  cancelMainLoopInterval();
+  scheduleMainLoopRaf();
+}
+
+function stopMainLoop() {
+  mainLoopStarted = false;
+  cancelMainLoopRaf();
+  cancelMainLoopInterval();
+}
+
+function startMainLoop() {
+  if (mainLoopStarted) {
+    return;
+  }
+  mainLoopStarted = true;
+  mainLoopMode = shouldUseHiddenIntervalLoop()
+    ? MAIN_LOOP_MODE_INTERVAL
+    : MAIN_LOOP_MODE_RAF;
+  clock.getDelta();
+  if (mainLoopMode === MAIN_LOOP_MODE_INTERVAL) {
+    startMainLoopInterval();
+    return;
+  }
+  scheduleMainLoopRaf();
 }
 
 // Start game
@@ -5774,11 +6030,14 @@ function initGame() {
   resetRunStateForNewLevel();
   showWeaponSelectionMenu();
   reportPokiGameLoadingFinished();
-  animate();
+  refreshBackgroundKeepAlive();
+  startMainLoop();
 }
 
 window.addEventListener("beforeunload", () => {
   notifyPeersHostEndedSession();
+  stopBackgroundKeepAliveOscillators();
+  stopMainLoop();
 });
 
 initGame();

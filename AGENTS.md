@@ -29,6 +29,10 @@ Capture project decisions that are easy to regress but not always obvious from l
   - Host death events spawn drops for both clients; each client collects into its own money total.
 - Remote player is visual-only and must not be included in movement collision obstacles.
 - Co-op tech selection is non-pausing (local modal while simulation continues).
+- Co-op hidden-tab resilience:
+  - Main loop runs with `requestAnimationFrame` while visible and a `setInterval(1000/60)` fallback while hidden and connected to a peer.
+  - Hidden fallback is simulation/network only (no overlay or renderer passes).
+  - Keepalive audio oscillators are gesture-gated and run only during active co-op sessions to reduce hidden-tab timer throttling.
 
 ## Economy + Upgrade Rules
 - Money state lives in `main.js` (`playerMoney`) and starts from `GAME_CONFIG.economy.startingCash`.
