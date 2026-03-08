@@ -139,6 +139,8 @@ const HIDDEN_COOP_INTERVAL_FPS = 60;
 const HIDDEN_COOP_INTERVAL_MS = 1000 / HIDDEN_COOP_INTERVAL_FPS;
 const BACKGROUND_KEEPALIVE_FREQUENCY_HZ = 20000;
 const BACKGROUND_KEEPALIVE_GAIN = 0.001;
+const HOST_LOBBY_TOAST_VISIBLE_MS = 2200;
+const HOST_LOBBY_TOAST_FADE_MS = 180;
 
 function mpLog(message, details) {
   if (!MULTIPLAYER_DEBUG) {
@@ -689,6 +691,21 @@ function createShareOverlayUi() {
   root.style.gap = "8px";
   root.style.pointerEvents = "auto";
 
+  const hostToast = document.createElement("div");
+  hostToast.style.display = "none";
+  hostToast.style.alignSelf = "flex-start";
+  hostToast.style.padding = "6px 10px";
+  hostToast.style.borderRadius = "999px";
+  hostToast.style.border = "1px solid rgba(255,255,255,0.2)";
+  hostToast.style.background = "rgba(16,16,16,0.8)";
+  hostToast.style.color = "rgba(244,244,244,0.95)";
+  hostToast.style.font = "500 12px system-ui, sans-serif";
+  hostToast.style.pointerEvents = "none";
+  hostToast.style.opacity = "0";
+  hostToast.style.transition = `opacity ${HOST_LOBBY_TOAST_FADE_MS}ms ease`;
+  hostToast.style.maxWidth = "min(420px, calc(100vw - 24px))";
+  root.appendChild(hostToast);
+
   const shareButton = document.createElement("button");
   shareButton.type = "button";
   shareButton.textContent = "Share";
@@ -741,6 +758,7 @@ function createShareOverlayUi() {
 
   return {
     root,
+    hostToast,
     shareButton,
     panel,
     linkInput,
@@ -749,6 +767,56 @@ function createShareOverlayUi() {
 }
 
 const shareOverlayUi = createShareOverlayUi();
+let hostLobbyToastHideTimeoutId = null;
+let hostLobbyToastFadeTimeoutId = null;
+
+function clearHostLobbyToastTimers() {
+  if (hostLobbyToastHideTimeoutId != null) {
+    window.clearTimeout(hostLobbyToastHideTimeoutId);
+    hostLobbyToastHideTimeoutId = null;
+  }
+  if (hostLobbyToastFadeTimeoutId != null) {
+    window.clearTimeout(hostLobbyToastFadeTimeoutId);
+    hostLobbyToastFadeTimeoutId = null;
+  }
+}
+
+function hideHostLobbyToast({ immediate = false } = {}) {
+  clearHostLobbyToastTimers();
+  const toast = shareOverlayUi.hostToast;
+  toast.style.opacity = "0";
+  if (immediate) {
+    toast.style.display = "none";
+    return;
+  }
+  hostLobbyToastFadeTimeoutId = window.setTimeout(() => {
+    toast.style.display = "none";
+    hostLobbyToastFadeTimeoutId = null;
+  }, HOST_LOBBY_TOAST_FADE_MS + 24);
+}
+
+function showHostLobbyToast(message) {
+  const text = typeof message === "string" ? message.trim() : "";
+  if (!text) {
+    return;
+  }
+  clearHostLobbyToastTimers();
+  const toast = shareOverlayUi.hostToast;
+  toast.textContent = text;
+  toast.style.display = "inline-flex";
+  toast.style.opacity = "0";
+  // Force a reflow so repeated updates still animate opacity.
+  void toast.offsetWidth;
+  toast.style.opacity = "1";
+  hostLobbyToastHideTimeoutId = window.setTimeout(() => {
+    toast.style.opacity = "0";
+    hostLobbyToastHideTimeoutId = null;
+    hostLobbyToastFadeTimeoutId = window.setTimeout(() => {
+      toast.style.display = "none";
+      hostLobbyToastFadeTimeoutId = null;
+    }, HOST_LOBBY_TOAST_FADE_MS + 24);
+  }, HOST_LOBBY_TOAST_VISIBLE_MS);
+}
 
 const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
 
@@ -1400,10 +1468,21 @@ mpLog("Multiplayer logging active", {
 
 function updateShareOverlayFromLobbyState() {
   const state = getMultiplayerState();
+  const showShareControls = !state.inLobby || (state.isHost && Number(state.peerCount) <= 0);
+  shareOverlayUi.shareButton.style.display = showShareControls ? "inline-flex" : "none";
+  if (!state.inLobby || !state.isHost) {
+    hideHostLobbyToast({ immediate: true });
+  }
+  if (!showShareControls) {
+    shareOverlayUi.panel.style.display = "none";
+    shareOverlayUi.linkInput.value = "";
+    mpLog("Share overlay hidden by lobby state", summarizeMultiplayerStateForLog(state));
+    return;
+  }
   if (!state.inLobby || !state.lobbyCode) {
     shareOverlayUi.panel.style.display = "none";
     shareOverlayUi.linkInput.value = "";
-    mpLog("Share overlay hidden (not in lobby)");
+    mpLog("Share overlay reset (no lobby code)");
     return;
   }
   const shareUrl = getLobbyShareUrl(state.lobbyCode);
@@ -4951,16 +5030,21 @@ function handleMultiplayerLeftLobby() {
 
 function handleMultiplayerPeerConnected(peer) {
   mpLog("Peer connected", { peerId: peer?.id || null, state: summarizeMultiplayerStateForLog(getMultiplayerState()) });
+  const hostNow = isMultiplayerHost();
   if (peer?.id) {
     ensureRemotePlayerEntry(peer.id);
   }
   applyMultiplayerAuthorityForCurrentSystems();
-  if (isMultiplayerHost() && isPaused) {
+  if (hostNow) {
+    updateShareOverlayFromLobbyState();
+    showHostLobbyToast("Player joined");
+  }
+  if (hostNow && isPaused) {
     manualPauseRequested = false;
     applyPausedState(false);
     mpLog("Host auto-unpaused due peer join", { peerId: peer?.id || null });
   }
-  if (isMultiplayerHost() && peer?.id) {
+  if (hostNow && peer?.id) {
     sendHostSnapshotToPeer(peer.id);
     broadcastHostStateSync(true);
   }
@@ -4970,15 +5054,20 @@ function handleMultiplayerPeerConnected(peer) {
 
 function handleMultiplayerPeerDisconnected(peer) {
   mpWarn("Peer disconnected", { peerId: peer?.id || null, state: summarizeMultiplayerStateForLog(getMultiplayerState()) });
+  const hostNow = isMultiplayerHost();
   if (peer?.id) {
     disposeRemotePlayerEntry(peer.id);
     clearRemoteWeaponEffectsForPeer(peer.id);
     towerSystem?.clearPeerPreview?.(peer.id);
   }
   applyMultiplayerAuthorityForCurrentSystems();
+  if (hostNow) {
+    updateShareOverlayFromLobbyState();
+    showHostLobbyToast("Player left");
+  }
   refreshBackgroundKeepAlive();
   refreshMainLoopMode();
-  if (isMultiplayerHost()) {
+  if (hostNow) {
     broadcastHostStateSync(true);
     return;
   }

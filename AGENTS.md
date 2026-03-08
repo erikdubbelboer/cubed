@@ -21,6 +21,10 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Leave behavior:
   - Guest leaves: host continues solo and scaling returns to `1x`.
   - Host leaves: guest session terminates (`host_ended`/disconnect).
+- Share UI contract:
+  - Share controls are host-only while in a lobby.
+  - Host share controls are hidden while any peer is connected (`peerCount > 0`) and reappear when solo.
+  - Host receives subtle, non-blocking join/leave toasts (`Player joined` / `Player left`).
 - Ownership model:
   - Money, weapon choice, and tech progression are per-player.
   - Tower placements carry `ownerId`; owner-scoped tech applies only to that owner's towers.
