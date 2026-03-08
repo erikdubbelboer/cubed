@@ -1207,11 +1207,13 @@ const mobileInput = {
   lookOriginY: 0,
   pressedButtons: {
     primary: false,
+    primaryAlt: false,
     jump: false,
     cancel: false,
   },
   buttonPointerIds: {
     primary: null,
+    primaryAlt: null,
     jump: null,
     cancel: null,
   },
@@ -2150,9 +2152,11 @@ function resetMobileInputState() {
   mobileInput.lookOriginX = 0;
   mobileInput.lookOriginY = 0;
   mobileInput.pressedButtons.primary = false;
+  mobileInput.pressedButtons.primaryAlt = false;
   mobileInput.pressedButtons.jump = false;
   mobileInput.pressedButtons.cancel = false;
   mobileInput.buttonPointerIds.primary = null;
+  mobileInput.buttonPointerIds.primaryAlt = null;
   mobileInput.buttonPointerIds.jump = null;
   mobileInput.buttonPointerIds.cancel = null;
   mobileInput.previousPrimaryPressed = false;
@@ -2169,13 +2173,13 @@ function resetMobileInputState() {
 }
 
 function releaseMobileButtonPointer(pointerId) {
-  for (const action of ["primary", "jump", "cancel"]) {
+  for (const action of ["primary", "primaryAlt", "jump", "cancel"]) {
     if (mobileInput.buttonPointerIds[action] !== pointerId) {
       continue;
     }
     mobileInput.buttonPointerIds[action] = null;
     mobileInput.pressedButtons[action] = false;
-    if (action === "primary") {
+    if (action === "primary" || action === "primaryAlt") {
       mobileInput.pendingBuildConfirm = false;
       mobileInput.suppressPrimaryFireUntilRelease = false;
       setPrimaryDownState(false);
@@ -2240,7 +2244,7 @@ function applyMobileGameplayInput() {
     player.setJumpHeld(mobileInput.pressedButtons.jump);
   }
 
-  const primaryPressed = !!mobileInput.pressedButtons.primary;
+  const primaryPressed = !!(mobileInput.pressedButtons.primary || mobileInput.pressedButtons.primaryAlt);
   if (towerSystem.isBuildMode()) {
     setPrimaryDownState(false);
     if (
@@ -2522,7 +2526,7 @@ if (isTouchDevice) {
     if (touchedAction) {
       mobileInput.buttonPointerIds[touchedAction] = event.pointerId;
       mobileInput.pressedButtons[touchedAction] = true;
-      if (touchedAction === "primary") {
+      if (touchedAction === "primary" || touchedAction === "primaryAlt") {
         if (towerSystem.isBuildMode()) {
           mobileInput.pendingBuildConfirm = true;
           mobileInput.suppressPrimaryFireUntilRelease = true;

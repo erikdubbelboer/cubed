@@ -73,6 +73,8 @@ export const GAME_CONFIG = {
       edgeMarginPx: 18,
       // Bottom offset for controls in pixels.
       controlBottomOffsetPx: 26,
+      // Additional upward offset for the move joystick center in pixels.
+      movePadVerticalOffsetPx: 104,
       // Multiplier applied to move stick activation radius.
       moveStickActivationScale: 1.45,
       // Top padding for look input zone in pixels.

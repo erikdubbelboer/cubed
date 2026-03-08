@@ -8,6 +8,7 @@ const MOBILE_UI_DEFAULTS = {
   cancelButtonSizePx: 56,
   edgeMarginPx: 18,
   controlBottomOffsetPx: 26,
+  movePadVerticalOffsetPx: 104,
   moveStickActivationScale: 1.45,
   lookZoneTopPaddingPx: 108,
 };
@@ -1012,6 +1013,7 @@ export function createUiOverlay({
     movePadCenterY: null,
     pressedActions: {
       primary: false,
+      primaryAlt: false,
       jump: false,
       cancel: false,
     },
@@ -1176,6 +1178,7 @@ export function createUiOverlay({
     if (partialState.pressedActions && typeof partialState.pressedActions === "object") {
       state.pressedActions = {
         primary: !!partialState.pressedActions.primary,
+        primaryAlt: !!partialState.pressedActions.primaryAlt,
         jump: !!partialState.pressedActions.jump,
         cancel: !!partialState.pressedActions.cancel,
       };
@@ -1991,8 +1994,14 @@ export function createUiOverlay({
       movePadActivationRadius + 6,
       viewportWidth - movePadActivationRadius - 6
     );
+    const movePadVerticalOffset = clamp(
+      Number(mobileUiConfig.movePadVerticalOffsetPx) || MOBILE_UI_DEFAULTS.movePadVerticalOffsetPx,
+      0,
+      Math.max(0, viewportHeight * 0.45)
+    );
+
     const defaultMovePadCenterY = clamp(
-      viewportHeight - bottomOffset - movePadActivationRadius,
+      viewportHeight - bottomOffset - movePadActivationRadius - movePadVerticalOffset,
       movePadActivationRadius + 6,
       viewportHeight - movePadActivationRadius - 6
     );
@@ -2060,6 +2069,7 @@ export function createUiOverlay({
     );
 
     const primaryRadius = clamp((Number(mobileUiConfig.actionButtonSizePx) || MOBILE_UI_DEFAULTS.actionButtonSizePx) * 0.5, 28, 78);
+    const leftPrimaryRadius = primaryRadius;
     const jumpRadius = clamp((Number(mobileUiConfig.jumpButtonSizePx) || MOBILE_UI_DEFAULTS.jumpButtonSizePx) * 0.5, 22, 62);
     const cancelRadius = clamp((Number(mobileUiConfig.cancelButtonSizePx) || MOBILE_UI_DEFAULTS.cancelButtonSizePx) * 0.5, 16, 44);
 
@@ -2074,6 +2084,12 @@ export function createUiOverlay({
       primaryRadius + 6,
       viewportHeight - primaryRadius - 6
     );
+    const leftPrimaryCenterX = clamp(
+      edgeMargin + leftPrimaryRadius,
+      leftPrimaryRadius + 6,
+      viewportWidth - leftPrimaryRadius - 6
+    );
+    const leftPrimaryCenterY = primaryCenterY;
     const jumpCenterX = clamp(
       primaryCenterX - (primaryRadius + jumpRadius + actionGap),
       jumpRadius + 6,
@@ -2105,7 +2121,7 @@ export function createUiOverlay({
       drawCtx.strokeStyle = isPressed ? "rgba(198, 244, 255, 0.98)" : "rgba(163, 218, 255, 0.54)";
       drawCtx.stroke();
 
-      if (action === "primary") {
+      if (action === "primary" || action === "primaryAlt") {
         if (state.buildMode) {
           drawCtx.strokeStyle = "rgba(220, 255, 236, 0.96)";
           drawCtx.lineWidth = Math.max(2, radius * 0.095);
@@ -2170,6 +2186,13 @@ export function createUiOverlay({
       primaryCenterX,
       primaryCenterY,
       primaryRadius,
+      state.buildMode ? "Place" : "Fire"
+    );
+    drawActionButton(
+      "primaryAlt",
+      leftPrimaryCenterX,
+      leftPrimaryCenterY,
+      leftPrimaryRadius,
       state.buildMode ? "Place" : "Fire"
     );
     drawActionButton("jump", jumpCenterX, jumpCenterY, jumpRadius, "Jetpack");
