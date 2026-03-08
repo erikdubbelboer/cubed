@@ -22,6 +22,7 @@ export function createPlayer({
   movementBounds = null,
   getSurfaceYAtWorld = null,
   onPickupRangeTechGrant = null,
+  onWeaponVisualEvent = null,
 }) {
   const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
   const controls = new PointerLockControls(camera, domElement);
@@ -980,6 +981,13 @@ export function createPlayer({
     primaryHeld = nextHeld;
   }
 
+  function emitWeaponVisualEvent(event) {
+    if (typeof onWeaponVisualEvent !== "function" || !event || typeof event !== "object") {
+      return;
+    }
+    onWeaponVisualEvent(event);
+  }
+
   function spawnProjectileFromWeaponType(type) {
     const config = getWeaponConfig(type);
     if (!config) {
@@ -1002,22 +1010,46 @@ export function createPlayer({
     projectileMesh.position.copy(projectileSpawnWorldPos);
     scene.add(projectileMesh);
 
-    projectileVelocity.copy(projectileDirection).multiplyScalar(
-      Math.max(0.01, Number(config.projectileSpeed) || 10)
-    );
+    const projectileSpeed = Math.max(0.01, Number(config.projectileSpeed) || 10);
+    const projectileLifetime = Math.max(0.01, Number(config.projectileLifetime) || 0.5);
+    const projectileGravity = Math.max(0, Number(config.projectileGravity) || 0);
+    const splashRadius = Math.max(0, Number(config.splashRadius) || 0) * getWeaponSplashRadiusMultiplier(type);
+    const explosionDuration = Math.max(0.01, Number(config.explosionDuration) || 0.22);
+    const projectileSize = Math.max(0.05, Number(config.projectileSize) || 0.2);
+    projectileVelocity.copy(projectileDirection).multiplyScalar(projectileSpeed);
     projectiles.push({
       kind: type,
       mesh: projectileMesh,
       velocity: projectileVelocity.clone(),
-      life: Math.max(0.01, Number(config.projectileLifetime) || 0.5),
+      life: projectileLifetime,
       damage: Math.max(0, Number(config.damage) || 0) * getWeaponDamageMultiplier(type),
       hitRadius: Math.max(0, Number(config.projectileHitRadius) || 0.1),
-      gravity: Math.max(0, Number(config.projectileGravity) || 0),
-      splashRadius: Math.max(0, Number(config.splashRadius) || 0) * getWeaponSplashRadiusMultiplier(type),
-      explosionDuration: Math.max(0.01, Number(config.explosionDuration) || 0.22),
+      gravity: projectileGravity,
+      splashRadius,
+      explosionDuration,
     });
 
     gunFlashTimer = gunFlashDuration;
+    emitWeaponVisualEvent({
+      kind: "projectile",
+      weaponType: type,
+      origin: {
+        x: projectileSpawnWorldPos.x,
+        y: projectileSpawnWorldPos.y,
+        z: projectileSpawnWorldPos.z,
+      },
+      direction: {
+        x: projectileDirection.x,
+        y: projectileDirection.y,
+        z: projectileDirection.z,
+      },
+      speed: projectileSpeed,
+      lifetime: projectileLifetime,
+      gravity: projectileGravity,
+      projectileSize,
+      splashRadius,
+      explosionDuration,
+    });
     return true;
   }
 
@@ -1327,6 +1359,22 @@ export function createPlayer({
       Math.max(0.01, hitDistance)
     );
     spawnSniperBeamEffect(sniperBeamStart, projectileImpactWorldPos, config);
+    emitWeaponVisualEvent({
+      kind: "sniper_beam",
+      weaponType: "sniper",
+      start: {
+        x: sniperBeamStart.x,
+        y: sniperBeamStart.y,
+        z: sniperBeamStart.z,
+      },
+      end: {
+        x: projectileImpactWorldPos.x,
+        y: projectileImpactWorldPos.y,
+        z: projectileImpactWorldPos.z,
+      },
+      duration: Math.max(0.01, Number(config?.beamDuration) || 0.08),
+      beamWidth: Math.max(0.02, Number(config?.beamWidth) || 0.09),
+    });
     gunFlashTimer = gunFlashDuration;
     weaponCooldownRemaining = getWeaponFireInterval("sniper");
     return true;

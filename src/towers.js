@@ -241,6 +241,7 @@ export function createTowerSystem({
   scene,
   camera,
   grid,
+  localOwnerId = "local",
   getCurrentMoney = null,
   spendMoney = null,
   refundMoney = null,
@@ -248,8 +249,12 @@ export function createTowerSystem({
   canBlockCell = null,
   getBlockedRevision = null,
   onBlockedCellsChanged = null,
+  onTowerPlaced = null,
 } = {}) {
   const raycaster = new THREE.Raycaster();
+  let activeLocalOwnerId = typeof localOwnerId === "string" && localOwnerId.length > 0
+    ? localOwnerId
+    : "local";
   const aimPoint = new THREE.Vector2(0, 0);
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -grid.tileTopY);
   const groundHit = new THREE.Vector3();
@@ -543,6 +548,7 @@ export function createTowerSystem({
   let previewPlacement = null;
   let previewPathBlockCache = null;
   let suppressPreviewFootprintKey = null;
+  const peerPreviewEntries = new Map();
 
   const reservedCellKeys = new Set(
     spawnCells.map((cell) => `${cell.x},${cell.z}`)
@@ -554,6 +560,7 @@ export function createTowerSystem({
   let towerDamageMultiplier = 1;
   let towerFireRateMultiplier = 1;
   const towerTechModifiersByType = new Map();
+  const towerTechModifiersByOwner = new Map();
   for (const type of TOWER_TYPE_ORDER) {
     towerTechModifiersByType.set(type, {
       damageMultiplier: 1,
@@ -576,20 +583,69 @@ export function createTowerSystem({
     });
   }
 
-  function getTowerTechModifiers(type) {
+  function createDefaultTowerTechModifiers() {
+    return {
+      damageMultiplier: 1,
+      fireIntervalMultiplier: 1,
+      rangeAdd: 0,
+      projectilePierce: 0,
+      laserPierceTargets: 0,
+      mortarSplashRadiusAdd: 0,
+      teslaChainCountAdd: 0,
+      spikesCycleIntervalMultiplier: 1,
+      spikesActiveDurationMultiplier: 1,
+      plasmaDepthCellsAdd: 0,
+      plasmaSideCellsAdd: 0,
+      slowMultiplierAdd: 0,
+      slowDurationMultiplier: 1,
+      buffRangeAdd: 0,
+      buffDamageBonusPerTowerAdd: 0,
+      buffFireRateBonusPerTowerAdd: 0,
+      buffAffectsBuffTowers: false,
+    };
+  }
+
+  function normalizeOwnerId(ownerId) {
+    if (typeof ownerId === "string" && ownerId.length > 0) {
+      return ownerId;
+    }
+    return activeLocalOwnerId;
+  }
+
+  function ensureOwnerTechModifiers(ownerId) {
+    const key = normalizeOwnerId(ownerId);
+    if (!towerTechModifiersByOwner.has(key)) {
+      const byType = new Map();
+      for (const type of TOWER_TYPE_ORDER) {
+        byType.set(type, createDefaultTowerTechModifiers());
+      }
+      towerTechModifiersByOwner.set(key, byType);
+    }
+    return towerTechModifiersByOwner.get(key);
+  }
+
+  function getTowerTechModifiers(type, ownerId = null) {
     const normalizedType = normalizeTowerType(type);
     if (!normalizedType) {
       return null;
     }
+    const resolvedOwnerId = normalizeOwnerId(ownerId);
+    if (resolvedOwnerId) {
+      const ownerMap = ensureOwnerTechModifiers(resolvedOwnerId);
+      const ownerModifiers = ownerMap.get(normalizedType) ?? null;
+      if (ownerModifiers) {
+        return ownerModifiers;
+      }
+    }
     return towerTechModifiersByType.get(normalizedType) ?? null;
   }
 
-  function getTowerRangeForType(type) {
+  function getTowerRangeForType(type, ownerId = null) {
     const spec = getTowerSpec(type);
     if (!spec) {
       return 0;
     }
-    const modifiers = getTowerTechModifiers(type);
+    const modifiers = getTowerTechModifiers(type, ownerId);
     const rangeAdd = Number.isFinite(Number(modifiers?.rangeAdd))
       ? Number(modifiers.rangeAdd)
       : 0;
@@ -897,8 +953,119 @@ export function createTowerSystem({
     towerFireRateMultiplier *= rateMultiplier;
   }
 
-  function applyTechGrants(grants = {}) {
+  function applyTowerModifierPatch(modifiers, modifierPatch) {
+    if (!modifiers || !modifierPatch || typeof modifierPatch !== "object") {
+      return false;
+    }
     let appliedAny = false;
+
+    const damageMultiplier = Number(modifierPatch.damageMultiplier);
+    if (Number.isFinite(damageMultiplier) && damageMultiplier > 0) {
+      modifiers.damageMultiplier *= damageMultiplier;
+      appliedAny = true;
+    }
+
+    const fireIntervalMultiplier = Number(modifierPatch.fireIntervalMultiplier);
+    if (Number.isFinite(fireIntervalMultiplier) && fireIntervalMultiplier > 0) {
+      modifiers.fireIntervalMultiplier *= fireIntervalMultiplier;
+      appliedAny = true;
+    }
+
+    const rangeAdd = Number(modifierPatch.rangeAdd);
+    if (Number.isFinite(rangeAdd) && rangeAdd !== 0) {
+      modifiers.rangeAdd += rangeAdd;
+      appliedAny = true;
+    }
+
+    const projectilePierceAdd = Math.floor(Number(modifierPatch.projectilePierceAdd));
+    if (Number.isFinite(projectilePierceAdd) && projectilePierceAdd !== 0) {
+      modifiers.projectilePierce += projectilePierceAdd;
+      appliedAny = true;
+    }
+
+    const laserPierceTargetsAdd = Math.floor(Number(modifierPatch.laserPierceTargetsAdd));
+    if (Number.isFinite(laserPierceTargetsAdd) && laserPierceTargetsAdd !== 0) {
+      modifiers.laserPierceTargets += laserPierceTargetsAdd;
+      appliedAny = true;
+    }
+
+    const mortarSplashRadiusAdd = Number(modifierPatch.mortarSplashRadiusAdd);
+    if (Number.isFinite(mortarSplashRadiusAdd) && mortarSplashRadiusAdd !== 0) {
+      modifiers.mortarSplashRadiusAdd += mortarSplashRadiusAdd;
+      appliedAny = true;
+    }
+
+    const teslaChainCountAdd = Math.floor(Number(modifierPatch.teslaChainCountAdd));
+    if (Number.isFinite(teslaChainCountAdd) && teslaChainCountAdd !== 0) {
+      modifiers.teslaChainCountAdd += teslaChainCountAdd;
+      appliedAny = true;
+    }
+
+    const spikesCycleIntervalMultiplier = Number(modifierPatch.spikesCycleIntervalMultiplier);
+    if (Number.isFinite(spikesCycleIntervalMultiplier) && spikesCycleIntervalMultiplier > 0) {
+      modifiers.spikesCycleIntervalMultiplier *= spikesCycleIntervalMultiplier;
+      appliedAny = true;
+    }
+
+    const spikesActiveDurationMultiplier = Number(modifierPatch.spikesActiveDurationMultiplier);
+    if (Number.isFinite(spikesActiveDurationMultiplier) && spikesActiveDurationMultiplier > 0) {
+      modifiers.spikesActiveDurationMultiplier *= spikesActiveDurationMultiplier;
+      appliedAny = true;
+    }
+
+    const plasmaDepthCellsAdd = Math.floor(Number(modifierPatch.plasmaDepthCellsAdd));
+    if (Number.isFinite(plasmaDepthCellsAdd) && plasmaDepthCellsAdd !== 0) {
+      modifiers.plasmaDepthCellsAdd += plasmaDepthCellsAdd;
+      appliedAny = true;
+    }
+
+    const plasmaSideCellsAdd = Math.floor(Number(modifierPatch.plasmaSideCellsAdd));
+    if (Number.isFinite(plasmaSideCellsAdd) && plasmaSideCellsAdd !== 0) {
+      modifiers.plasmaSideCellsAdd += plasmaSideCellsAdd;
+      appliedAny = true;
+    }
+
+    const slowMultiplierAdd = Number(modifierPatch.slowMultiplierAdd);
+    if (Number.isFinite(slowMultiplierAdd) && slowMultiplierAdd !== 0) {
+      modifiers.slowMultiplierAdd += slowMultiplierAdd;
+      appliedAny = true;
+    }
+
+    const slowDurationMultiplier = Number(modifierPatch.slowDurationMultiplier);
+    if (Number.isFinite(slowDurationMultiplier) && slowDurationMultiplier > 0) {
+      modifiers.slowDurationMultiplier *= slowDurationMultiplier;
+      appliedAny = true;
+    }
+
+    const buffRangeAdd = Number(modifierPatch.buffRangeAdd);
+    if (Number.isFinite(buffRangeAdd) && buffRangeAdd !== 0) {
+      modifiers.buffRangeAdd += buffRangeAdd;
+      appliedAny = true;
+    }
+
+    const buffDamageBonusPerTowerAdd = Number(modifierPatch.buffDamageBonusPerTowerAdd);
+    if (Number.isFinite(buffDamageBonusPerTowerAdd) && buffDamageBonusPerTowerAdd !== 0) {
+      modifiers.buffDamageBonusPerTowerAdd += buffDamageBonusPerTowerAdd;
+      appliedAny = true;
+    }
+
+    const buffFireRateBonusPerTowerAdd = Number(modifierPatch.buffFireRateBonusPerTowerAdd);
+    if (Number.isFinite(buffFireRateBonusPerTowerAdd) && buffFireRateBonusPerTowerAdd !== 0) {
+      modifiers.buffFireRateBonusPerTowerAdd += buffFireRateBonusPerTowerAdd;
+      appliedAny = true;
+    }
+
+    if (modifierPatch.buffAffectsBuffTowers === true) {
+      modifiers.buffAffectsBuffTowers = true;
+      appliedAny = true;
+    }
+
+    return appliedAny;
+  }
+
+  function applyTechGrants(grants = {}, options = {}) {
+    let appliedAny = false;
+    const ownerId = normalizeOwnerId(options?.ownerId);
 
     if (typeof grants.unlockTowerType === "string") {
       appliedAny = unlockTowerType(grants.unlockTowerType) || appliedAny;
@@ -907,111 +1074,8 @@ export function createTowerSystem({
     const towerGrants = grants?.tower;
     if (towerGrants && typeof towerGrants === "object") {
       for (const [rawType, modifierPatch] of Object.entries(towerGrants)) {
-        const modifiers = getTowerTechModifiers(rawType);
-        if (!modifiers || !modifierPatch || typeof modifierPatch !== "object") {
-          continue;
-        }
-
-        const damageMultiplier = Number(modifierPatch.damageMultiplier);
-        if (Number.isFinite(damageMultiplier) && damageMultiplier > 0) {
-          modifiers.damageMultiplier *= damageMultiplier;
-          appliedAny = true;
-        }
-
-        const fireIntervalMultiplier = Number(modifierPatch.fireIntervalMultiplier);
-        if (Number.isFinite(fireIntervalMultiplier) && fireIntervalMultiplier > 0) {
-          modifiers.fireIntervalMultiplier *= fireIntervalMultiplier;
-          appliedAny = true;
-        }
-
-        const rangeAdd = Number(modifierPatch.rangeAdd);
-        if (Number.isFinite(rangeAdd) && rangeAdd !== 0) {
-          modifiers.rangeAdd += rangeAdd;
-          appliedAny = true;
-        }
-
-        const projectilePierceAdd = Math.floor(Number(modifierPatch.projectilePierceAdd));
-        if (Number.isFinite(projectilePierceAdd) && projectilePierceAdd !== 0) {
-          modifiers.projectilePierce += projectilePierceAdd;
-          appliedAny = true;
-        }
-
-        const laserPierceTargetsAdd = Math.floor(Number(modifierPatch.laserPierceTargetsAdd));
-        if (Number.isFinite(laserPierceTargetsAdd) && laserPierceTargetsAdd !== 0) {
-          modifiers.laserPierceTargets += laserPierceTargetsAdd;
-          appliedAny = true;
-        }
-
-        const mortarSplashRadiusAdd = Number(modifierPatch.mortarSplashRadiusAdd);
-        if (Number.isFinite(mortarSplashRadiusAdd) && mortarSplashRadiusAdd !== 0) {
-          modifiers.mortarSplashRadiusAdd += mortarSplashRadiusAdd;
-          appliedAny = true;
-        }
-
-        const teslaChainCountAdd = Math.floor(Number(modifierPatch.teslaChainCountAdd));
-        if (Number.isFinite(teslaChainCountAdd) && teslaChainCountAdd !== 0) {
-          modifiers.teslaChainCountAdd += teslaChainCountAdd;
-          appliedAny = true;
-        }
-
-        const spikesCycleIntervalMultiplier = Number(modifierPatch.spikesCycleIntervalMultiplier);
-        if (Number.isFinite(spikesCycleIntervalMultiplier) && spikesCycleIntervalMultiplier > 0) {
-          modifiers.spikesCycleIntervalMultiplier *= spikesCycleIntervalMultiplier;
-          appliedAny = true;
-        }
-
-        const spikesActiveDurationMultiplier = Number(modifierPatch.spikesActiveDurationMultiplier);
-        if (Number.isFinite(spikesActiveDurationMultiplier) && spikesActiveDurationMultiplier > 0) {
-          modifiers.spikesActiveDurationMultiplier *= spikesActiveDurationMultiplier;
-          appliedAny = true;
-        }
-
-        const plasmaDepthCellsAdd = Math.floor(Number(modifierPatch.plasmaDepthCellsAdd));
-        if (Number.isFinite(plasmaDepthCellsAdd) && plasmaDepthCellsAdd !== 0) {
-          modifiers.plasmaDepthCellsAdd += plasmaDepthCellsAdd;
-          appliedAny = true;
-        }
-
-        const plasmaSideCellsAdd = Math.floor(Number(modifierPatch.plasmaSideCellsAdd));
-        if (Number.isFinite(plasmaSideCellsAdd) && plasmaSideCellsAdd !== 0) {
-          modifiers.plasmaSideCellsAdd += plasmaSideCellsAdd;
-          appliedAny = true;
-        }
-
-        const slowMultiplierAdd = Number(modifierPatch.slowMultiplierAdd);
-        if (Number.isFinite(slowMultiplierAdd) && slowMultiplierAdd !== 0) {
-          modifiers.slowMultiplierAdd += slowMultiplierAdd;
-          appliedAny = true;
-        }
-
-        const slowDurationMultiplier = Number(modifierPatch.slowDurationMultiplier);
-        if (Number.isFinite(slowDurationMultiplier) && slowDurationMultiplier > 0) {
-          modifiers.slowDurationMultiplier *= slowDurationMultiplier;
-          appliedAny = true;
-        }
-
-        const buffRangeAdd = Number(modifierPatch.buffRangeAdd);
-        if (Number.isFinite(buffRangeAdd) && buffRangeAdd !== 0) {
-          modifiers.buffRangeAdd += buffRangeAdd;
-          appliedAny = true;
-        }
-
-        const buffDamageBonusPerTowerAdd = Number(modifierPatch.buffDamageBonusPerTowerAdd);
-        if (Number.isFinite(buffDamageBonusPerTowerAdd) && buffDamageBonusPerTowerAdd !== 0) {
-          modifiers.buffDamageBonusPerTowerAdd += buffDamageBonusPerTowerAdd;
-          appliedAny = true;
-        }
-
-        const buffFireRateBonusPerTowerAdd = Number(modifierPatch.buffFireRateBonusPerTowerAdd);
-        if (Number.isFinite(buffFireRateBonusPerTowerAdd) && buffFireRateBonusPerTowerAdd !== 0) {
-          modifiers.buffFireRateBonusPerTowerAdd += buffFireRateBonusPerTowerAdd;
-          appliedAny = true;
-        }
-
-        if (modifierPatch.buffAffectsBuffTowers === true) {
-          modifiers.buffAffectsBuffTowers = true;
-          appliedAny = true;
-        }
+        const modifiers = getTowerTechModifiers(rawType, ownerId);
+        appliedAny = applyTowerModifierPatch(modifiers, modifierPatch) || appliedAny;
       }
     }
 
@@ -2740,11 +2804,186 @@ export function createTowerSystem({
     updatePathRangeHighlights(nextPlacement.position || preview.position);
   }
 
-  function createTowerEntry(towerType, towerMesh, basePosition, placement) {
+  function serializePlacementPayload(towerType, placement) {
+    if (!placement || !placement.position) {
+      return null;
+    }
+    const normalizedType = normalizeTowerType(towerType ?? placement.towerType);
+    if (!normalizedType) {
+      return null;
+    }
+    return {
+      towerType: normalizedType,
+      occupiedCells: Array.isArray(placement.occupiedCells)
+        ? placement.occupiedCells
+          .filter((cell) => Number.isInteger(cell?.x) && Number.isInteger(cell?.z))
+          .map((cell) => ({ x: cell.x, z: cell.z }))
+        : [],
+      position: {
+        x: placement.position.x,
+        y: placement.position.y,
+        z: placement.position.z,
+      },
+      footprintKey: typeof placement.footprintKey === "string" ? placement.footprintKey : "",
+      anchorKey: typeof placement.anchorKey === "string" ? placement.anchorKey : null,
+      rotationY: Number.isFinite(Number(placement.rotationY)) ? Number(placement.rotationY) : 0,
+      plasmaDirection: placement.plasmaDirection
+        ? { x: placement.plasmaDirection.x, z: placement.plasmaDirection.z }
+        : null,
+      plasmaWallCell: placement.plasmaWallCell
+        ? {
+          x: placement.plasmaWallCell.x,
+          y: placement.plasmaWallCell.y,
+          z: placement.plasmaWallCell.z,
+        }
+        : null,
+      plasmaTargetCell: placement.plasmaTargetCell
+        ? { x: placement.plasmaTargetCell.x, z: placement.plasmaTargetCell.z }
+        : null,
+    };
+  }
+
+  function parsePlacementPayload(payload = {}) {
+    const normalizedType = normalizeTowerType(payload?.towerType ?? payload?.type);
+    const px = Number(payload?.position?.x);
+    const py = Number(payload?.position?.y);
+    const pz = Number(payload?.position?.z);
+    if (!normalizedType || !Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) {
+      return null;
+    }
+    const occupiedCells = Array.isArray(payload?.occupiedCells)
+      ? payload.occupiedCells
+        .filter((cell) => Number.isInteger(cell?.x) && Number.isInteger(cell?.z))
+        .map((cell) => ({ x: cell.x, z: cell.z }))
+      : [];
+    const resolvedPlacement = {
+      towerType: normalizedType,
+      occupiedCells,
+      position: new THREE.Vector3(px, py, pz),
+      sameSurfaceHeight: true,
+      footprintKey: typeof payload?.footprintKey === "string" && payload.footprintKey.length > 0
+        ? payload.footprintKey
+        : getFootprintKey(occupiedCells),
+      anchorKey: typeof payload?.anchorKey === "string" ? payload.anchorKey : null,
+      rotationY: Number.isFinite(Number(payload?.rotationY)) ? Number(payload.rotationY) : 0,
+      plasmaDirection: payload?.plasmaDirection
+        ? {
+          x: Number.isInteger(payload.plasmaDirection.x) ? payload.plasmaDirection.x : 0,
+          z: Number.isInteger(payload.plasmaDirection.z) ? payload.plasmaDirection.z : 0,
+        }
+        : null,
+      plasmaWallCell: payload?.plasmaWallCell
+        ? {
+          x: payload.plasmaWallCell.x,
+          y: payload.plasmaWallCell.y,
+          z: payload.plasmaWallCell.z,
+        }
+        : null,
+      plasmaTargetCell: payload?.plasmaTargetCell
+        ? {
+          x: payload.plasmaTargetCell.x,
+          z: payload.plasmaTargetCell.z,
+        }
+        : null,
+    };
+    if (normalizedType === "plasma") {
+      resolvedPlacement.occupiedCells = [];
+    }
+    return resolvedPlacement;
+  }
+
+  function placeTowerAtResolvedPlacement(resolvedPlacement, options = {}) {
+    const normalizedType = normalizeTowerType(resolvedPlacement?.towerType);
+    if (!normalizedType || !resolvedPlacement?.position) {
+      return { success: false, reason: "invalid_payload" };
+    }
+
+    const ownerId = normalizeOwnerId(options?.ownerId);
+    const requireUnlocked = options?.requireUnlocked !== false;
+    const requireAffordable = options?.requireAffordable !== false;
+    const spendCost = options?.spendCost !== false;
+
+    if (requireUnlocked && !isTowerTypeUnlocked(normalizedType)) {
+      return { success: false, reason: "locked" };
+    }
+    if (requireAffordable && !canAffordTower(normalizedType)) {
+      return { success: false, reason: "unaffordable" };
+    }
+    if (!isPlacementValid(resolvedPlacement)) {
+      return { success: false, reason: "invalid_placement" };
+    }
+
+    const towerMesh = createTowerPlacedMesh(normalizedType);
+    towerMesh.position.copy(resolvedPlacement.position);
+    if (typeof resolvedPlacement.rotationY === "number") {
+      towerMesh.rotation.y = resolvedPlacement.rotationY;
+    }
+    scene.add(towerMesh);
+
+    const towerEntry = createTowerEntry(
+      normalizedType,
+      towerMesh,
+      resolvedPlacement.position,
+      resolvedPlacement,
+      { ownerId }
+    );
+    if (!towerEntry) {
+      scene.remove(towerMesh);
+      disposeMeshResources(towerMesh);
+      return { success: false, reason: "entry_creation_failed" };
+    }
+    if (spendCost && !spendTowerCost(normalizedType)) {
+      scene.remove(towerMesh);
+      disposeMeshResources(towerMesh);
+      return { success: false, reason: "spend_failed" };
+    }
+
+    towers.push(towerEntry);
+    startTowerBuildFx(towerEntry);
+    const didCommitBlockedCells = notifyBlockedCellsChanged();
+    if (!didCommitBlockedCells) {
+      const buildEffectIndex = activeBuildEffects.indexOf(towerEntry);
+      if (buildEffectIndex >= 0) {
+        activeBuildEffects.splice(buildEffectIndex, 1);
+      }
+      if (towerEntry.buildFxState) {
+        restoreTowerBuildMaterialStates(towerEntry.buildFxState.materialStates || []);
+        disposeTowerBuildFxState(towerEntry.buildFxState);
+        towerEntry.buildFxState = null;
+      }
+      const towerIndex = towers.indexOf(towerEntry);
+      if (towerIndex >= 0) {
+        towers.splice(towerIndex, 1);
+      }
+      scene.remove(towerMesh);
+      disposeMeshResources(towerMesh);
+      if (spendCost) {
+        refundTowerCost(normalizedType);
+      }
+      return { success: false, reason: "path_blocking_rejected" };
+    }
+
+    const placementPayload = serializePlacementPayload(normalizedType, resolvedPlacement);
+    if (typeof onTowerPlaced === "function" && placementPayload) {
+      onTowerPlaced({
+        ownerId,
+        placement: placementPayload,
+      });
+    }
+    return {
+      success: true,
+      ownerId,
+      placement: placementPayload,
+      tower: towerEntry,
+    };
+  }
+
+  function createTowerEntry(towerType, towerMesh, basePosition, placement, options = {}) {
     const towerSpec = getTowerSpec(towerType);
     if (!towerSpec) {
       return null;
     }
+    const ownerId = normalizeOwnerId(options?.ownerId);
 
     const occupiedCells = Array.isArray(placement?.occupiedCells)
       ? placement.occupiedCells.map((cell) => ({ x: cell.x, z: cell.z }))
@@ -2755,7 +2994,7 @@ export function createTowerSystem({
     const initialSpikesCycleInterval = Math.max(
       0.05,
       SPIKES_CYCLE_INTERVAL
-        * Math.max(0.05, getTowerModifierNumber("spikes", "spikesCycleIntervalMultiplier", 1))
+        * Math.max(0.05, getTowerModifierNumber("spikes", "spikesCycleIntervalMultiplier", 1, ownerId))
     );
 
     const entry = {
@@ -2796,6 +3035,8 @@ export function createTowerSystem({
       buffAuraClock: Math.random() * Math.PI * 2,
       isOperational: true,
       buildFxState: null,
+      ownerId,
+      rotationY: typeof placement?.rotationY === "number" ? placement.rotationY : 0,
     };
 
     return entry;
@@ -3125,63 +3366,19 @@ export function createTowerSystem({
     }
 
     const normalizedType = normalizeTowerType(selectedTowerType);
-    const resolvedPlacement = {
-      towerType: normalizedType,
-      occupiedCells: previewPlacement.occupiedCells.map((cell) => ({ x: cell.x, z: cell.z })),
-      position: previewPlacement.position.clone(),
-      footprintKey: previewPlacement.footprintKey,
-      anchorKey: previewPlacement.anchorKey ?? null,
-      rotationY: previewPlacement.rotationY ?? 0,
-      plasmaDirection: previewPlacement.plasmaDirection
-        ? { x: previewPlacement.plasmaDirection.x, z: previewPlacement.plasmaDirection.z }
-        : null,
-      plasmaWallCell: previewPlacement.plasmaWallCell
-        ? {
-          x: previewPlacement.plasmaWallCell.x,
-          y: previewPlacement.plasmaWallCell.y,
-          z: previewPlacement.plasmaWallCell.z,
-        }
-        : null,
-      plasmaTargetCell: previewPlacement.plasmaTargetCell
-        ? { x: previewPlacement.plasmaTargetCell.x, z: previewPlacement.plasmaTargetCell.z }
-        : null,
-    };
-    const towerMesh = createTowerPlacedMesh(normalizedType);
-    towerMesh.position.copy(resolvedPlacement.position);
-    if (typeof resolvedPlacement.rotationY === "number") {
-      towerMesh.rotation.y = resolvedPlacement.rotationY;
-    }
-    scene.add(towerMesh);
-
-    const towerEntry = createTowerEntry(normalizedType, towerMesh, resolvedPlacement.position, resolvedPlacement);
-    if (!towerEntry) {
-      scene.remove(towerMesh);
+    const resolvedPlacement = parsePlacementPayload(
+      serializePlacementPayload(normalizedType, previewPlacement)
+    );
+    if (!resolvedPlacement) {
       return false;
     }
-    if (!spendTowerCost(normalizedType)) {
-      scene.remove(towerMesh);
-      return false;
-    }
-    towers.push(towerEntry);
-    startTowerBuildFx(towerEntry);
-    const didCommitBlockedCells = notifyBlockedCellsChanged();
-    if (!didCommitBlockedCells) {
-      const buildEffectIndex = activeBuildEffects.indexOf(towerEntry);
-      if (buildEffectIndex >= 0) {
-        activeBuildEffects.splice(buildEffectIndex, 1);
-      }
-      if (towerEntry.buildFxState) {
-        restoreTowerBuildMaterialStates(towerEntry.buildFxState.materialStates || []);
-        disposeTowerBuildFxState(towerEntry.buildFxState);
-        towerEntry.buildFxState = null;
-      }
-      const towerIndex = towers.indexOf(towerEntry);
-      if (towerIndex >= 0) {
-        towers.splice(towerIndex, 1);
-      }
-      scene.remove(towerMesh);
-      disposeMeshResources(towerMesh);
-      refundTowerCost(normalizedType);
+    const result = placeTowerAtResolvedPlacement(resolvedPlacement, {
+      ownerId: normalizeOwnerId(null),
+      spendCost: true,
+      requireUnlocked: true,
+      requireAffordable: true,
+    });
+    if (!result.success) {
       return false;
     }
     if (!canAffordTower(normalizedType)) {
@@ -3439,7 +3636,7 @@ export function createTowerSystem({
   }
 
   function isPointInTowerRange(tower, targetPosition) {
-    const towerRange = getTowerRangeForType(tower?.towerType) || (tower.range ?? GUN_RANGE);
+    const towerRange = getTowerRangeForType(tower?.towerType, tower?.ownerId) || (tower.range ?? GUN_RANGE);
     return tower.mesh.position.distanceToSquared(targetPosition) <= (towerRange * towerRange);
   }
 
@@ -3471,7 +3668,7 @@ export function createTowerSystem({
     if (!enemySystem) {
       return null;
     }
-    const towerRange = getTowerRangeForType(tower?.towerType) || (tower.range ?? GUN_RANGE);
+    const towerRange = getTowerRangeForType(tower?.towerType, tower?.ownerId) || (tower.range ?? GUN_RANGE);
     const maxRangeSq = towerRange * towerRange;
     let bestTarget = null;
     let bestDistSq = maxRangeSq;
@@ -3667,7 +3864,7 @@ export function createTowerSystem({
   }
 
   function hasDamageableEnemyInRange(tower, enemySystem) {
-    const range = getTowerRangeForType(tower?.towerType) || (tower.range ?? AOE_RANGE);
+    const range = getTowerRangeForType(tower?.towerType, tower?.ownerId) || (tower.range ?? AOE_RANGE);
     const rangeSq = range * range;
     for (const enemyMesh of getDamageableEnemyMeshes(enemySystem)) {
       if (!enemyMesh || !enemyMesh.visible) {
@@ -3684,8 +3881,8 @@ export function createTowerSystem({
     const localBuff = Number.isFinite(Number(tower?.buffDamageMultiplier))
       ? Number(tower.buffDamageMultiplier)
       : 1;
-    const typeDamageMultiplier = Number.isFinite(Number(getTowerTechModifiers(tower?.towerType)?.damageMultiplier))
-      ? Number(getTowerTechModifiers(tower?.towerType)?.damageMultiplier)
+    const typeDamageMultiplier = Number.isFinite(Number(getTowerTechModifiers(tower?.towerType, tower?.ownerId)?.damageMultiplier))
+      ? Number(getTowerTechModifiers(tower?.towerType, tower?.ownerId)?.damageMultiplier)
       : 1;
     return towerDamageMultiplier * typeDamageMultiplier * Math.max(0, localBuff);
   }
@@ -3694,14 +3891,14 @@ export function createTowerSystem({
     const localBuff = Number.isFinite(Number(tower?.buffFireRateIntervalFactor))
       ? Number(tower.buffFireRateIntervalFactor)
       : 1;
-    const typeFireIntervalMultiplier = Number.isFinite(Number(getTowerTechModifiers(tower?.towerType)?.fireIntervalMultiplier))
-      ? Number(getTowerTechModifiers(tower?.towerType)?.fireIntervalMultiplier)
+    const typeFireIntervalMultiplier = Number.isFinite(Number(getTowerTechModifiers(tower?.towerType, tower?.ownerId)?.fireIntervalMultiplier))
+      ? Number(getTowerTechModifiers(tower?.towerType, tower?.ownerId)?.fireIntervalMultiplier)
       : 1;
     return towerFireRateMultiplier * typeFireIntervalMultiplier * Math.max(0.05, localBuff);
   }
 
-  function getTowerModifierNumber(towerType, key, fallback = 0) {
-    const modifiers = getTowerTechModifiers(towerType);
+  function getTowerModifierNumber(towerType, key, fallback = 0, ownerId = null) {
+    const modifiers = getTowerTechModifiers(towerType, ownerId);
     const value = Number(modifiers?.[key]);
     return Number.isFinite(value) ? value : fallback;
   }
@@ -3709,11 +3906,6 @@ export function createTowerSystem({
   function updateBuffTowerAurasAndBonuses(deltaSeconds) {
     const buffBaseDamageBonus = Number(BUFF_TOWER_CONFIG.damageBonusPerTower) || 0;
     const buffBaseFireRateBonus = Number(BUFF_TOWER_CONFIG.fireRateBonusPerTower) || 0;
-    const buffRange = getTowerRangeForType("buff") || BUFF_RANGE;
-    const buffModifiers = getTowerTechModifiers("buff");
-    const damageBonusPerTower = buffBaseDamageBonus + (Number(buffModifiers?.buffDamageBonusPerTowerAdd) || 0);
-    const fireRateBonusPerTower = buffBaseFireRateBonus + (Number(buffModifiers?.buffFireRateBonusPerTowerAdd) || 0);
-    const buffAffectsBuffTowers = !!buffModifiers?.buffAffectsBuffTowers;
     const activeBuffTowers = towers.filter((tower) => tower?.isOperational && tower.towerType === "buff");
 
     for (const tower of towers) {
@@ -3741,20 +3933,25 @@ export function createTowerSystem({
       if (!tower?.isOperational) {
         continue;
       }
-      if (!buffAffectsBuffTowers && tower.towerType === "buff") {
-        continue;
-      }
-      let stackedCount = 0;
+      let damageBonusSum = 0;
+      let fireRateBonusSum = 0;
       for (const buffTower of activeBuffTowers) {
+        const buffModifiers = getTowerTechModifiers("buff", buffTower.ownerId);
+        const buffRange = getTowerRangeForType("buff", buffTower.ownerId) || BUFF_RANGE;
+        const buffAffectsBuffTowers = !!buffModifiers?.buffAffectsBuffTowers;
+        if (!buffAffectsBuffTowers && tower.towerType === "buff") {
+          continue;
+        }
         if (tower.mesh.position.distanceToSquared(buffTower.mesh.position) <= (buffRange * buffRange)) {
-          stackedCount += 1;
+          damageBonusSum += buffBaseDamageBonus + (Number(buffModifiers?.buffDamageBonusPerTowerAdd) || 0);
+          fireRateBonusSum += buffBaseFireRateBonus + (Number(buffModifiers?.buffFireRateBonusPerTowerAdd) || 0);
         }
       }
-      if (stackedCount <= 0) {
+      if (damageBonusSum <= 0 && fireRateBonusSum <= 0) {
         continue;
       }
-      tower.buffDamageMultiplier = 1 + (stackedCount * damageBonusPerTower);
-      tower.buffFireRateIntervalFactor = Math.max(0.1, 1 - (stackedCount * fireRateBonusPerTower));
+      tower.buffDamageMultiplier = Math.max(0, 1 + damageBonusSum);
+      tower.buffFireRateIntervalFactor = Math.max(0.1, 1 - fireRateBonusSum);
     }
   }
 
@@ -3807,7 +4004,7 @@ export function createTowerSystem({
     projectileMesh.position.copy(tempVecA);
     scene.add(projectileMesh);
 
-    const gunModifiers = getTowerTechModifiers("gun");
+    const gunModifiers = getTowerTechModifiers("gun", tower?.ownerId);
     const extraPierce = Math.max(0, Math.floor(Number(gunModifiers?.projectilePierce) || 0));
     gunProjectiles.push({
       mesh: projectileMesh,
@@ -4162,7 +4359,7 @@ export function createTowerSystem({
   function updateSlowTowerCombat(tower, deltaSeconds, enemySystem) {
     updateSlowTowerBobbing(tower, deltaSeconds);
     tower.cooldown = Math.max(0, tower.cooldown - deltaSeconds);
-    const slowModifiers = getTowerTechModifiers("slow");
+    const slowModifiers = getTowerTechModifiers("slow", tower?.ownerId);
     const effectiveSlowMultiplier = THREE.MathUtils.clamp(
       SLOW_MULTIPLIER + (Number(slowModifiers?.slowMultiplierAdd) || 0),
       0.15,
@@ -4238,7 +4435,7 @@ export function createTowerSystem({
       return;
     }
 
-    const pulseRange = getTowerRangeForType("aoe") || (tower.range ?? AOE_RANGE);
+    const pulseRange = getTowerRangeForType("aoe", tower?.ownerId) || (tower.range ?? AOE_RANGE);
     const pulseDamage = AOE_PULSE_DAMAGE * getTowerDamageScale(tower);
     while (tower.chargeTimer >= chargeInterval) {
       tower.chargeTimer -= chargeInterval;
@@ -4341,10 +4538,10 @@ export function createTowerSystem({
       return;
     }
     getLaserEmitterWorldPosition(tower, tempVecB);
-    const sniperModifiers = getTowerTechModifiers("laserSniper");
+    const sniperModifiers = getTowerTechModifiers("laserSniper", tower?.ownerId);
     const pierceTargets = Math.max(0, Math.floor(Number(sniperModifiers?.laserPierceTargets) || 0));
     const maxHits = Math.max(1, 1 + pierceTargets);
-    const effectiveRange = getTowerRangeForType("laserSniper") || LASER_SNIPER_RANGE;
+    const effectiveRange = getTowerRangeForType("laserSniper", tower?.ownerId) || LASER_SNIPER_RANGE;
 
     const primaryAimPoint = target.aimPoint ? target.aimPoint.clone() : target.position.clone();
     tempVecI.copy(primaryAimPoint).sub(tempVecB);
@@ -4394,7 +4591,7 @@ export function createTowerSystem({
   }
 
   function findTargetInRangeNoLos(tower, enemySystem) {
-    const effectiveRange = getTowerRangeForType("mortar") || (tower.range ?? MORTAR_RANGE);
+    const effectiveRange = getTowerRangeForType("mortar", tower?.ownerId) || (tower.range ?? MORTAR_RANGE);
     const rangeSq = effectiveRange ** 2;
     let best = null;
     let bestDistSq = rangeSq;
@@ -4527,7 +4724,7 @@ export function createTowerSystem({
       splashDamage: MORTAR_SPLASH_DAMAGE * getTowerDamageScale(tower),
       splashRadius: Math.max(
         0.1,
-        MORTAR_SPLASH_RADIUS + getTowerModifierNumber("mortar", "mortarSplashRadiusAdd", 0)
+        MORTAR_SPLASH_RADIUS + getTowerModifierNumber("mortar", "mortarSplashRadiusAdd", 0, tower?.ownerId)
       ),
       sourceTower: tower,
     });
@@ -4721,7 +4918,10 @@ export function createTowerSystem({
     const candidates = getDamageableEnemyMeshes(enemySystem);
     const chainTargets = [primary.mesh];
     const targetSet = new Set([primary.mesh.uuid]);
-    const extraChainTargets = Math.max(0, Math.floor(getTowerModifierNumber("tesla", "teslaChainCountAdd", 0)));
+    const extraChainTargets = Math.max(
+      0,
+      Math.floor(getTowerModifierNumber("tesla", "teslaChainCountAdd", 0, tower?.ownerId))
+    );
     const maxChainTargets = Math.max(1, TESLA_CHAIN_COUNT + extraChainTargets);
     let lastCenter = getEnemyCollisionCenter(primary.mesh, tempVecD).clone();
     while (chainTargets.length < maxChainTargets) {
@@ -4766,12 +4966,12 @@ export function createTowerSystem({
     const cycleInterval = Math.max(
       0.05,
       SPIKES_CYCLE_INTERVAL
-        * Math.max(0.05, getTowerModifierNumber("spikes", "spikesCycleIntervalMultiplier", 1))
+        * Math.max(0.05, getTowerModifierNumber("spikes", "spikesCycleIntervalMultiplier", 1, tower?.ownerId))
     );
     const activeDuration = Math.max(
       0.02,
       SPIKES_ACTIVE_DURATION
-        * Math.max(0.05, getTowerModifierNumber("spikes", "spikesActiveDurationMultiplier", 1))
+        * Math.max(0.05, getTowerModifierNumber("spikes", "spikesActiveDurationMultiplier", 1, tower?.ownerId))
     );
     tower.spikesCycleTimer += Math.max(0, deltaSeconds);
     if (tower.spikesCycleTimer >= cycleInterval) {
@@ -4874,11 +5074,11 @@ export function createTowerSystem({
 
     const depthCells = Math.max(
       1,
-      1 + Math.max(0, Math.floor(getTowerModifierNumber("plasma", "plasmaDepthCellsAdd", 0)))
+      1 + Math.max(0, Math.floor(getTowerModifierNumber("plasma", "plasmaDepthCellsAdd", 0, tower?.ownerId)))
     );
     const sideCells = Math.max(
       0,
-      Math.floor(getTowerModifierNumber("plasma", "plasmaSideCellsAdd", 0))
+      Math.floor(getTowerModifierNumber("plasma", "plasmaSideCellsAdd", 0, tower?.ownerId))
     );
     const rightX = -direction.z;
     const rightZ = direction.x;
@@ -5053,6 +5253,7 @@ export function createTowerSystem({
 
   function clearAllTowers() {
     cancelPlacement();
+    clearAllPeerPreviews();
 
     for (let i = gunProjectiles.length - 1; i >= 0; i -= 1) {
       destroyGunProjectile(gunProjectiles[i]);
@@ -5223,6 +5424,183 @@ export function createTowerSystem({
     return towers;
   }
 
+  function setLocalOwnerId(nextOwnerId) {
+    const previousOwnerId = activeLocalOwnerId;
+    if (typeof nextOwnerId === "string" && nextOwnerId.length > 0) {
+      activeLocalOwnerId = nextOwnerId;
+    }
+    if (previousOwnerId !== activeLocalOwnerId) {
+      const previousOwnerMap = towerTechModifiersByOwner.get(previousOwnerId) ?? null;
+      if (previousOwnerMap && !towerTechModifiersByOwner.has(activeLocalOwnerId)) {
+        const clonedOwnerMap = new Map();
+        for (const [type, modifiers] of previousOwnerMap.entries()) {
+          clonedOwnerMap.set(type, { ...modifiers });
+        }
+        towerTechModifiersByOwner.set(activeLocalOwnerId, clonedOwnerMap);
+      }
+      for (const tower of towers) {
+        if (tower?.ownerId === previousOwnerId) {
+          tower.ownerId = activeLocalOwnerId;
+        }
+      }
+    }
+    ensureOwnerTechModifiers(activeLocalOwnerId);
+    return activeLocalOwnerId;
+  }
+
+  function getCurrentPreviewPayload() {
+    if (!buildMode || !selectedTowerType) {
+      return {
+        active: false,
+        towerType: null,
+        valid: false,
+        placement: null,
+      };
+    }
+    const placementPayload = previewPlacement
+      ? serializePlacementPayload(selectedTowerType, previewPlacement)
+      : null;
+    return {
+      active: true,
+      towerType: selectedTowerType,
+      valid: previewValid,
+      placement: placementPayload,
+    };
+  }
+
+  function canPlaceTowerFromPayload(payload, options = {}) {
+    const parsedPlacement = parsePlacementPayload(payload);
+    if (!parsedPlacement) {
+      return false;
+    }
+    if (options.requireUnlocked !== false && !isTowerTypeUnlocked(parsedPlacement.towerType)) {
+      return false;
+    }
+    if (options.requireAffordable !== false && !canAffordTower(parsedPlacement.towerType)) {
+      return false;
+    }
+    return isPlacementValid(parsedPlacement);
+  }
+
+  function placeTowerFromPayload(payload, options = {}) {
+    const parsedPlacement = parsePlacementPayload(payload);
+    if (!parsedPlacement) {
+      return false;
+    }
+    const result = placeTowerAtResolvedPlacement(parsedPlacement, {
+      ownerId: options.ownerId ?? payload?.ownerId ?? normalizeOwnerId(null),
+      spendCost: options.spendCost === true,
+      requireUnlocked: options.requireUnlocked === true,
+      requireAffordable: options.requireAffordable === true,
+    });
+    return !!result.success;
+  }
+
+  function getTowerSnapshots() {
+    const snapshots = [];
+    for (const tower of towers) {
+      const snapshot = serializePlacementPayload(tower.towerType, {
+        towerType: tower.towerType,
+        occupiedCells: tower.occupiedCells,
+        position: tower.mesh?.position ?? new THREE.Vector3(),
+        footprintKey: tower.footprintKey,
+        anchorKey: tower.anchorKey,
+        rotationY: tower.rotationY ?? tower.mesh?.rotation?.y ?? 0,
+        plasmaDirection: tower.plasmaDirection,
+        plasmaWallCell: tower.plasmaWallCell,
+        plasmaTargetCell: tower.plasmaTargetCell,
+      });
+      if (!snapshot) {
+        continue;
+      }
+      snapshots.push({
+        ...snapshot,
+        ownerId: normalizeOwnerId(tower.ownerId),
+      });
+    }
+    return snapshots;
+  }
+
+  function applyPeerPreviewVisual(mesh, isValid = true) {
+    const colorHex = isValid ? 0x78d6ff : 0xff8d8d;
+    const emissiveHex = isValid ? 0x164f64 : 0x5a1414;
+    const opacity = isValid ? 0.42 : 0.34;
+    mesh.traverse((child) => {
+      if (!child?.material) {
+        return;
+      }
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (!material) {
+          continue;
+        }
+        if (material.color?.setHex) {
+          material.color.setHex(colorHex);
+        }
+        if (material.emissive?.setHex) {
+          material.emissive.setHex(emissiveHex);
+        }
+        if ("transparent" in material) {
+          material.transparent = true;
+        }
+        if ("opacity" in material && Number.isFinite(Number(material.opacity))) {
+          material.opacity = Math.min(Number(material.opacity), opacity);
+        }
+        if ("depthWrite" in material) {
+          material.depthWrite = false;
+        }
+      }
+    });
+  }
+
+  function clearPeerPreview(peerId) {
+    if (typeof peerId !== "string" || !peerPreviewEntries.has(peerId)) {
+      return;
+    }
+    const entry = peerPreviewEntries.get(peerId);
+    if (entry?.mesh?.parent) {
+      entry.mesh.parent.remove(entry.mesh);
+    }
+    disposeMeshResources(entry?.mesh);
+    peerPreviewEntries.delete(peerId);
+  }
+
+  function clearAllPeerPreviews() {
+    for (const peerId of peerPreviewEntries.keys()) {
+      clearPeerPreview(peerId);
+    }
+  }
+
+  function setPeerPreview(peerId, previewState = null) {
+    if (typeof peerId !== "string" || peerId.length === 0) {
+      return false;
+    }
+    const active = previewState?.active === true;
+    const towerType = normalizeTowerType(previewState?.towerType);
+    const placementPayload = previewState?.placement ?? null;
+    const parsedPlacement = placementPayload ? parsePlacementPayload(placementPayload) : null;
+    if (!active || !towerType || !parsedPlacement?.position) {
+      clearPeerPreview(peerId);
+      return false;
+    }
+
+    let entry = peerPreviewEntries.get(peerId);
+    if (!entry || entry.towerType !== towerType) {
+      clearPeerPreview(peerId);
+      const mesh = createTowerPreviewMesh(towerType);
+      mesh.visible = true;
+      scene.add(mesh);
+      entry = { towerType, mesh };
+      peerPreviewEntries.set(peerId, entry);
+    }
+
+    entry.mesh.visible = true;
+    entry.mesh.position.copy(parsedPlacement.position);
+    entry.mesh.rotation.y = Number(parsedPlacement.rotationY) || 0;
+    applyPeerPreviewVisual(entry.mesh, previewState?.valid === true);
+    return true;
+  }
+
   return {
     update,
     selectTower,
@@ -5234,6 +5612,14 @@ export function createTowerSystem({
     getTowerInventory,
     getSelectedTowerType,
     getMovementObstacles,
+    setLocalOwnerId,
+    getCurrentPreviewPayload,
+    canPlaceTowerFromPayload,
+    placeTowerFromPayload,
+    getTowerSnapshots,
+    setPeerPreview,
+    clearPeerPreview,
+    clearAllPeerPreviews,
     getBlockedCells,
     getTowerCost,
     canAffordTower,
@@ -5245,7 +5631,7 @@ export function createTowerSystem({
     upgradeTowerFireRate,
     clearAllTowers,
     dispose,
-    forcePlaceTower: (x, z, towerType = "gun") => {
+    forcePlaceTower: (x, z, towerType = "gun", options = {}) => {
       const normalizedType = normalizeTowerType(towerType);
       const towerSpec = getTowerSpec(normalizedType);
       if (!towerSpec) {
@@ -5263,45 +5649,13 @@ export function createTowerSystem({
       if (!resolvedPlacement || !isPlacementValid(resolvedPlacement) || !resolvedPlacement.position) {
         return false;
       }
-
-      const towerMesh = createTowerPlacedMesh(normalizedType);
-
-      towerMesh.position.copy(resolvedPlacement.position);
-      if (typeof resolvedPlacement.rotationY === "number") {
-        towerMesh.rotation.y = resolvedPlacement.rotationY;
-      }
-      scene.add(towerMesh);
-      const towerEntry = createTowerEntry(
-        normalizedType,
-        towerMesh,
-        resolvedPlacement.position,
-        resolvedPlacement
-      );
-      if (!towerEntry) {
-        scene.remove(towerMesh);
-        return false;
-      }
-      towers.push(towerEntry);
-      startTowerBuildFx(towerEntry);
-      if (!notifyBlockedCellsChanged()) {
-        const buildEffectIndex = activeBuildEffects.indexOf(towerEntry);
-        if (buildEffectIndex >= 0) {
-          activeBuildEffects.splice(buildEffectIndex, 1);
-        }
-        if (towerEntry.buildFxState) {
-          restoreTowerBuildMaterialStates(towerEntry.buildFxState.materialStates || []);
-          disposeTowerBuildFxState(towerEntry.buildFxState);
-          towerEntry.buildFxState = null;
-        }
-        const towerIndex = towers.indexOf(towerEntry);
-        if (towerIndex >= 0) {
-          towers.splice(towerIndex, 1);
-        }
-        scene.remove(towerMesh);
-        disposeMeshResources(towerMesh);
-        return false;
-      }
-      return true;
+      const result = placeTowerAtResolvedPlacement(resolvedPlacement, {
+        ownerId: options.ownerId ?? normalizeOwnerId(null),
+        spendCost: false,
+        requireUnlocked: false,
+        requireAffordable: false,
+      });
+      return !!result.success;
     }
   };
 }

@@ -10,6 +10,7 @@
     "rsync": "rsync -av --delete dist/ dubbelboer.com:/var/www/dubbelboer.com/cubed/"
   },
   "dependencies": {
+    "@poki/netlib": "^0.0.18",
     "three": "^0.183.2"
   },
   "devDependencies": {

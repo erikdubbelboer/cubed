@@ -156,8 +156,22 @@ export function createEnemySystem(scene, grid, options = {}) {
   const onEnemyDefeated = typeof options?.onEnemyDefeated === "function"
     ? options.onEnemyDefeated
     : null;
+  const onEnemySpawn = typeof options?.onEnemySpawn === "function"
+    ? options.onEnemySpawn
+    : null;
+  const onEnemyDamaged = typeof options?.onEnemyDamaged === "function"
+    ? options.onEnemyDamaged
+    : null;
+  const onDamageRequested = typeof options?.onDamageRequested === "function"
+    ? options.onDamageRequested
+    : null;
+  let enemyHealthMultiplier = Number.isFinite(Number(options?.enemyHealthMultiplier))
+    ? Math.max(0.01, Number(options.enemyHealthMultiplier))
+    : 1;
+  let damageEnabled = options?.damageEnabled !== false;
 
   const activeEnemies = [];
+  const enemyByNetworkId = new Map();
   let scheduledSpawns = [];
   let spawnEventCursor = 0;
   let waveElapsedTime = 0;
@@ -166,6 +180,7 @@ export function createEnemySystem(scene, grid, options = {}) {
   let deathExplosionRadiusAdd = 0;
   let deathExplosionDamageScaleAdd = 0;
   let enemySpawnSerial = 0;
+  let nextEnemyNetworkId = 1;
   let spawnCellCursor = 0;
 
   const blockedCellKeys = new Set();
@@ -229,6 +244,14 @@ export function createEnemySystem(scene, grid, options = {}) {
 
   function getNowMs() {
     return hasPerformanceNow ? globalThis.performance.now() : Date.now();
+  }
+
+  function parseEnemyNetworkId(rawId) {
+    const parsed = Number.parseInt(rawId, 10);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      return null;
+    }
+    return parsed;
   }
 
   const gridBaseY = Number.isFinite(Number(grid?.tileTopY))
@@ -1577,7 +1600,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     return activeEnemies.length === 0 && spawnEventCursor >= scheduledSpawns.length;
   }
 
-  function createEnemyMesh(type, spawnIndex = 0) {
+  function createEnemyMesh(type, spawnIndex = 0, spawnOptions = {}) {
     const normalizedType = normalizeEnemyType(type);
     const enemyType = normalizedType ? ENEMY_TYPES[normalizedType] : null;
     if (!enemyType) {
@@ -1698,7 +1721,29 @@ export function createEnemySystem(scene, grid, options = {}) {
       travelWaypoints,
       spawnIndex,
       deathExplosionProcessed: false,
+      networkId: 0,
     };
+
+    const baseHealth = Math.max(0.01, Number(enemyType.health) || 0.01);
+    const configuredMaxHealth = Number(spawnOptions?.maxHealth);
+    const resolvedMaxHealth = Number.isFinite(configuredMaxHealth) && configuredMaxHealth > 0
+      ? configuredMaxHealth
+      : (baseHealth * enemyHealthMultiplier);
+    const configuredHealth = Number(spawnOptions?.health);
+    const resolvedHealth = Number.isFinite(configuredHealth)
+      ? THREE.MathUtils.clamp(configuredHealth, 0, resolvedMaxHealth)
+      : resolvedMaxHealth;
+    enemy.maxHealth = Math.max(0.01, resolvedMaxHealth);
+    enemy.health = THREE.MathUtils.clamp(resolvedHealth, 0, enemy.maxHealth);
+
+    const explicitNetworkId = parseEnemyNetworkId(spawnOptions?.networkId);
+    if (explicitNetworkId != null) {
+      enemy.networkId = explicitNetworkId;
+      nextEnemyNetworkId = Math.max(nextEnemyNetworkId, explicitNetworkId + 1);
+    } else {
+      enemy.networkId = nextEnemyNetworkId;
+      nextEnemyNetworkId += 1;
+    }
 
     setEnemyWorldPosition(enemy, enemy.pathCenter, enemy.pathForward);
     applyEnemyOrientation(enemy);
@@ -1706,6 +1751,20 @@ export function createEnemySystem(scene, grid, options = {}) {
     enemyMesh.userData.bodyCenterOffsetY = bodyMesh.position.y;
     enemyMesh.userData.bodyHalfSize = enemyType.size * 0.5;
     enemyMesh.userData.hitSphereRadius = enemyType.radius;
+    enemyMesh.userData.networkId = enemy.networkId;
+
+    if (spawnOptions?.position && typeof spawnOptions.position === "object") {
+      const px = Number(spawnOptions.position.x);
+      const py = Number(spawnOptions.position.y);
+      const pz = Number(spawnOptions.position.z);
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        tempCenterPosition.set(px, py, pz);
+        setEnemyWorldPosition(enemy, tempCenterPosition, enemy.pathForward);
+        applyEnemyOrientation(enemy);
+      }
+    }
+
+    updateHealthBar(enemy);
 
     return enemy;
   }
@@ -1719,6 +1778,42 @@ export function createEnemySystem(scene, grid, options = {}) {
       ENEMY_CONFIG.healthBarSaturation,
       ENEMY_CONFIG.healthBarLightness
     );
+  }
+
+  function addEnemyToActiveList(enemy, { emitSpawn = true } = {}) {
+    if (!enemy) {
+      return false;
+    }
+    activeEnemies.push(enemy);
+    if (Number.isInteger(enemy.networkId) && enemy.networkId > 0) {
+      enemyByNetworkId.set(enemy.networkId, enemy);
+    }
+    if (emitSpawn && onEnemySpawn) {
+      onEnemySpawn({
+        enemyId: enemy.networkId,
+        type: enemy.type,
+        spawnIndex: enemy.spawnIndex,
+        health: enemy.health,
+        maxHealth: enemy.maxHealth,
+        position: {
+          x: enemy.mesh.position.x,
+          y: enemy.mesh.position.y,
+          z: enemy.mesh.position.z,
+        },
+      });
+    }
+    return true;
+  }
+
+  function removeEnemyAtIndex(index) {
+    if (index < 0 || index >= activeEnemies.length) {
+      return;
+    }
+    const enemy = activeEnemies[index];
+    if (enemy && Number.isInteger(enemy.networkId)) {
+      enemyByNetworkId.delete(enemy.networkId);
+    }
+    activeEnemies.splice(index, 1);
   }
 
   function createDissolveMaterial(sourceMaterial) {
@@ -1867,25 +1962,78 @@ export function createEnemySystem(scene, grid, options = {}) {
     });
   }
 
-  function applyDamage(enemy, amount) {
-    if (!enemy.alive || enemy.dying) return;
-    enemy.health = Math.max(0, enemy.health - amount);
+  function emitEnemyDamageEvent(enemy, damageAmount) {
+    if (!onEnemyDamaged || !enemy) {
+      return;
+    }
+    onEnemyDamaged({
+      enemyId: enemy.networkId,
+      health: enemy.health,
+      maxHealth: enemy.maxHealth,
+      damage: damageAmount,
+      dead: enemy.health <= 0,
+      position: {
+        x: enemy.mesh.position.x,
+        y: enemy.mesh.position.y,
+        z: enemy.mesh.position.z,
+      },
+    });
+  }
+
+  function handleEnemyDefeat(enemy) {
+    if (!enemy || !enemy.alive || enemy.dying) {
+      return;
+    }
+    if (onEnemyDefeated) {
+      const configuredReward = Number(ENEMY_TYPES[enemy.type]?.cashReward);
+      const cashReward = Number.isFinite(configuredReward)
+        ? Math.max(0, Math.floor(configuredReward))
+        : Math.max(1, Math.floor(enemy.maxHealth || 1));
+      if (cashReward > 0) {
+        const dropPosition = getEnemyCollisionCenter(enemy, tempDefeatDropPosition).clone();
+        onEnemyDefeated(cashReward, enemy.type, dropPosition, enemy.networkId);
+      }
+    }
+    startEnemyDissolve(enemy);
+    triggerEnemyDeathExplosion(enemy);
+  }
+
+  function applyDamage(enemy, amount, options = {}) {
+    if (!enemy || !enemy.alive || enemy.dying) {
+      return false;
+    }
+
+    const safeAmount = Number(amount);
+    if (!Number.isFinite(safeAmount) || safeAmount <= 0) {
+      return false;
+    }
+
+    const force = options?.force === true;
+    if (!damageEnabled && !force) {
+      if (onDamageRequested && Number.isInteger(enemy.networkId)) {
+        onDamageRequested({
+          enemyId: enemy.networkId,
+          damage: safeAmount,
+        });
+      }
+      return false;
+    }
+
+    const previousHealth = enemy.health;
+    enemy.health = Math.max(0, enemy.health - safeAmount);
+    if (enemy.health >= previousHealth) {
+      return false;
+    }
+
     triggerHitPulse(enemy);
     updateHealthBar(enemy);
-    if (enemy.health <= 0) {
-      if (onEnemyDefeated) {
-        const configuredReward = Number(ENEMY_TYPES[enemy.type]?.cashReward);
-        const cashReward = Number.isFinite(configuredReward)
-          ? Math.max(0, Math.floor(configuredReward))
-          : Math.max(1, Math.floor(enemy.maxHealth || 1));
-        if (cashReward > 0) {
-          const dropPosition = getEnemyCollisionCenter(enemy, tempDefeatDropPosition).clone();
-          onEnemyDefeated(cashReward, enemy.type, dropPosition);
-        }
-      }
-      startEnemyDissolve(enemy);
-      triggerEnemyDeathExplosion(enemy);
+    if (options?.suppressDamageEvent !== true) {
+      emitEnemyDamageEvent(enemy, previousHealth - enemy.health);
     }
+    if (enemy.health <= 0) {
+      handleEnemyDefeat(enemy);
+    }
+    return true;
   }
 
   function findActiveEnemyByMesh(enemyMesh) {
@@ -1899,6 +2047,14 @@ export function createEnemySystem(scene, grid, options = {}) {
       }
     }
     return null;
+  }
+
+  function findActiveEnemyById(enemyId) {
+    const normalizedId = parseEnemyNetworkId(enemyId);
+    if (normalizedId == null) {
+      return null;
+    }
+    return enemyByNetworkId.get(normalizedId) ?? null;
   }
 
   function isEnemyMeshSlowed(enemyMesh) {
@@ -2062,7 +2218,7 @@ export function createEnemySystem(scene, grid, options = {}) {
 
         const enemy = createEnemyMesh(spawnEvent.type, spawnIndex);
         if (enemy) {
-          activeEnemies.push(enemy);
+          addEnemyToActiveList(enemy, { emitSpawn: true });
         }
         spawnEventCursor += 1;
       }
@@ -2072,7 +2228,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       const enemy = activeEnemies[i];
 
       if (!enemy.alive && !enemy.dying) {
-        activeEnemies.splice(i, 1);
+        removeEnemyAtIndex(i);
         continue;
       }
 
@@ -2092,7 +2248,7 @@ export function createEnemySystem(scene, grid, options = {}) {
           for (const dissolveMaterial of enemy.dissolveMaterials) {
             dissolveMaterial.dispose();
           }
-          activeEnemies.splice(i, 1);
+          removeEnemyAtIndex(i);
         }
         continue;
       }
@@ -2102,7 +2258,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       if (isEnemyFullyInsideEndCube(enemy)) {
         enemy.alive = false;
         scene.remove(enemy.mesh);
-        activeEnemies.splice(i, 1);
+        removeEnemyAtIndex(i);
         continue;
       }
 
@@ -2118,11 +2274,15 @@ export function createEnemySystem(scene, grid, options = {}) {
 
   function applyDamageAtPoint(point, hitRadius, damage) {
     const safeHitRadius = Math.max(0, Number(hitRadius) || 0);
+    const safeDamage = Number(damage);
+    if (!Number.isFinite(safeDamage) || safeDamage <= 0) {
+      return false;
+    }
     let hitAny = false;
     for (const enemy of activeEnemies) {
       if (!enemy.alive || enemy.dying) continue;
       if (isPointNearEnemyBody(enemy, point, safeHitRadius)) {
-        applyDamage(enemy, damage);
+        applyDamage(enemy, safeDamage);
         hitAny = true;
       }
     }
@@ -2148,11 +2308,131 @@ export function createEnemySystem(scene, grid, options = {}) {
         return false;
       }
 
-      applyDamage(enemy, damage);
-      return true;
+      return applyDamage(enemy, damage);
     }
 
     return false;
+  }
+
+  function applyDamageToEnemyId(enemyId, damage, options = {}) {
+    const enemy = findActiveEnemyById(enemyId);
+    if (!enemy) {
+      return false;
+    }
+    return applyDamage(enemy, damage, options);
+  }
+
+  function setEnemyHealthFromNetwork(enemyId, health, maxHealth = null) {
+    const enemy = findActiveEnemyById(enemyId);
+    if (!enemy || !enemy.alive || enemy.dying) {
+      return false;
+    }
+
+    const nextMax = Number(maxHealth);
+    if (Number.isFinite(nextMax) && nextMax > 0) {
+      enemy.maxHealth = Math.max(0.01, nextMax);
+    }
+
+    const nextHealthValue = Number(health);
+    if (!Number.isFinite(nextHealthValue)) {
+      return false;
+    }
+
+    const previousHealth = enemy.health;
+    enemy.health = THREE.MathUtils.clamp(nextHealthValue, 0, enemy.maxHealth);
+    if (enemy.health < previousHealth) {
+      triggerHitPulse(enemy);
+    }
+    updateHealthBar(enemy);
+
+    if (enemy.health <= 0) {
+      handleEnemyDefeat(enemy);
+    }
+
+    return true;
+  }
+
+  function setEnemyHealthMultiplier(multiplier = 1) {
+    const safeMultiplier = Number(multiplier);
+    if (!Number.isFinite(safeMultiplier) || safeMultiplier <= 0) {
+      return enemyHealthMultiplier;
+    }
+    enemyHealthMultiplier = safeMultiplier;
+    for (const enemy of activeEnemies) {
+      if (!enemy?.alive || enemy.dying) {
+        continue;
+      }
+      const baseHealth = Math.max(0.01, Number(ENEMY_TYPES[enemy.type]?.health) || enemy.maxHealth || 1);
+      const healthRatio = enemy.maxHealth > 0
+        ? THREE.MathUtils.clamp(enemy.health / enemy.maxHealth, 0, 1)
+        : 1;
+      enemy.maxHealth = Math.max(0.01, baseHealth * enemyHealthMultiplier);
+      enemy.health = THREE.MathUtils.clamp(enemy.maxHealth * healthRatio, 0, enemy.maxHealth);
+      updateHealthBar(enemy);
+    }
+    return enemyHealthMultiplier;
+  }
+
+  function setDamageEnabled(nextEnabled) {
+    damageEnabled = !!nextEnabled;
+    return damageEnabled;
+  }
+
+  function getDamageEnabled() {
+    return damageEnabled;
+  }
+
+  function spawnNetworkEnemy(snapshot = {}) {
+    const existingEnemyId = parseEnemyNetworkId(snapshot?.enemyId);
+    if (existingEnemyId != null && enemyByNetworkId.has(existingEnemyId)) {
+      const existingEnemy = enemyByNetworkId.get(existingEnemyId);
+      if (existingEnemy && snapshot?.position && typeof snapshot.position === "object") {
+        const px = Number(snapshot.position.x);
+        const py = Number(snapshot.position.y);
+        const pz = Number(snapshot.position.z);
+        if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+          existingEnemy.mesh.position.set(px, py, pz);
+        }
+      }
+      setEnemyHealthFromNetwork(existingEnemyId, snapshot?.health, snapshot?.maxHealth);
+      return true;
+    }
+
+    const spawnIndex = Number.isInteger(snapshot?.spawnIndex)
+      ? snapshot.spawnIndex
+      : 0;
+    const safeSpawnIndex = ((Math.floor(spawnIndex) % spawnCells.length) + spawnCells.length) % spawnCells.length;
+    const enemy = createEnemyMesh(
+      normalizeEnemyType(snapshot?.type),
+      safeSpawnIndex,
+      {
+        networkId: snapshot?.enemyId,
+        health: snapshot?.health,
+        maxHealth: snapshot?.maxHealth,
+        position: snapshot?.position,
+      }
+    );
+    if (!enemy) {
+      return false;
+    }
+    return addEnemyToActiveList(enemy, { emitSpawn: false });
+  }
+
+  function getActiveEnemySnapshots() {
+    return activeEnemies
+      .filter((enemy) => enemy?.alive && !enemy.dying)
+      .map((enemy) => ({
+        enemyId: enemy.networkId,
+        type: enemy.type,
+        spawnIndex: enemy.spawnIndex,
+        health: enemy.health,
+        maxHealth: enemy.maxHealth,
+        position: {
+          x: enemy.mesh.position.x,
+          y: enemy.mesh.position.y,
+          z: enemy.mesh.position.z,
+        },
+      }));
   }
 
   function isPointNearEnemyMesh(enemyMesh, point, radius = 0) {
@@ -2294,6 +2574,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       disposeEnemyVisual(enemy);
     }
     activeEnemies.length = 0;
+    enemyByNetworkId.clear();
     for (let i = deathExplosionEffects.length - 1; i >= 0; i -= 1) {
       const effect = deathExplosionEffects[i];
       if (effect?.mesh?.parent) {
@@ -2306,6 +2587,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     spawnEventCursor = 0;
     waveElapsedTime = 0;
     spawnCellCursor = 0;
+    nextEnemyNetworkId = 1;
   }
 
   function dispose() {
@@ -2320,8 +2602,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     if (!enemy) {
       return false;
     }
-    activeEnemies.push(enemy);
-    return true;
+    return addEnemyToActiveList(enemy, { emitSpawn: true });
   }
 
   function initializePathfindingState() {
@@ -2352,17 +2633,24 @@ export function createEnemySystem(scene, grid, options = {}) {
     update,
     getEnemies,
     getDamageableEnemies,
+    getActiveEnemySnapshots,
     getTargetInRange,
     isEnemyMeshSlowed,
     applyTemporarySlowToEnemyMesh,
     applyTemporarySlowInAabb,
     applyDamageAtPoint,
     applyDamageToEnemyMesh,
+    applyDamageToEnemyId,
+    setEnemyHealthFromNetwork,
     isPointNearEnemyMesh,
     startWave,
     isWaveClear,
     applyTechGrants,
     upgradeSlowEnemies,
+    setEnemyHealthMultiplier,
+    setDamageEnabled,
+    getDamageEnabled,
+    spawnNetworkEnemy,
     canBlockCells,
     canBlockCell,
     setBlockedCells,

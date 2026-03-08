@@ -5,6 +5,7 @@ import { createEnemySystem } from "./enemies.js";
 import { createTowerSystem } from "./towers.js";
 import { createLevelEditor } from "./levelEditor.js";
 import { createUiOverlay } from "./uiOverlay.js";
+import { createMultiplayerController } from "./multiplayer.js";
 import { GAME_CONFIG } from "./config.js";
 
 const SCENE_CONFIG = GAME_CONFIG.scene;
@@ -36,6 +37,7 @@ const RUN_WEAPON_OPTIONS = Array.isArray(PLAYER_CONFIG.weaponSelection?.options)
         : "weapon_machine_gun",
     }))
   : DEFAULT_RUN_WEAPON_OPTIONS.slice();
+const RUN_WEAPON_TYPE_SET = new Set(RUN_WEAPON_OPTIONS.map((option) => option.type));
 const MENU_MODE_TECH_TREE = "tech_tree";
 const MENU_MODE_WEAPON_SELECT = "weapon_select";
 const TECH_TREE_MENU_TITLE = "Research Tree";
@@ -93,6 +95,216 @@ const BUILD_PREVIEW_ARROW_RADIUS_FROM_CELL = 0.07;
 const BUILD_PREVIEW_ARROW_VERTICAL_JITTER = 0.06;
 const FPS_SAMPLE_WINDOW_SECONDS = 0.35;
 const EDITOR_TOOL_ROTATE_INTERVAL_MS = 200;
+const MULTIPLAYER_GAME_ID = "ed698dfc-1c2f-482e-a733-22339afeeb55";
+const MULTIPLAYER_MAX_PLAYERS = 2;
+const MULTIPLAYER_HEALTH_SCALE_SOLO = 1;
+const MULTIPLAYER_HEALTH_SCALE_COOP = 2;
+const MULTIPLAYER_TRANSFORM_SEND_INTERVAL = 1 / 20;
+const MULTIPLAYER_PREVIEW_SEND_INTERVAL = 1 / 15;
+const MULTIPLAYER_STATE_SYNC_INTERVAL = 0.75;
+const MULTIPLAYER_MAX_WEAPON_FX_EVENTS_PER_PACKET = 8;
+const MULTIPLAYER_MAX_PENDING_WEAPON_FX_EVENTS = 48;
+const MULTIPLAYER_MESSAGE_TYPE = {
+  stateSync: "state_sync",
+  waveCmd: "wave_cmd",
+  speedPauseCmd: "speed_pause_cmd",
+  towerPlaceCommit: "tower_place_commit",
+  techChoiceCommit: "tech_choice_commit",
+  weaponChoiceCommit: "weapon_choice_commit",
+  enemySpawn: "enemy_spawn",
+  enemyDamage: "enemy_damage",
+  enemyDeath: "enemy_death",
+  hostEnded: "host_ended",
+  playerTransform: "player_transform",
+  towerPreview: "tower_preview",
+};
+const MULTIPLAYER_DEBUG = new URLSearchParams(window.location.search).get("mplog") !== "0";
+const MULTIPLAYER_UNRELIABLE_STATS_LOG_INTERVAL_MS = 3000;
+
+function mpLog(message, details) {
+  if (!MULTIPLAYER_DEBUG) {
+    return;
+  }
+  if (details === undefined) {
+    console.log(`[Multiplayer] ${message}`);
+    return;
+  }
+  console.log(`[Multiplayer] ${message}`, details);
+}
+
+function mpWarn(message, details) {
+  if (details === undefined) {
+    console.warn(`[Multiplayer] ${message}`);
+    return;
+  }
+  console.warn(`[Multiplayer] ${message}`, details);
+}
+
+function roundMultiplayerLogNumber(value, digits = 2) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  const factor = 10 ** Math.max(0, Math.floor(digits));
+  return Math.round(numeric * factor) / factor;
+}
+
+function summarizePositionForLog(source = {}) {
+  if (!source || typeof source !== "object") {
+    return null;
+  }
+  const x = roundMultiplayerLogNumber(source.x, 2);
+  const y = roundMultiplayerLogNumber(source.y, 2);
+  const z = roundMultiplayerLogNumber(source.z, 2);
+  if (x === null || y === null || z === null) {
+    return null;
+  }
+  return { x, y, z };
+}
+
+function summarizeTowerPlacementForLog(placement = {}) {
+  if (!placement || typeof placement !== "object") {
+    return null;
+  }
+  const summary = {
+    towerType: typeof placement.towerType === "string" ? placement.towerType : null,
+    cellX: Number.isInteger(placement.cellX) ? placement.cellX : null,
+    cellZ: Number.isInteger(placement.cellZ) ? placement.cellZ : null,
+  };
+  if (Number.isInteger(placement.cellY)) {
+    summary.cellY = placement.cellY;
+  }
+  if (Array.isArray(placement.cells)) {
+    summary.cells = placement.cells.length;
+  }
+  if (placement.anchor && typeof placement.anchor === "object") {
+    summary.anchor = summarizePositionForLog(placement.anchor);
+  }
+  if (typeof placement.anchorKey === "string") {
+    summary.anchorKey = placement.anchorKey;
+  }
+  return summary;
+}
+
+function summarizeMultiplayerStateForLog(state = {}) {
+  return {
+    ready: state.ready === true,
+    inLobby: state.inLobby === true,
+    isHost: state.isHost === true,
+    lobbyCode: typeof state.lobbyCode === "string" ? state.lobbyCode : null,
+    localPeerId: typeof state.localPeerId === "string" ? state.localPeerId : null,
+    peerCount: Number.isFinite(Number(state.peerCount)) ? Number(state.peerCount) : 0,
+    peerIds: Array.isArray(state.peerIds) ? [...state.peerIds] : [],
+  };
+}
+
+function summarizeMultiplayerPayloadForLog(type, payload = {}) {
+  if (!payload || typeof payload !== "object") {
+    return payload;
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.stateSync) {
+    const snapshot = payload.snapshot && typeof payload.snapshot === "object"
+      ? payload.snapshot
+      : null;
+    return {
+      waveState: typeof payload.waveState === "string" ? payload.waveState : null,
+      currentWave: Number.isFinite(Number(payload.currentWave)) ? Number(payload.currentWave) : null,
+      waveDelay: roundMultiplayerLogNumber(payload.waveDelay, 2),
+      queuedWaveNumber: Number.isInteger(payload.queuedWaveNumber) ? payload.queuedWaveNumber : null,
+      buildPhaseRemainingSeconds: roundMultiplayerLogNumber(payload.buildPhaseRemainingSeconds, 2),
+      paused: payload.paused === true,
+      speedMultiplier: roundMultiplayerLogNumber(payload.speedMultiplier, 3),
+      playerCount: Number.isFinite(Number(payload.playerCount)) ? Number(payload.playerCount) : null,
+      enemyHealthMultiplier: roundMultiplayerLogNumber(payload.enemyHealthMultiplier, 3),
+      snapshotTowers: Array.isArray(snapshot?.towers) ? snapshot.towers.length : 0,
+      snapshotEnemies: Array.isArray(snapshot?.enemies) ? snapshot.enemies.length : 0,
+    };
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.waveCmd) {
+    return {
+      request: payload.request === true,
+      action: typeof payload.action === "string" ? payload.action : null,
+      waveNumber: Number.isInteger(payload.waveNumber) ? payload.waveNumber : null,
+    };
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.speedPauseCmd) {
+    return {
+      request: payload.request === true,
+      action: typeof payload.action === "string" ? payload.action : null,
+      paused: payload.paused === true,
+      speedMultiplier: roundMultiplayerLogNumber(payload.speedMultiplier, 3),
+    };
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.towerPlaceCommit) {
+    return {
+      request: payload.request === true,
+      rejected: payload.rejected === true,
+      requestId: typeof payload.requestId === "string" ? payload.requestId : null,
+      ownerId: typeof payload.ownerId === "string" ? payload.ownerId : null,
+      placement: summarizeTowerPlacementForLog(payload.placement),
+    };
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.techChoiceCommit) {
+    return {
+      ownerId: typeof payload.ownerId === "string" ? payload.ownerId : null,
+      grantKeys: payload.grants && typeof payload.grants === "object"
+        ? Object.keys(payload.grants)
+        : [],
+    };
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.weaponChoiceCommit) {
+    return {
+      ownerId: typeof payload.ownerId === "string" ? payload.ownerId : null,
+      weaponType: typeof payload.weaponType === "string" ? payload.weaponType : null,
+    };
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.enemySpawn) {
+    return {
+      enemyId: typeof payload.enemyId === "string" ? payload.enemyId : null,
+      enemyType: typeof payload.enemyType === "string" ? payload.enemyType : null,
+      health: roundMultiplayerLogNumber(payload.health, 2),
+      maxHealth: roundMultiplayerLogNumber(payload.maxHealth, 2),
+      position: summarizePositionForLog(payload.position),
+    };
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.enemyDamage) {
+    return {
+      request: payload.request === true,
+      enemyId: typeof payload.enemyId === "string" ? payload.enemyId : null,
+      damage: roundMultiplayerLogNumber(payload.damage, 2),
+      health: roundMultiplayerLogNumber(payload.health, 2),
+      maxHealth: roundMultiplayerLogNumber(payload.maxHealth, 2),
+    };
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.enemyDeath) {
+    return {
+      enemyId: typeof payload.enemyId === "string" ? payload.enemyId : null,
+      cashReward: roundMultiplayerLogNumber(payload.cashReward, 2),
+      maxHealth: roundMultiplayerLogNumber(payload.maxHealth, 2),
+      dropPosition: summarizePositionForLog(payload.dropPosition),
+    };
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.hostEnded) {
+    return {};
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.playerTransform) {
+    return {
+      x: roundMultiplayerLogNumber(payload.x, 2),
+      y: roundMultiplayerLogNumber(payload.y, 2),
+      z: roundMultiplayerLogNumber(payload.z, 2),
+      yaw: roundMultiplayerLogNumber(payload.yaw, 3),
+    };
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.towerPreview) {
+    return {
+      active: payload.active === true,
+      valid: payload.valid === true,
+      towerType: typeof payload.towerType === "string" ? payload.towerType : null,
+      placement: summarizeTowerPlacementForLog(payload.placement),
+    };
+  }
+  return payload;
+}
 const LEVELING_CONFIG = ECONOMY_CONFIG.leveling ?? {};
 const DEFAULT_XP_PER_KILL = 1;
 const XP_PER_KILL = Number.isFinite(Number(LEVELING_CONFIG.xpPerKill))
@@ -321,6 +533,190 @@ const EDITOR_TOOL_INVENTORY = [
 ];
 
 const app = document.getElementById("app");
+const initialLobbyQueryCode = (() => {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("lobby");
+  return typeof code === "string" && code.trim().length > 0
+    ? code.trim()
+    : null;
+})();
+
+const REMOTE_PLAYER_WIDTH = 0.95;
+const REMOTE_PLAYER_HEIGHT = 2.05;
+const REMOTE_PLAYER_DEPTH = 0.62;
+const remotePlayerGeometry = new THREE.BoxGeometry(
+  REMOTE_PLAYER_WIDTH,
+  REMOTE_PLAYER_HEIGHT,
+  REMOTE_PLAYER_DEPTH
+);
+const remotePlayerMaterial = new THREE.MeshStandardMaterial({
+  color: 0x080808,
+  roughness: 0.85,
+  metalness: 0.05,
+});
+const remotePlayersByPeerId = new Map();
+const pendingLocalWeaponFxEvents = [];
+const remoteWeaponProjectileGeometryBySize = new Map();
+const remoteWeaponProjectileMaterialByType = new Map();
+const remoteWeaponProjectiles = [];
+const remoteWeaponBeams = [];
+const remoteWeaponVectorA = new THREE.Vector3();
+const remoteWeaponVectorB = new THREE.Vector3();
+const remoteWeaponVectorC = new THREE.Vector3();
+const remoteWeaponYAxis = new THREE.Vector3(0, 1, 0);
+const pendingTowerRequestsById = new Map();
+let nextTowerRequestId = 1;
+let pendingAutoJoinLobbyCode = initialLobbyQueryCode;
+let localMultiplayerPeerId = "local";
+let multiplayerTransformTimer = 0;
+let multiplayerPreviewTimer = 0;
+let multiplayerStateSyncTimer = 0;
+let lastBroadcastHostStateSignature = "";
+let hasAppliedHostSnapshot = false;
+const multiplayerUnreliableStats = {
+  lastFlushAtMs: 0,
+  rxPlayerTransform: 0,
+  rxTowerPreview: 0,
+  txPlayerTransform: 0,
+  txTowerPreview: 0,
+};
+
+function noteUnreliableMultiplayerTraffic(direction, type) {
+  if (direction === "rx") {
+    if (type === MULTIPLAYER_MESSAGE_TYPE.playerTransform) {
+      multiplayerUnreliableStats.rxPlayerTransform += 1;
+      return;
+    }
+    if (type === MULTIPLAYER_MESSAGE_TYPE.towerPreview) {
+      multiplayerUnreliableStats.rxTowerPreview += 1;
+    }
+    return;
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.playerTransform) {
+    multiplayerUnreliableStats.txPlayerTransform += 1;
+    return;
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.towerPreview) {
+    multiplayerUnreliableStats.txTowerPreview += 1;
+  }
+}
+
+function flushUnreliableMultiplayerStatsLog(force = false) {
+  if (!MULTIPLAYER_DEBUG) {
+    return;
+  }
+  const nowMs = typeof performance?.now === "function" ? performance.now() : Date.now();
+  if (!force && (nowMs - multiplayerUnreliableStats.lastFlushAtMs) < MULTIPLAYER_UNRELIABLE_STATS_LOG_INTERVAL_MS) {
+    return;
+  }
+  const {
+    rxPlayerTransform,
+    rxTowerPreview,
+    txPlayerTransform,
+    txTowerPreview,
+  } = multiplayerUnreliableStats;
+  const total = rxPlayerTransform + rxTowerPreview + txPlayerTransform + txTowerPreview;
+  multiplayerUnreliableStats.lastFlushAtMs = nowMs;
+  multiplayerUnreliableStats.rxPlayerTransform = 0;
+  multiplayerUnreliableStats.rxTowerPreview = 0;
+  multiplayerUnreliableStats.txPlayerTransform = 0;
+  multiplayerUnreliableStats.txTowerPreview = 0;
+  if (total <= 0) {
+    return;
+  }
+  mpLog("Unreliable traffic (since last sample)", {
+    txPlayerTransform,
+    txTowerPreview,
+    rxPlayerTransform,
+    rxTowerPreview,
+  });
+}
+
+if (initialLobbyQueryCode) {
+  mpLog("Detected lobby code in URL query", { lobbyCode: initialLobbyQueryCode });
+}
+
+function getLobbyShareUrl(lobbyCode) {
+  const url = new URL(window.location.href);
+  if (typeof lobbyCode === "string" && lobbyCode.length > 0) {
+    url.searchParams.set("lobby", lobbyCode);
+  } else {
+    url.searchParams.delete("lobby");
+  }
+  return url.toString();
+}
+
+function createShareOverlayUi() {
+  const root = document.createElement("div");
+  root.style.position = "fixed";
+  root.style.left = "12px";
+  root.style.bottom = "12px";
+  root.style.zIndex = "30";
+  root.style.display = "flex";
+  root.style.flexDirection = "column";
+  root.style.gap = "8px";
+  root.style.pointerEvents = "auto";
+
+  const shareButton = document.createElement("button");
+  shareButton.type = "button";
+  shareButton.textContent = "Share";
+  shareButton.style.padding = "8px 12px";
+  shareButton.style.font = "600 14px system-ui, sans-serif";
+  shareButton.style.borderRadius = "8px";
+  shareButton.style.border = "1px solid rgba(0,0,0,0.25)";
+  shareButton.style.background = "rgba(255,255,255,0.92)";
+  shareButton.style.color = "#111";
+  shareButton.style.cursor = "pointer";
+  root.appendChild(shareButton);
+
+  const panel = document.createElement("div");
+  panel.style.display = "none";
+  panel.style.alignItems = "center";
+  panel.style.gap = "6px";
+  panel.style.padding = "8px";
+  panel.style.borderRadius = "8px";
+  panel.style.background = "rgba(255,255,255,0.95)";
+  panel.style.border = "1px solid rgba(0,0,0,0.25)";
+  panel.style.maxWidth = "min(640px, calc(100vw - 24px))";
+
+  const linkInput = document.createElement("input");
+  linkInput.type = "text";
+  linkInput.readOnly = true;
+  linkInput.style.flex = "1 1 auto";
+  linkInput.style.minWidth = "220px";
+  linkInput.style.padding = "6px 8px";
+  linkInput.style.borderRadius = "6px";
+  linkInput.style.border = "1px solid rgba(0,0,0,0.25)";
+  linkInput.style.font = "12px ui-monospace, SFMono-Regular, Menlo, monospace";
+  linkInput.addEventListener("focus", () => {
+    linkInput.select();
+  });
+  panel.appendChild(linkInput);
+
+  const nativeShareButton = document.createElement("button");
+  nativeShareButton.type = "button";
+  nativeShareButton.textContent = "Native Share";
+  nativeShareButton.style.padding = "6px 10px";
+  nativeShareButton.style.borderRadius = "6px";
+  nativeShareButton.style.border = "1px solid rgba(0,0,0,0.25)";
+  nativeShareButton.style.background = "rgba(0,0,0,0.06)";
+  nativeShareButton.style.color = "#111";
+  nativeShareButton.style.cursor = "pointer";
+  nativeShareButton.style.display = typeof navigator.share === "function" ? "inline-flex" : "none";
+  panel.appendChild(nativeShareButton);
+  root.appendChild(panel);
+  app.appendChild(root);
+
+  return {
+    root,
+    shareButton,
+    panel,
+    linkInput,
+    nativeShareButton,
+  };
+}
+
+const shareOverlayUi = createShareOverlayUi();
 
 const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
 
@@ -491,6 +887,560 @@ let enemySystem;
 let towerSystem;
 let levelEditor;
 let lastEditorToolRotateAtMs = -Infinity;
+let multiplayerController;
+
+function getMultiplayerState() {
+  if (!multiplayerController || typeof multiplayerController.getState !== "function") {
+    return {
+      ready: false,
+      inLobby: false,
+      isHost: false,
+      lobbyCode: null,
+      localPeerId: localMultiplayerPeerId,
+      peerCount: 0,
+      peerIds: [],
+    };
+  }
+  const state = multiplayerController.getState();
+  if (typeof state?.localPeerId === "string" && state.localPeerId.length > 0) {
+    localMultiplayerPeerId = state.localPeerId;
+  }
+  return {
+    ...state,
+    localPeerId: localMultiplayerPeerId,
+  };
+}
+
+function isMultiplayerLobbyActive() {
+  return !!getMultiplayerState().inLobby;
+}
+
+function isMultiplayerHost() {
+  const state = getMultiplayerState();
+  return !!state.inLobby && !!state.isHost;
+}
+
+function isMultiplayerGuest() {
+  const state = getMultiplayerState();
+  return !!state.inLobby && !state.isHost;
+}
+
+function isMultiplayerWithPeer() {
+  const state = getMultiplayerState();
+  return !!state.inLobby && Number(state.peerCount) > 0;
+}
+
+function getConnectedPlayerCount() {
+  const state = getMultiplayerState();
+  if (!state.inLobby) {
+    return 1;
+  }
+  return Math.max(1, Math.min(MULTIPLAYER_MAX_PLAYERS, 1 + Math.max(0, state.peerCount || 0)));
+}
+
+function getEnemyHealthMultiplierForCurrentPlayerCount() {
+  return getConnectedPlayerCount() >= 2
+    ? MULTIPLAYER_HEALTH_SCALE_COOP
+    : MULTIPLAYER_HEALTH_SCALE_SOLO;
+}
+
+function shouldHostControlSimulation() {
+  if (!isMultiplayerLobbyActive()) {
+    return true;
+  }
+  return isMultiplayerHost();
+}
+
+function disposeRemotePlayerEntry(peerId) {
+  const entry = remotePlayersByPeerId.get(peerId);
+  if (!entry) {
+    return;
+  }
+  if (entry.mesh?.parent) {
+    entry.mesh.parent.remove(entry.mesh);
+  }
+  remotePlayersByPeerId.delete(peerId);
+  mpLog("Removed remote player mesh", { peerId, remainingRemotePlayers: remotePlayersByPeerId.size });
+}
+
+function clearAllRemotePlayers() {
+  for (const peerId of remotePlayersByPeerId.keys()) {
+    disposeRemotePlayerEntry(peerId);
+  }
+}
+
+function ensureRemotePlayerEntry(peerId) {
+  if (typeof peerId !== "string" || peerId.length === 0) {
+    return null;
+  }
+  let entry = remotePlayersByPeerId.get(peerId);
+  if (entry?.mesh) {
+    return entry;
+  }
+  const mesh = new THREE.Mesh(remotePlayerGeometry, remotePlayerMaterial);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.visible = true;
+  scene.add(mesh);
+  entry = {
+    mesh,
+    lastUpdateAt: 0,
+  };
+  remotePlayersByPeerId.set(peerId, entry);
+  mpLog("Created remote player mesh", { peerId, remotePlayers: remotePlayersByPeerId.size });
+  return entry;
+}
+
+function applyRemotePlayerTransform(peerId, transform = {}) {
+  const entry = ensureRemotePlayerEntry(peerId);
+  if (!entry?.mesh) {
+    return false;
+  }
+  const px = Number(transform?.x);
+  const py = Number(transform?.y);
+  const pz = Number(transform?.z);
+  if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) {
+    return false;
+  }
+  const eyeHeight = Math.max(0.4, Number(grid?.eyeHeight) || 1.7);
+  entry.mesh.position.set(px, py - eyeHeight + (REMOTE_PLAYER_HEIGHT * 0.5), pz);
+  const yaw = Number(transform?.yaw);
+  if (Number.isFinite(yaw)) {
+    entry.mesh.rotation.y = yaw;
+  }
+  entry.lastUpdateAt = (typeof performance?.now === "function" ? performance.now() : Date.now());
+  return true;
+}
+
+function normalizeWeaponTypeForMultiplayerFx(rawType) {
+  const safeType = typeof rawType === "string" ? rawType : "";
+  if (RUN_WEAPON_TYPE_SET.has(safeType)) {
+    return safeType;
+  }
+  if (RUN_WEAPON_TYPE_SET.has("machineGun")) {
+    return "machineGun";
+  }
+  const [firstType] = RUN_WEAPON_TYPE_SET;
+  return typeof firstType === "string" ? firstType : "machineGun";
+}
+
+function sanitizeMultiplayerWeaponFxEvent(rawEvent) {
+  if (!rawEvent || typeof rawEvent !== "object") {
+    return null;
+  }
+  const kind = typeof rawEvent.kind === "string" ? rawEvent.kind : "";
+
+  if (kind === "projectile") {
+    const ox = Number(rawEvent?.origin?.x);
+    const oy = Number(rawEvent?.origin?.y);
+    const oz = Number(rawEvent?.origin?.z);
+    const dx = Number(rawEvent?.direction?.x);
+    const dy = Number(rawEvent?.direction?.y);
+    const dz = Number(rawEvent?.direction?.z);
+    if (
+      !Number.isFinite(ox)
+      || !Number.isFinite(oy)
+      || !Number.isFinite(oz)
+      || !Number.isFinite(dx)
+      || !Number.isFinite(dy)
+      || !Number.isFinite(dz)
+    ) {
+      return null;
+    }
+    const directionLength = Math.hypot(dx, dy, dz);
+    if (directionLength <= 1e-5) {
+      return null;
+    }
+    return {
+      kind: "projectile",
+      weaponType: normalizeWeaponTypeForMultiplayerFx(rawEvent.weaponType),
+      origin: { x: ox, y: oy, z: oz },
+      direction: {
+        x: dx / directionLength,
+        y: dy / directionLength,
+        z: dz / directionLength,
+      },
+      speed: THREE.MathUtils.clamp(Number(rawEvent.speed) || 0, 0.01, 240),
+      lifetime: THREE.MathUtils.clamp(Number(rawEvent.lifetime) || 0, 0.03, 4),
+      gravity: THREE.MathUtils.clamp(Number(rawEvent.gravity) || 0, 0, 220),
+      projectileSize: THREE.MathUtils.clamp(Number(rawEvent.projectileSize) || 0.2, 0.05, 2),
+    };
+  }
+
+  if (kind === "sniper_beam") {
+    const sx = Number(rawEvent?.start?.x);
+    const sy = Number(rawEvent?.start?.y);
+    const sz = Number(rawEvent?.start?.z);
+    const ex = Number(rawEvent?.end?.x);
+    const ey = Number(rawEvent?.end?.y);
+    const ez = Number(rawEvent?.end?.z);
+    if (
+      !Number.isFinite(sx)
+      || !Number.isFinite(sy)
+      || !Number.isFinite(sz)
+      || !Number.isFinite(ex)
+      || !Number.isFinite(ey)
+      || !Number.isFinite(ez)
+    ) {
+      return null;
+    }
+    return {
+      kind: "sniper_beam",
+      weaponType: "sniper",
+      start: { x: sx, y: sy, z: sz },
+      end: { x: ex, y: ey, z: ez },
+      duration: THREE.MathUtils.clamp(Number(rawEvent.duration) || 0.08, 0.02, 0.35),
+      beamWidth: THREE.MathUtils.clamp(Number(rawEvent.beamWidth) || 0.09, 0.02, 0.45),
+    };
+  }
+
+  return null;
+}
+
+function queueLocalWeaponFxEvent(rawEvent) {
+  const normalizedEvent = sanitizeMultiplayerWeaponFxEvent(rawEvent);
+  if (!normalizedEvent) {
+    return;
+  }
+  pendingLocalWeaponFxEvents.push(normalizedEvent);
+  const overflow = pendingLocalWeaponFxEvents.length - MULTIPLAYER_MAX_PENDING_WEAPON_FX_EVENTS;
+  if (overflow > 0) {
+    pendingLocalWeaponFxEvents.splice(0, overflow);
+  }
+}
+
+function drainPendingLocalWeaponFxEvents() {
+  if (pendingLocalWeaponFxEvents.length <= 0) {
+    return null;
+  }
+  const maxCount = Math.max(1, MULTIPLAYER_MAX_WEAPON_FX_EVENTS_PER_PACKET);
+  return pendingLocalWeaponFxEvents.splice(0, maxCount);
+}
+
+function getRemoteWeaponProjectileGeometry(size) {
+  const safeSize = THREE.MathUtils.clamp(Number(size) || 0.2, 0.05, 2);
+  const key = safeSize.toFixed(3);
+  let geometry = remoteWeaponProjectileGeometryBySize.get(key);
+  if (!geometry) {
+    geometry = new THREE.BoxGeometry(safeSize, safeSize, safeSize);
+    remoteWeaponProjectileGeometryBySize.set(key, geometry);
+  }
+  return geometry;
+}
+
+function getRemoteWeaponProjectileMaterial(weaponType) {
+  const normalizedType = normalizeWeaponTypeForMultiplayerFx(weaponType);
+  let material = remoteWeaponProjectileMaterialByType.get(normalizedType);
+  if (material) {
+    return material;
+  }
+  const sharedWeaponConfig = PLAYER_CONFIG.weapon ?? {};
+  const weaponConfig = (PLAYER_CONFIG.weapons ?? {})[normalizedType] ?? {};
+  const defaultColor = Number.isFinite(Number(sharedWeaponConfig.projectileColor))
+    ? Number(sharedWeaponConfig.projectileColor)
+    : 0xd4d8e0;
+  const defaultEmissive = Number.isFinite(Number(sharedWeaponConfig.projectileEmissive))
+    ? Number(sharedWeaponConfig.projectileEmissive)
+    : 0x202020;
+  material = new THREE.MeshStandardMaterial({
+    color: Number.isFinite(Number(weaponConfig.projectileColor))
+      ? Number(weaponConfig.projectileColor)
+      : defaultColor,
+    emissive: Number.isFinite(Number(weaponConfig.projectileEmissive))
+      ? Number(weaponConfig.projectileEmissive)
+      : defaultEmissive,
+    emissiveIntensity: Number.isFinite(Number(weaponConfig.projectileEmissiveIntensity))
+      ? Number(weaponConfig.projectileEmissiveIntensity)
+      : (Number.isFinite(Number(sharedWeaponConfig.projectileEmissiveIntensity))
+        ? Number(sharedWeaponConfig.projectileEmissiveIntensity)
+        : 0.7),
+    roughness: Number.isFinite(Number(weaponConfig.projectileRoughness))
+      ? Number(weaponConfig.projectileRoughness)
+      : (Number.isFinite(Number(sharedWeaponConfig.projectileRoughness))
+        ? Number(sharedWeaponConfig.projectileRoughness)
+        : 0.35),
+    metalness: Number.isFinite(Number(weaponConfig.projectileMetalness))
+      ? Number(weaponConfig.projectileMetalness)
+      : (Number.isFinite(Number(sharedWeaponConfig.projectileMetalness))
+        ? Number(sharedWeaponConfig.projectileMetalness)
+        : 0.2),
+  });
+  remoteWeaponProjectileMaterialByType.set(normalizedType, material);
+  return material;
+}
+
+function disposeRemoteWeaponProjectileEntry(entry) {
+  if (entry?.mesh?.parent) {
+    entry.mesh.parent.remove(entry.mesh);
+  }
+}
+
+function disposeRemoteWeaponBeamEntry(entry) {
+  if (entry?.mesh?.parent) {
+    entry.mesh.parent.remove(entry.mesh);
+  }
+  entry?.mesh?.geometry?.dispose?.();
+  entry?.material?.dispose?.();
+}
+
+function clearRemoteWeaponEffectsForPeer(peerId) {
+  if (typeof peerId !== "string" || peerId.length <= 0) {
+    return;
+  }
+  for (let i = remoteWeaponProjectiles.length - 1; i >= 0; i -= 1) {
+    if (remoteWeaponProjectiles[i].ownerPeerId !== peerId) {
+      continue;
+    }
+    disposeRemoteWeaponProjectileEntry(remoteWeaponProjectiles[i]);
+    remoteWeaponProjectiles.splice(i, 1);
+  }
+  for (let i = remoteWeaponBeams.length - 1; i >= 0; i -= 1) {
+    if (remoteWeaponBeams[i].ownerPeerId !== peerId) {
+      continue;
+    }
+    disposeRemoteWeaponBeamEntry(remoteWeaponBeams[i]);
+    remoteWeaponBeams.splice(i, 1);
+  }
+}
+
+function clearAllRemoteWeaponEffects() {
+  pendingLocalWeaponFxEvents.length = 0;
+  for (let i = remoteWeaponProjectiles.length - 1; i >= 0; i -= 1) {
+    disposeRemoteWeaponProjectileEntry(remoteWeaponProjectiles[i]);
+  }
+  remoteWeaponProjectiles.length = 0;
+  for (let i = remoteWeaponBeams.length - 1; i >= 0; i -= 1) {
+    disposeRemoteWeaponBeamEntry(remoteWeaponBeams[i]);
+  }
+  remoteWeaponBeams.length = 0;
+}
+
+function spawnRemoteWeaponProjectile(ownerPeerId, event) {
+  const projectileMesh = new THREE.Mesh(
+    getRemoteWeaponProjectileGeometry(event.projectileSize),
+    getRemoteWeaponProjectileMaterial(event.weaponType)
+  );
+  projectileMesh.castShadow = true;
+  projectileMesh.receiveShadow = true;
+  projectileMesh.position.set(event.origin.x, event.origin.y, event.origin.z);
+  scene.add(projectileMesh);
+
+  remoteWeaponVectorA.set(event.direction.x, event.direction.y, event.direction.z);
+  remoteWeaponVectorA.multiplyScalar(event.speed);
+  remoteWeaponProjectiles.push({
+    ownerPeerId,
+    weaponType: event.weaponType,
+    mesh: projectileMesh,
+    velocity: remoteWeaponVectorA.clone(),
+    gravity: event.gravity,
+    life: event.lifetime,
+  });
+}
+
+function spawnRemoteWeaponBeam(ownerPeerId, event) {
+  remoteWeaponVectorA.set(event.start.x, event.start.y, event.start.z);
+  remoteWeaponVectorB.set(event.end.x, event.end.y, event.end.z);
+  remoteWeaponVectorC.copy(remoteWeaponVectorB).sub(remoteWeaponVectorA);
+  const beamLength = Math.max(0.01, remoteWeaponVectorC.length());
+  if (!Number.isFinite(beamLength) || beamLength <= 0.01) {
+    return;
+  }
+  const sniperConfig = (PLAYER_CONFIG.weapons ?? {}).sniper ?? {};
+  const beamMaterial = new THREE.MeshBasicMaterial({
+    color: Number.isFinite(Number(sniperConfig.beamColor))
+      ? Number(sniperConfig.beamColor)
+      : 0x9ec7ff,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  beamMaterial.toneMapped = false;
+  const beamGeometry = new THREE.CylinderGeometry(
+    event.beamWidth * 0.5,
+    event.beamWidth * 0.5,
+    beamLength,
+    8,
+    1,
+    true
+  );
+  const beamMesh = new THREE.Mesh(beamGeometry, beamMaterial);
+  beamMesh.position.copy(remoteWeaponVectorA).addScaledVector(remoteWeaponVectorC, 0.5);
+  beamMesh.quaternion.setFromUnitVectors(remoteWeaponYAxis, remoteWeaponVectorC.normalize());
+  scene.add(beamMesh);
+  remoteWeaponBeams.push({
+    ownerPeerId,
+    mesh: beamMesh,
+    material: beamMaterial,
+    life: event.duration,
+    maxLife: event.duration,
+  });
+}
+
+function spawnRemoteWeaponEffect(ownerPeerId, rawEvent) {
+  const event = sanitizeMultiplayerWeaponFxEvent(rawEvent);
+  if (!event) {
+    return;
+  }
+  if (event.kind === "projectile") {
+    spawnRemoteWeaponProjectile(ownerPeerId, event);
+    return;
+  }
+  if (event.kind === "sniper_beam") {
+    spawnRemoteWeaponBeam(ownerPeerId, event);
+  }
+}
+
+function updateRemoteWeaponEffects(deltaSeconds) {
+  if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0) {
+    return;
+  }
+
+  for (let i = remoteWeaponProjectiles.length - 1; i >= 0; i -= 1) {
+    const projectile = remoteWeaponProjectiles[i];
+    projectile.velocity.y -= projectile.gravity * deltaSeconds;
+    projectile.mesh.position.addScaledVector(projectile.velocity, deltaSeconds);
+    projectile.life -= deltaSeconds;
+    if (projectile.life > 0) {
+      continue;
+    }
+    disposeRemoteWeaponProjectileEntry(projectile);
+    remoteWeaponProjectiles.splice(i, 1);
+  }
+
+  for (let i = remoteWeaponBeams.length - 1; i >= 0; i -= 1) {
+    const beam = remoteWeaponBeams[i];
+    beam.life -= deltaSeconds;
+    const remaining = Math.max(0, beam.life / Math.max(0.0001, beam.maxLife));
+    beam.material.opacity = 0.9 * remaining;
+    if (beam.life > 0) {
+      continue;
+    }
+    disposeRemoteWeaponBeamEntry(beam);
+    remoteWeaponBeams.splice(i, 1);
+  }
+}
+
+function initializeMultiplayerController() {
+  if (multiplayerController) {
+    return multiplayerController;
+  }
+  mpLog("Initializing multiplayer controller", {
+    gameId: MULTIPLAYER_GAME_ID,
+    maxPlayers: MULTIPLAYER_MAX_PLAYERS,
+  });
+  multiplayerController = createMultiplayerController({
+    gameId: MULTIPLAYER_GAME_ID,
+    debug: MULTIPLAYER_DEBUG,
+    onReady: () => {
+      handleMultiplayerReady();
+    },
+    onLobby: () => {
+      handleMultiplayerLobbyChanged();
+    },
+    onLeft: () => {
+      handleMultiplayerLeftLobby();
+    },
+    onPeerConnected: (peer) => {
+      handleMultiplayerPeerConnected(peer);
+    },
+    onPeerDisconnected: (peer) => {
+      handleMultiplayerPeerDisconnected(peer);
+    },
+    onReliableMessage: (peer, type, payload) => {
+      handleMultiplayerReliableMessage(peer, type, payload);
+    },
+    onUnreliableMessage: (peer, type, payload) => {
+      handleMultiplayerUnreliableMessage(peer, type, payload);
+    },
+    onError: (error) => {
+      mpWarn("Network error", error);
+    },
+  });
+  return multiplayerController;
+}
+
+initializeMultiplayerController();
+mpLog("Multiplayer logging active", {
+  enabled: MULTIPLAYER_DEBUG,
+  disableHint: `${window.location.pathname}?mplog=0`,
+});
+
+function updateShareOverlayFromLobbyState() {
+  const state = getMultiplayerState();
+  if (!state.inLobby || !state.lobbyCode) {
+    shareOverlayUi.panel.style.display = "none";
+    shareOverlayUi.linkInput.value = "";
+    mpLog("Share overlay hidden (not in lobby)");
+    return;
+  }
+  const shareUrl = getLobbyShareUrl(state.lobbyCode);
+  shareOverlayUi.linkInput.value = shareUrl;
+  mpLog("Share overlay updated", { lobbyCode: state.lobbyCode, shareUrl });
+}
+
+async function ensureLobbyForSharing() {
+  const state = getMultiplayerState();
+  mpLog("Ensuring lobby for share", summarizeMultiplayerStateForLog(state));
+  if (state.inLobby && state.lobbyCode) {
+    updateShareOverlayFromLobbyState();
+    return true;
+  }
+  if (!state.ready || !multiplayerController) {
+    mpWarn("Cannot create share lobby yet (network not ready)");
+    return false;
+  }
+  try {
+    mpLog("Creating lobby from Share button");
+    await multiplayerController.createLobby({
+      public: false,
+      maxPlayers: MULTIPLAYER_MAX_PLAYERS,
+    });
+    updateShareOverlayFromLobbyState();
+    mpLog("Share lobby created");
+    return true;
+  } catch (error) {
+    mpWarn("Failed to create share lobby", error);
+    return false;
+  }
+}
+
+shareOverlayUi.shareButton.addEventListener("click", async () => {
+  mpLog("Share button clicked");
+  const didEnsureLobby = await ensureLobbyForSharing();
+  if (!didEnsureLobby) {
+    mpWarn("Share click could not ensure lobby");
+    return;
+  }
+  updateShareOverlayFromLobbyState();
+  if (shareOverlayUi.linkInput.value) {
+    shareOverlayUi.panel.style.display = "flex";
+    shareOverlayUi.linkInput.focus();
+    shareOverlayUi.linkInput.select();
+    mpLog("Share panel shown", { url: shareOverlayUi.linkInput.value });
+  }
+});
+
+shareOverlayUi.nativeShareButton.addEventListener("click", async () => {
+  mpLog("Native share button clicked");
+  const didEnsureLobby = await ensureLobbyForSharing();
+  if (!didEnsureLobby || typeof navigator.share !== "function") {
+    mpWarn("Native share unavailable or lobby missing");
+    return;
+  }
+  const url = shareOverlayUi.linkInput.value;
+  if (!url) {
+    mpWarn("Native share skipped (empty URL)");
+    return;
+  }
+  try {
+    await navigator.share({ url });
+    mpLog("Native share invoked", { url });
+  } catch (_error) {
+    // Ignore cancel errors.
+    mpLog("Native share canceled");
+  }
+});
 
 const clock = new THREE.Clock();
 let isPaused = false;
@@ -592,6 +1542,9 @@ window.addEventListener("click", markPokiUserInteraction, { capture: true, passi
 initPokiSdkEarly();
 
 function getAutoPauseRequested() {
+  if (isMultiplayerWithPeer()) {
+    return false;
+  }
   const isLocked = !!document.pointerLockElement;
   return document.hidden || !document.hasFocus() || (!isTouchDevice && !isLocked);
 }
@@ -614,6 +1567,9 @@ function applyPausedState(nextPaused) {
 }
 
 function refreshPauseState() {
+  if (isMultiplayerGuest()) {
+    return;
+  }
   applyPausedState(manualPauseRequested || getAutoPauseRequested());
 }
 
@@ -1115,7 +2071,7 @@ function handlePrimaryAction() {
     return;
   }
   if (towerSystem?.isBuildMode()) {
-    const didPlaceTower = towerSystem.placeSelectedTower();
+    const didPlaceTower = requestTowerPlacementFromLocalPlayer();
     if (didPlaceTower) {
       setPrimaryDownState(false);
     }
@@ -1125,16 +2081,16 @@ function handlePrimaryAction() {
 
 function handleHudButtonAction(buttonId) {
   if (buttonId === "pause") {
-    toggleManualPause();
+    requestPauseToggleFromLocalPlayer();
     return true;
   }
   if (buttonId === "speed") {
-    toggleGameSpeed();
+    requestSpeedToggleFromLocalPlayer();
     return true;
   }
   if (buttonId === "next_wave") {
     if (waveState === "BUILD") {
-      return startQueuedWaveNow();
+      return requestStartWaveFromLocalPlayer();
     }
     return false;
   }
@@ -1300,15 +2256,29 @@ function hasAnyTechResearchRemaining() {
 }
 
 function applyTechNodeGrants(grants = {}) {
+  mpLog("Applying local tech grants", {
+    ownerId: localMultiplayerPeerId,
+    grantKeys: grants && typeof grants === "object" ? Object.keys(grants) : [],
+  });
   let appliedAny = false;
   if (towerSystem && typeof towerSystem.applyTechGrants === "function") {
-    appliedAny = towerSystem.applyTechGrants(grants) || appliedAny;
+    appliedAny = towerSystem.applyTechGrants(grants, { ownerId: localMultiplayerPeerId }) || appliedAny;
   }
   if (player && typeof player.applyTechGrants === "function") {
     appliedAny = player.applyTechGrants(grants) || appliedAny;
   }
-  if (enemySystem && typeof enemySystem.applyTechGrants === "function") {
+  if (enemySystem && shouldHostControlSimulation() && typeof enemySystem.applyTechGrants === "function") {
     appliedAny = enemySystem.applyTechGrants(grants) || appliedAny;
+  }
+  if (appliedAny && isMultiplayerWithPeer() && multiplayerController) {
+    multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.techChoiceCommit, {
+      ownerId: localMultiplayerPeerId,
+      grants,
+    });
+    mpLog("Broadcast tech choice commit", {
+      ownerId: localMultiplayerPeerId,
+      grantKeys: grants && typeof grants === "object" ? Object.keys(grants) : [],
+    });
   }
   return appliedAny;
 }
@@ -1558,6 +2528,15 @@ function markTechTreeExhausted() {
   currentExperience = experienceToNextLevel;
 }
 
+function isCoopNonPausingTechMenuActive() {
+  return (
+    isMultiplayerWithPeer()
+    && waveState === "MENU"
+    && currentMenuMode === MENU_MODE_TECH_TREE
+    && menuAdvancesWaveOnChoice === false
+  );
+}
+
 function tryOpenLevelUpTechTreeMenu() {
   if (
     waveState === "MENU"
@@ -1676,6 +2655,21 @@ function applyWeaponChoice(index) {
     return false;
   }
   selectedOption.apply();
+  mpLog("Applied local weapon choice", {
+    ownerId: localMultiplayerPeerId,
+    weaponType: selectedOption.type,
+    optionIndex: index,
+  });
+  if (isMultiplayerWithPeer() && multiplayerController) {
+    multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.weaponChoiceCommit, {
+      ownerId: localMultiplayerPeerId,
+      weaponType: selectedOption.type,
+    });
+    mpLog("Broadcast weapon choice commit", {
+      ownerId: localMultiplayerPeerId,
+      weaponType: selectedOption.type,
+    });
+  }
   finishWeaponSelectionChoice();
   return true;
 }
@@ -2430,7 +3424,7 @@ if (!isTouchDevice) {
     }
 
     if (towerSystem?.isBuildMode()) {
-      towerSystem.placeSelectedTower();
+      requestTowerPlacementFromLocalPlayer();
       return;
     }
 
@@ -2713,9 +3707,9 @@ window.addEventListener("keydown", (event) => {
 
   if (event.code === DESKTOP_SPEED_TOGGLE_KEY && !event.repeat) {
     if (waveState === "BUILD") {
-      startQueuedWaveNow();
+      requestStartWaveFromLocalPlayer();
     } else {
-      toggleGameSpeed();
+      requestSpeedToggleFromLocalPlayer();
     }
     return;
   }
@@ -2754,7 +3748,7 @@ window.addEventListener("keydown", (event) => {
   }
 
   if (event.code === "Enter" && towerSystem?.isBuildMode()) {
-    towerSystem.placeSelectedTower();
+    requestTowerPlacementFromLocalPlayer();
   }
 });
 
@@ -2766,6 +3760,878 @@ let buildPhaseRemainingSeconds = 0;
 let fpsDisplay = 0;
 let fpsSampleTime = 0;
 let fpsSampleFrames = 0;
+
+function getHostPeerIdFromState(state = getMultiplayerState()) {
+  if (!state.inLobby) {
+    return null;
+  }
+  if (state.isHost) {
+    return state.localPeerId;
+  }
+  if (Array.isArray(state.peerIds) && state.peerIds.length > 0) {
+    return state.peerIds[0];
+  }
+  return null;
+}
+
+function sendReliableToHost(type, payload = {}) {
+  if (!multiplayerController) {
+    mpWarn("sendReliableToHost failed: controller missing", { type });
+    return false;
+  }
+  const state = getMultiplayerState();
+  if (!state.inLobby) {
+    mpWarn("sendReliableToHost failed: not in lobby", { type });
+    return false;
+  }
+  if (state.isHost) {
+    mpLog("Loopback reliable request to host handler", {
+      type,
+      payload: summarizeMultiplayerPayloadForLog(type, payload),
+    });
+    handleMultiplayerReliableMessage(
+      { id: state.localPeerId },
+      type,
+      { ...(payload || {}), request: true }
+    );
+    return true;
+  }
+  const hostPeerId = getHostPeerIdFromState(state);
+  if (!hostPeerId) {
+    mpWarn("sendReliableToHost failed: could not determine host peer", {
+      type,
+      state: summarizeMultiplayerStateForLog(state),
+    });
+    return false;
+  }
+  const sent = multiplayerController.sendReliable(hostPeerId, type, payload);
+  mpLog("Sent reliable message to host", {
+    hostPeerId,
+    type,
+    sent,
+    payload: summarizeMultiplayerPayloadForLog(type, payload),
+  });
+  return sent;
+}
+
+function applyMultiplayerAuthorityForCurrentSystems() {
+  if (towerSystem && typeof towerSystem.setLocalOwnerId === "function") {
+    towerSystem.setLocalOwnerId(localMultiplayerPeerId);
+  }
+  if (!enemySystem) {
+    return;
+  }
+  const hostAuthority = shouldHostControlSimulation();
+  if (typeof enemySystem.setDamageEnabled === "function") {
+    enemySystem.setDamageEnabled(hostAuthority);
+  }
+  if (typeof enemySystem.setEnemyHealthMultiplier === "function") {
+    enemySystem.setEnemyHealthMultiplier(getEnemyHealthMultiplierForCurrentPlayerCount());
+  }
+  mpLog("Applied multiplayer authority to systems", {
+    hostAuthority,
+    localPeerId: localMultiplayerPeerId,
+    connectedPlayers: getConnectedPlayerCount(),
+    enemyHealthMultiplier: getEnemyHealthMultiplierForCurrentPlayerCount(),
+  });
+}
+
+function buildHostStatePayload({ includeSnapshot = false } = {}) {
+  const payload = {
+    waveState,
+    currentWave,
+    waveDelay,
+    queuedWaveNumber,
+    buildPhaseRemainingSeconds,
+    paused: !!isPaused,
+    speedMultiplier: gameSpeedMultiplier,
+    playerCount: getConnectedPlayerCount(),
+    enemyHealthMultiplier: getEnemyHealthMultiplierForCurrentPlayerCount(),
+  };
+  if (includeSnapshot) {
+    payload.snapshot = {
+      towers: towerSystem && typeof towerSystem.getTowerSnapshots === "function"
+        ? towerSystem.getTowerSnapshots()
+        : [],
+      enemies: enemySystem && typeof enemySystem.getActiveEnemySnapshots === "function"
+        ? enemySystem.getActiveEnemySnapshots()
+        : [],
+    };
+  }
+  return payload;
+}
+
+function getHostStateSignature(payload) {
+  return JSON.stringify({
+    waveState: payload.waveState,
+    currentWave: payload.currentWave,
+    waveDelay: payload.waveDelay,
+    queuedWaveNumber: payload.queuedWaveNumber,
+    buildPhaseRemainingSeconds: payload.buildPhaseRemainingSeconds,
+    paused: payload.paused,
+    speedMultiplier: payload.speedMultiplier,
+    playerCount: payload.playerCount,
+    enemyHealthMultiplier: payload.enemyHealthMultiplier,
+  });
+}
+
+function broadcastHostStateSync(force = false) {
+  if (!multiplayerController || !isMultiplayerHost()) {
+    return false;
+  }
+  const payload = buildHostStatePayload({ includeSnapshot: false });
+  const signature = getHostStateSignature(payload);
+  if (!force && signature === lastBroadcastHostStateSignature) {
+    mpLog("Skipped host state sync (unchanged)");
+    return false;
+  }
+  lastBroadcastHostStateSignature = signature;
+  multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.stateSync, payload);
+  mpLog("Broadcast host state sync", {
+    force,
+    payload: summarizeMultiplayerPayloadForLog(MULTIPLAYER_MESSAGE_TYPE.stateSync, payload),
+  });
+  return true;
+}
+
+function sendHostSnapshotToPeer(peerId) {
+  if (!multiplayerController || !isMultiplayerHost() || typeof peerId !== "string" || !peerId) {
+    return false;
+  }
+  const payload = buildHostStatePayload({ includeSnapshot: true });
+  const sent = multiplayerController.sendReliable(peerId, MULTIPLAYER_MESSAGE_TYPE.stateSync, payload);
+  mpLog("Sent host snapshot to peer", {
+    peerId,
+    sent,
+    payload: summarizeMultiplayerPayloadForLog(MULTIPLAYER_MESSAGE_TYPE.stateSync, payload),
+  });
+  return sent;
+}
+
+function applyHostStateSyncPayload(payload = {}) {
+  if (isMultiplayerHost()) {
+    mpLog("Ignored host state sync payload because local player is host");
+    return;
+  }
+  mpLog("Applying host state sync payload", summarizeMultiplayerPayloadForLog(MULTIPLAYER_MESSAGE_TYPE.stateSync, payload));
+  const normalizedSpeed = Number(payload.speedMultiplier);
+  if (Number.isFinite(normalizedSpeed) && normalizedSpeed > 0) {
+    gameSpeedMultiplier = normalizedSpeed >= GAME_SPEED_FAST ? GAME_SPEED_FAST : GAME_SPEED_NORMAL;
+  }
+  applyPausedState(payload.paused === true);
+  manualPauseRequested = false;
+
+  if (typeof payload.waveState === "string") {
+    waveState = payload.waveState;
+  }
+  if (player && typeof player.setMenuMode === "function") {
+    player.setMenuMode(waveState === "MENU");
+  }
+  if (Number.isInteger(payload.currentWave) && payload.currentWave > 0) {
+    currentWave = payload.currentWave;
+  }
+  if (Number.isFinite(Number(payload.waveDelay))) {
+    waveDelay = Math.max(0, Number(payload.waveDelay));
+  }
+  queuedWaveNumber = Number.isInteger(payload.queuedWaveNumber) && payload.queuedWaveNumber > 0
+    ? payload.queuedWaveNumber
+    : null;
+  if (Number.isFinite(Number(payload.buildPhaseRemainingSeconds))) {
+    buildPhaseRemainingSeconds = Math.max(0, Number(payload.buildPhaseRemainingSeconds));
+  }
+
+  if (enemySystem && Number.isFinite(Number(payload.enemyHealthMultiplier))) {
+    enemySystem.setEnemyHealthMultiplier(Math.max(0.01, Number(payload.enemyHealthMultiplier)));
+  }
+
+  if (payload.snapshot && typeof payload.snapshot === "object") {
+    const snapshotTowers = Array.isArray(payload.snapshot.towers) ? payload.snapshot.towers : [];
+    const snapshotEnemies = Array.isArray(payload.snapshot.enemies) ? payload.snapshot.enemies : [];
+    if (towerSystem) {
+      towerSystem.clearAllTowers();
+      for (const towerSnapshot of snapshotTowers) {
+        towerSystem.placeTowerFromPayload(towerSnapshot, {
+          ownerId: towerSnapshot?.ownerId,
+          spendCost: false,
+          requireUnlocked: false,
+          requireAffordable: false,
+        });
+      }
+    }
+    if (enemySystem) {
+      enemySystem.clearAll();
+      for (const enemySnapshot of snapshotEnemies) {
+        enemySystem.spawnNetworkEnemy(enemySnapshot);
+      }
+    }
+    hasAppliedHostSnapshot = true;
+    mpLog("Applied host snapshot state", {
+      towers: snapshotTowers.length,
+      enemies: snapshotEnemies.length,
+    });
+  }
+
+  syncBuildPhasePathPreviewVisibility();
+}
+
+function requestPauseToggleFromLocalPlayer() {
+  if (!isMultiplayerLobbyActive()) {
+    mpLog("Local pause toggle (single-player)");
+    toggleManualPause();
+    return true;
+  }
+  if (isMultiplayerHost()) {
+    mpLog("Host pause toggle requested locally");
+    toggleManualPause();
+    multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.speedPauseCmd, {
+      request: false,
+      action: "set_pause",
+      paused: isPaused,
+    });
+    broadcastHostStateSync(true);
+    return true;
+  }
+  const sent = sendReliableToHost(MULTIPLAYER_MESSAGE_TYPE.speedPauseCmd, {
+    request: true,
+    action: "toggle_pause",
+  });
+  mpLog("Guest pause toggle request sent", { sent });
+  return sent;
+}
+
+function requestSpeedToggleFromLocalPlayer() {
+  if (!isMultiplayerLobbyActive()) {
+    mpLog("Local speed toggle (single-player)");
+    toggleGameSpeed();
+    return true;
+  }
+  if (isMultiplayerHost()) {
+    mpLog("Host speed toggle requested locally");
+    toggleGameSpeed();
+    multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.speedPauseCmd, {
+      request: false,
+      action: "set_speed",
+      speedMultiplier: gameSpeedMultiplier,
+    });
+    broadcastHostStateSync(true);
+    return true;
+  }
+  const sent = sendReliableToHost(MULTIPLAYER_MESSAGE_TYPE.speedPauseCmd, {
+    request: true,
+    action: "toggle_speed",
+  });
+  mpLog("Guest speed toggle request sent", { sent });
+  return sent;
+}
+
+function requestStartWaveFromLocalPlayer() {
+  if (waveState !== "BUILD") {
+    mpLog("Start wave ignored (not in build phase)", { waveState });
+    return false;
+  }
+  if (!isMultiplayerLobbyActive()) {
+    mpLog("Local start wave (single-player)");
+    return startQueuedWaveNow();
+  }
+  if (isMultiplayerHost()) {
+    mpLog("Host start wave requested locally");
+    return startQueuedWaveNow();
+  }
+  const sent = sendReliableToHost(MULTIPLAYER_MESSAGE_TYPE.waveCmd, {
+    request: true,
+    action: "start_wave",
+  });
+  mpLog("Guest start wave request sent", { sent });
+  return sent;
+}
+
+function applyPostPlacementBuildModeAffordability(towerType) {
+  if (!towerSystem || typeof towerType !== "string" || towerType.length <= 0) {
+    return;
+  }
+  if (typeof towerSystem.isBuildMode !== "function" || !towerSystem.isBuildMode()) {
+    return;
+  }
+  if (typeof towerSystem.getSelectedTowerType !== "function") {
+    return;
+  }
+  if (towerSystem.getSelectedTowerType() !== towerType) {
+    return;
+  }
+  if (typeof towerSystem.canAffordTower !== "function" || towerSystem.canAffordTower(towerType)) {
+    return;
+  }
+  towerSystem.cancelPlacement?.();
+  mpLog("Auto-cancelled build mode after placement (insufficient funds)", {
+    towerType,
+    money: roundMultiplayerLogNumber(playerMoney, 2),
+  });
+}
+
+function requestTowerPlacementFromLocalPlayer() {
+  if (!towerSystem || !towerSystem.isBuildMode()) {
+    mpLog("Tower placement request ignored (not in build mode)");
+    return false;
+  }
+  if (!isMultiplayerLobbyActive()) {
+    mpLog("Tower placement attempt (single-player)");
+    return towerSystem.placeSelectedTower();
+  }
+
+  const previewState = towerSystem.getCurrentPreviewPayload();
+  if (!previewState?.active || !previewState?.valid || !previewState?.placement) {
+    mpLog("Tower placement request ignored (invalid preview)", {
+      previewActive: previewState?.active === true,
+      previewValid: previewState?.valid === true,
+    });
+    return false;
+  }
+  const placementPayload = {
+    ...previewState.placement,
+    towerType: previewState.towerType,
+    ownerId: localMultiplayerPeerId,
+  };
+
+  if (isMultiplayerHost()) {
+    mpLog("Host placing tower locally", summarizeTowerPlacementForLog(placementPayload));
+    const didPlace = towerSystem.placeSelectedTower();
+    if (!didPlace) {
+      mpWarn("Host local tower placement failed");
+      return false;
+    }
+    multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.towerPlaceCommit, {
+      request: false,
+      rejected: false,
+      ownerId: localMultiplayerPeerId,
+      placement: placementPayload,
+    });
+    broadcastHostStateSync(true);
+    return true;
+  }
+
+  if (pendingTowerRequestsById.size > 0) {
+    mpWarn("Guest tower request blocked: pending request already exists", {
+      pendingCount: pendingTowerRequestsById.size,
+    });
+    return false;
+  }
+
+  const towerCost = towerSystem.getTowerCost(previewState.towerType);
+  if (!trySpendMoney(towerCost)) {
+    mpWarn("Guest tower request denied: insufficient funds", { towerCost, money: playerMoney });
+    return false;
+  }
+  const requestId = `req_${nextTowerRequestId++}`;
+  pendingTowerRequestsById.set(requestId, {
+    cost: towerCost,
+    towerType: previewState.towerType,
+    createdAt: (typeof performance?.now === "function" ? performance.now() : Date.now()),
+  });
+  const sent = sendReliableToHost(MULTIPLAYER_MESSAGE_TYPE.towerPlaceCommit, {
+    request: true,
+    requestId,
+    ownerId: localMultiplayerPeerId,
+    placement: placementPayload,
+  });
+  mpLog("Guest tower placement request sent", {
+    requestId,
+    sent,
+    cost: towerCost,
+    placement: summarizeTowerPlacementForLog(placementPayload),
+  });
+  if (!sent) {
+    pendingTowerRequestsById.delete(requestId);
+    addMoney(towerCost);
+    mpWarn("Guest tower placement request failed to send; refunded", { requestId, towerCost });
+  }
+  return sent;
+}
+
+function processPendingTowerRequestTimeouts() {
+  if (pendingTowerRequestsById.size === 0) {
+    return;
+  }
+  const nowMs = typeof performance?.now === "function" ? performance.now() : Date.now();
+  const timeoutMs = 5000;
+  for (const [requestId, request] of pendingTowerRequestsById.entries()) {
+    if ((nowMs - request.createdAt) < timeoutMs) {
+      continue;
+    }
+    pendingTowerRequestsById.delete(requestId);
+    addMoney(request.cost);
+    mpWarn("Pending tower request timed out; refunded", {
+      requestId,
+      cost: request.cost,
+      ageMs: roundMultiplayerLogNumber(nowMs - request.createdAt, 0),
+    });
+  }
+}
+
+function refundAllPendingTowerRequests() {
+  if (pendingTowerRequestsById.size === 0) {
+    return;
+  }
+  for (const request of pendingTowerRequestsById.values()) {
+    if (Number.isFinite(Number(request?.cost)) && Number(request.cost) > 0) {
+      addMoney(request.cost);
+    }
+  }
+  mpLog("Refunded all pending tower requests", { count: pendingTowerRequestsById.size });
+  pendingTowerRequestsById.clear();
+}
+
+function handleHostEndedSession() {
+  mpWarn("Handling host-ended session");
+  flushUnreliableMultiplayerStatsLog(true);
+  refundAllPendingTowerRequests();
+  clearAllRemotePlayers();
+  clearAllRemoteWeaponEffects();
+  towerSystem?.clearAllPeerPreviews?.();
+  if (multiplayerController && getMultiplayerState().inLobby) {
+    void multiplayerController.leaveLobby();
+  }
+  applyPausedState(true);
+  waveState = "MENU";
+  currentMenuMode = MENU_MODE_WEAPON_SELECT;
+  currentMenuTitle = "Session Ended";
+  currentMenuSubtitle = "Host left the match";
+  currentWeaponOptions = [];
+}
+
+function notifyPeersHostEndedSession() {
+  if (!multiplayerController || !isMultiplayerHost() || !isMultiplayerWithPeer()) {
+    return;
+  }
+  mpWarn("Host is notifying peers that session ended");
+  multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.hostEnded, {});
+}
+
+function handleTowerCommitMessage(peer, payload = {}) {
+  const ownerIdFromPayload = typeof payload?.ownerId === "string" && payload.ownerId.length > 0
+    ? payload.ownerId
+    : null;
+  const ownerId = payload?.request === true
+    ? (peer?.id || null)
+    : (ownerIdFromPayload || peer?.id || null);
+  const requestId = typeof payload?.requestId === "string" ? payload.requestId : null;
+  const placementPayload = payload?.placement && typeof payload.placement === "object"
+    ? payload.placement
+    : null;
+  mpLog("Handling tower commit message", {
+    fromPeerId: peer?.id || null,
+    payload: summarizeMultiplayerPayloadForLog(MULTIPLAYER_MESSAGE_TYPE.towerPlaceCommit, payload),
+  });
+
+  if (payload?.request === true) {
+    if (!isMultiplayerHost() || !placementPayload || !ownerId || !peer?.id) {
+      mpWarn("Ignoring tower commit request: invalid host/request context", {
+        isHost: isMultiplayerHost(),
+        hasPlacement: !!placementPayload,
+        ownerId,
+        fromPeerId: peer?.id || null,
+      });
+      return;
+    }
+    const canPlace = towerSystem?.canPlaceTowerFromPayload?.(placementPayload, {
+      requireUnlocked: false,
+      requireAffordable: false,
+    });
+    if (!canPlace) {
+      mpWarn("Host rejected tower placement request (validation failed)", {
+        requestId,
+        ownerId,
+        placement: summarizeTowerPlacementForLog(placementPayload),
+      });
+      multiplayerController.sendReliable(peer.id, MULTIPLAYER_MESSAGE_TYPE.towerPlaceCommit, {
+        request: false,
+        rejected: true,
+        requestId,
+      });
+      return;
+    }
+    const didPlace = towerSystem.placeTowerFromPayload(placementPayload, {
+      ownerId,
+      spendCost: false,
+      requireUnlocked: false,
+      requireAffordable: false,
+    });
+    if (!didPlace) {
+      mpWarn("Host rejected tower placement request (placement apply failed)", {
+        requestId,
+        ownerId,
+      });
+      multiplayerController.sendReliable(peer.id, MULTIPLAYER_MESSAGE_TYPE.towerPlaceCommit, {
+        request: false,
+        rejected: true,
+        requestId,
+      });
+      return;
+    }
+    multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.towerPlaceCommit, {
+      request: false,
+      rejected: false,
+      requestId,
+      ownerId,
+      placement: placementPayload,
+    });
+    mpLog("Host committed tower placement request", {
+      requestId,
+      ownerId,
+      placement: summarizeTowerPlacementForLog(placementPayload),
+    });
+    broadcastHostStateSync(true);
+    return;
+  }
+
+  if (payload?.rejected === true) {
+    if (requestId && pendingTowerRequestsById.has(requestId)) {
+      const request = pendingTowerRequestsById.get(requestId);
+      pendingTowerRequestsById.delete(requestId);
+      addMoney(request.cost);
+      mpWarn("Tower placement request rejected; refunded", {
+        requestId,
+        cost: request?.cost,
+      });
+    }
+    return;
+  }
+
+  if (!placementPayload || !towerSystem) {
+    mpWarn("Ignoring tower placement commit with missing placement/system");
+    return;
+  }
+  const didPlace = towerSystem.placeTowerFromPayload(placementPayload, {
+    ownerId,
+    spendCost: false,
+    requireUnlocked: false,
+    requireAffordable: false,
+  });
+  let resolvedPendingRequest = null;
+  if (requestId && pendingTowerRequestsById.has(requestId)) {
+    const request = pendingTowerRequestsById.get(requestId);
+    resolvedPendingRequest = request;
+    pendingTowerRequestsById.delete(requestId);
+    if (!didPlace) {
+      addMoney(request.cost);
+      mpWarn("Tower commit apply failed; refunded pending request", {
+        requestId,
+        cost: request?.cost,
+      });
+    }
+  }
+  if (didPlace && resolvedPendingRequest?.towerType) {
+    applyPostPlacementBuildModeAffordability(resolvedPendingRequest.towerType);
+  }
+  mpLog("Applied tower placement commit", {
+    requestId,
+    ownerId,
+    didPlace,
+    placement: summarizeTowerPlacementForLog(placementPayload),
+  });
+}
+
+function handleMultiplayerReady() {
+  const state = getMultiplayerState();
+  mpLog("Multiplayer ready", summarizeMultiplayerStateForLog(state));
+  if (state.localPeerId) {
+    localMultiplayerPeerId = state.localPeerId;
+  }
+  if (towerSystem?.setLocalOwnerId) {
+    towerSystem.setLocalOwnerId(localMultiplayerPeerId);
+  }
+  if (pendingAutoJoinLobbyCode && !state.inLobby && multiplayerController) {
+    const joinCode = pendingAutoJoinLobbyCode;
+    pendingAutoJoinLobbyCode = null;
+    mpLog("Attempting auto-join from query param", { joinCode });
+    void multiplayerController.joinLobby(joinCode).then((didJoin) => {
+      if (!didJoin) {
+        mpWarn(`Failed to auto-join lobby "${joinCode}".`);
+      } else {
+        mpLog("Auto-join succeeded", { joinCode });
+      }
+    }).catch((error) => {
+      mpWarn("Auto-join error", error);
+    });
+  }
+}
+
+function handleMultiplayerLobbyChanged() {
+  const state = getMultiplayerState();
+  mpLog("Lobby state changed", summarizeMultiplayerStateForLog(state));
+  if (state.localPeerId) {
+    localMultiplayerPeerId = state.localPeerId;
+  }
+  hasAppliedHostSnapshot = isMultiplayerHost();
+  towerSystem?.setLocalOwnerId?.(localMultiplayerPeerId);
+  applyMultiplayerAuthorityForCurrentSystems();
+  updateShareOverlayFromLobbyState();
+  if (isMultiplayerHost()) {
+    mpLog("Host entered lobby and is broadcasting initial state sync");
+    broadcastHostStateSync(true);
+  }
+}
+
+function handleMultiplayerLeftLobby() {
+  mpLog("Left lobby", summarizeMultiplayerStateForLog(getMultiplayerState()));
+  flushUnreliableMultiplayerStatsLog(true);
+  clearAllRemotePlayers();
+  clearAllRemoteWeaponEffects();
+  refundAllPendingTowerRequests();
+  hasAppliedHostSnapshot = false;
+  towerSystem?.clearAllPeerPreviews?.();
+  applyMultiplayerAuthorityForCurrentSystems();
+  updateShareOverlayFromLobbyState();
+}
+
+function handleMultiplayerPeerConnected(peer) {
+  mpLog("Peer connected", { peerId: peer?.id || null, state: summarizeMultiplayerStateForLog(getMultiplayerState()) });
+  if (peer?.id) {
+    ensureRemotePlayerEntry(peer.id);
+  }
+  applyMultiplayerAuthorityForCurrentSystems();
+  if (isMultiplayerHost() && isPaused) {
+    manualPauseRequested = false;
+    applyPausedState(false);
+    mpLog("Host auto-unpaused due peer join", { peerId: peer?.id || null });
+  }
+  if (isMultiplayerHost() && peer?.id) {
+    sendHostSnapshotToPeer(peer.id);
+    broadcastHostStateSync(true);
+  }
+}
+
+function handleMultiplayerPeerDisconnected(peer) {
+  mpWarn("Peer disconnected", { peerId: peer?.id || null, state: summarizeMultiplayerStateForLog(getMultiplayerState()) });
+  if (peer?.id) {
+    disposeRemotePlayerEntry(peer.id);
+    clearRemoteWeaponEffectsForPeer(peer.id);
+    towerSystem?.clearPeerPreview?.(peer.id);
+  }
+  applyMultiplayerAuthorityForCurrentSystems();
+  if (isMultiplayerHost()) {
+    broadcastHostStateSync(true);
+    return;
+  }
+  if (isMultiplayerLobbyActive() && getMultiplayerState().peerCount <= 0) {
+    mpWarn("Guest detected host disconnect; ending session");
+    handleHostEndedSession();
+  }
+}
+
+function handleMultiplayerReliableMessage(peer, type, payload) {
+  if (!type) {
+    return;
+  }
+  mpLog("Received reliable message", {
+    fromPeerId: peer?.id || null,
+    type,
+    payload: summarizeMultiplayerPayloadForLog(type, payload),
+  });
+  if (type === MULTIPLAYER_MESSAGE_TYPE.stateSync) {
+    if (!isMultiplayerHost()) {
+      applyHostStateSyncPayload(payload);
+    }
+    return;
+  }
+
+  if (type === MULTIPLAYER_MESSAGE_TYPE.waveCmd) {
+    if (payload?.request === true) {
+      if (!isMultiplayerHost()) {
+        mpWarn("Guest received wave request message; ignoring");
+        return;
+      }
+      if (payload.action === "start_wave") {
+        mpLog("Host executing requested start_wave from peer", { fromPeerId: peer?.id || null });
+        startQueuedWaveNow();
+      }
+      return;
+    }
+    if (!isMultiplayerHost() && payload?.action === "start_wave") {
+      const incomingWave = Number.isInteger(payload.waveNumber) ? payload.waveNumber : currentWave;
+      mpLog("Guest applying host start_wave command", { waveNumber: incomingWave });
+      startWave(incomingWave);
+    }
+    return;
+  }
+
+  if (type === MULTIPLAYER_MESSAGE_TYPE.speedPauseCmd) {
+    if (payload?.request === true) {
+      if (!isMultiplayerHost()) {
+        mpWarn("Guest received speed/pause request message; ignoring");
+        return;
+      }
+      if (payload.action === "toggle_pause") {
+        mpLog("Host executing requested pause toggle", { fromPeerId: peer?.id || null });
+        toggleManualPause();
+      } else if (payload.action === "toggle_speed") {
+        mpLog("Host executing requested speed toggle", { fromPeerId: peer?.id || null });
+        toggleGameSpeed();
+      }
+      multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.speedPauseCmd, {
+        request: false,
+        action: "state",
+        paused: isPaused,
+        speedMultiplier: gameSpeedMultiplier,
+      });
+      broadcastHostStateSync(true);
+      return;
+    }
+    if (!isMultiplayerHost()) {
+      if (payload.action === "set_pause" || payload.action === "state") {
+        applyPausedState(payload.paused === true);
+      }
+      if (payload.action === "set_speed" || payload.action === "state") {
+        const nextSpeed = Number(payload.speedMultiplier);
+        if (Number.isFinite(nextSpeed) && nextSpeed > 0) {
+          gameSpeedMultiplier = nextSpeed >= GAME_SPEED_FAST ? GAME_SPEED_FAST : GAME_SPEED_NORMAL;
+        }
+      }
+      mpLog("Guest applied host speed/pause state", {
+        paused: isPaused,
+        speedMultiplier: gameSpeedMultiplier,
+      });
+    }
+    return;
+  }
+
+  if (type === MULTIPLAYER_MESSAGE_TYPE.towerPlaceCommit) {
+    handleTowerCommitMessage(peer, payload);
+    return;
+  }
+
+  if (type === MULTIPLAYER_MESSAGE_TYPE.techChoiceCommit) {
+    const ownerId = typeof payload?.ownerId === "string" ? payload.ownerId : peer?.id;
+    const grants = payload?.grants;
+    if (ownerId && grants && towerSystem?.applyTechGrants) {
+      towerSystem.applyTechGrants(grants, { ownerId });
+      mpLog("Applied remote tech grants", {
+        ownerId,
+        grantKeys: Object.keys(grants),
+      });
+    }
+    return;
+  }
+
+  if (type === MULTIPLAYER_MESSAGE_TYPE.weaponChoiceCommit) {
+    return;
+  }
+
+  if (type === MULTIPLAYER_MESSAGE_TYPE.enemySpawn) {
+    if (!shouldHostControlSimulation()) {
+      enemySystem?.spawnNetworkEnemy?.(payload);
+      mpLog("Guest spawned enemy from host snapshot/event", {
+        enemyId: payload?.enemyId || null,
+        enemyType: payload?.enemyType || null,
+      });
+    }
+    return;
+  }
+
+  if (type === MULTIPLAYER_MESSAGE_TYPE.enemyDamage) {
+    if (payload?.request === true) {
+      if (isMultiplayerHost()) {
+        enemySystem?.applyDamageToEnemyId?.(payload.enemyId, payload.damage);
+        mpLog("Host applied damage request", {
+          enemyId: payload?.enemyId || null,
+          damage: roundMultiplayerLogNumber(payload?.damage, 2),
+        });
+      }
+      return;
+    }
+    if (!shouldHostControlSimulation()) {
+      enemySystem?.setEnemyHealthFromNetwork?.(payload.enemyId, payload.health, payload.maxHealth);
+      mpLog("Guest applied enemy damage update", {
+        enemyId: payload?.enemyId || null,
+        health: roundMultiplayerLogNumber(payload?.health, 2),
+        maxHealth: roundMultiplayerLogNumber(payload?.maxHealth, 2),
+      });
+    }
+    return;
+  }
+
+  if (type === MULTIPLAYER_MESSAGE_TYPE.enemyDeath) {
+    if (!shouldHostControlSimulation()) {
+      if (Number(payload?.cashReward) > 0) {
+        spawnMoneyDrops(payload.cashReward, payload.dropPosition);
+        addExperience(XP_PER_KILL);
+      }
+      enemySystem?.setEnemyHealthFromNetwork?.(payload.enemyId, 0, payload.maxHealth);
+      mpLog("Guest applied enemy death event", {
+        enemyId: payload?.enemyId || null,
+        cashReward: roundMultiplayerLogNumber(payload?.cashReward, 2),
+      });
+    }
+    return;
+  }
+
+  if (type === MULTIPLAYER_MESSAGE_TYPE.hostEnded) {
+    if (!isMultiplayerHost()) {
+      mpWarn("Received host_ended event");
+      handleHostEndedSession();
+    }
+    return;
+  }
+  mpWarn("Received unknown reliable message type", { type, fromPeerId: peer?.id || null });
+}
+
+function handleMultiplayerUnreliableMessage(peer, type, payload) {
+  noteUnreliableMultiplayerTraffic("rx", type);
+  if (type === MULTIPLAYER_MESSAGE_TYPE.playerTransform) {
+    if (peer?.id) {
+      applyRemotePlayerTransform(peer.id, payload);
+      const weaponFxEvents = Array.isArray(payload?.weaponFxEvents) ? payload.weaponFxEvents : [];
+      const maxEvents = Math.max(1, MULTIPLAYER_MAX_WEAPON_FX_EVENTS_PER_PACKET);
+      for (const weaponFxEvent of weaponFxEvents.slice(0, maxEvents)) {
+        spawnRemoteWeaponEffect(peer.id, weaponFxEvent);
+      }
+    }
+    return;
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.towerPreview) {
+    if (!peer?.id || !towerSystem) {
+      return;
+    }
+    towerSystem.setPeerPreview(peer.id, payload);
+    if (payload?.active !== true) {
+      mpLog("Received remote tower preview clear", { peerId: peer.id });
+    }
+    return;
+  }
+  mpWarn("Received unknown unreliable message type", { type, fromPeerId: peer?.id || null });
+}
+
+function broadcastLocalPlayerTransform() {
+  if (!multiplayerController || !isMultiplayerWithPeer() || !player) {
+    return;
+  }
+  const playerPosition = player.getPosition?.();
+  if (!playerPosition) {
+    return;
+  }
+  const payload = {
+    x: playerPosition.x,
+    y: playerPosition.y,
+    z: playerPosition.z,
+    yaw: camera.rotation.y,
+  };
+  const weaponFxEvents = drainPendingLocalWeaponFxEvents();
+  if (Array.isArray(weaponFxEvents) && weaponFxEvents.length > 0) {
+    payload.weaponFxEvents = weaponFxEvents;
+  }
+  multiplayerController.broadcastUnreliable(MULTIPLAYER_MESSAGE_TYPE.playerTransform, payload);
+  noteUnreliableMultiplayerTraffic("tx", MULTIPLAYER_MESSAGE_TYPE.playerTransform);
+}
+
+function broadcastLocalTowerPreview() {
+  if (!multiplayerController || !isMultiplayerWithPeer() || !towerSystem) {
+    return;
+  }
+  multiplayerController.broadcastUnreliable(
+    MULTIPLAYER_MESSAGE_TYPE.towerPreview,
+    towerSystem.getCurrentPreviewPayload()
+  );
+  noteUnreliableMultiplayerTraffic("tx", MULTIPLAYER_MESSAGE_TYPE.towerPreview);
+}
 
 function resetTechTreeResearchState() {
   researchedNodeIds = new Set();
@@ -2838,10 +4704,60 @@ function disposeCombatSystems() {
 
 function createEnemySystemForCurrentGrid() {
   return createEnemySystem(scene, grid, {
-    onEnemyDefeated: (cashReward, _enemyType, dropPosition) => {
+    onEnemyDefeated: (cashReward, _enemyType, dropPosition, enemyId) => {
+      if (!shouldHostControlSimulation()) {
+        return;
+      }
       spawnMoneyDrops(cashReward, dropPosition);
       addExperience(XP_PER_KILL);
+      if (isMultiplayerWithPeer() && multiplayerController) {
+        mpLog("Host broadcasting enemy death", {
+          enemyId: enemyId || null,
+          cashReward: roundMultiplayerLogNumber(cashReward, 2),
+          dropPosition: summarizePositionForLog(dropPosition),
+        });
+        multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.enemyDeath, {
+          enemyId,
+          cashReward,
+          dropPosition: dropPosition
+            ? { x: dropPosition.x, y: dropPosition.y, z: dropPosition.z }
+            : null,
+        });
+      }
     },
+    onEnemySpawn: (enemySnapshot) => {
+      if (shouldHostControlSimulation() && isMultiplayerWithPeer() && multiplayerController) {
+        mpLog("Host broadcasting enemy spawn", summarizeMultiplayerPayloadForLog(MULTIPLAYER_MESSAGE_TYPE.enemySpawn, enemySnapshot));
+        multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.enemySpawn, enemySnapshot);
+      }
+    },
+    onEnemyDamaged: (damageSnapshot) => {
+      if (shouldHostControlSimulation() && isMultiplayerWithPeer() && multiplayerController) {
+        mpLog("Host broadcasting enemy damage", summarizeMultiplayerPayloadForLog(MULTIPLAYER_MESSAGE_TYPE.enemyDamage, damageSnapshot));
+        multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.enemyDamage, damageSnapshot);
+      }
+    },
+    onDamageRequested: (damageRequest) => {
+      if (shouldHostControlSimulation()) {
+        mpLog("Host handling local damage request", {
+          enemyId: damageRequest?.enemyId || null,
+          damage: roundMultiplayerLogNumber(damageRequest?.damage, 2),
+        });
+        enemySystem?.applyDamageToEnemyId?.(damageRequest?.enemyId, damageRequest?.damage);
+        return;
+      }
+      mpLog("Guest forwarding damage request to host", {
+        enemyId: damageRequest?.enemyId || null,
+        damage: roundMultiplayerLogNumber(damageRequest?.damage, 2),
+      });
+      sendReliableToHost(MULTIPLAYER_MESSAGE_TYPE.enemyDamage, {
+        request: true,
+        enemyId: damageRequest?.enemyId,
+        damage: damageRequest?.damage,
+      });
+    },
+    enemyHealthMultiplier: getEnemyHealthMultiplierForCurrentPlayerCount(),
+    damageEnabled: shouldHostControlSimulation(),
   });
 }
 
@@ -2850,6 +4766,7 @@ function createTowerSystemForCurrentGrid() {
     scene,
     camera,
     grid,
+    localOwnerId: localMultiplayerPeerId,
     getCurrentMoney: () => playerMoney,
     spendMoney: (amount) => trySpendMoney(amount),
     refundMoney: (amount) => addMoney(amount),
@@ -2891,6 +4808,7 @@ function recreateGameplaySystems() {
   enemySystem = createEnemySystemForCurrentGrid();
   towerSystem = createTowerSystemForCurrentGrid();
   enemySystem.setBlockedCells(towerSystem.getBlockedCells());
+  applyMultiplayerAuthorityForCurrentSystems();
 }
 
 function replaceGrid(nextLevelObjects, options = {}) {
@@ -3056,8 +4974,15 @@ function startBuildPhase(nextWave) {
   queuedWaveNumber = Math.max(1, Math.floor(Number(nextWave) || (currentWave + 1)));
   buildPhaseRemainingSeconds = BUILD_PHASE_DURATION_SECONDS;
   waveState = "BUILD";
+  mpLog("Entered build phase", {
+    queuedWaveNumber,
+    buildPhaseRemainingSeconds: roundMultiplayerLogNumber(buildPhaseRemainingSeconds, 2),
+  });
   rebuildBuildPhasePathPreview();
   syncBuildPhasePathPreviewVisibility();
+  if (isMultiplayerHost() && isMultiplayerWithPeer()) {
+    broadcastHostStateSync(true);
+  }
   if (buildPhaseRemainingSeconds <= 0) {
     startQueuedWaveNow();
   }
@@ -3065,6 +4990,7 @@ function startBuildPhase(nextWave) {
 
 function startQueuedWaveNow() {
   if (!Number.isInteger(queuedWaveNumber) || queuedWaveNumber < 1) {
+    mpWarn("Cannot start queued wave: invalid queuedWaveNumber", { queuedWaveNumber });
     return false;
   }
   const nextWave = queuedWaveNumber;
@@ -3073,20 +4999,38 @@ function startQueuedWaveNow() {
   clearBuildPhasePathPreview();
   syncBuildPhasePathPreviewVisibility();
   startWave(nextWave);
+  mpLog("Started queued wave", { waveNumber: nextWave });
+  if (isMultiplayerHost() && isMultiplayerWithPeer() && multiplayerController) {
+    multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.waveCmd, {
+      request: false,
+      action: "start_wave",
+      waveNumber: nextWave,
+    });
+    broadcastHostStateSync(true);
+  }
   return true;
 }
 
 function startWave(wave) {
   if (!enemySystem) {
+    mpWarn("startWave ignored: enemy system missing", { wave });
     return;
   }
   setPrimaryDownState(false);
   currentWave = wave;
   waveState = "PLAYING";
+  mpLog("Wave started", {
+    wave,
+    hostControlsSimulation: shouldHostControlSimulation(),
+  });
   queuedWaveNumber = null;
   buildPhaseRemainingSeconds = 0;
   clearBuildPhasePathPreview();
   syncBuildPhasePathPreviewVisibility();
+
+  if (!shouldHostControlSimulation()) {
+    return;
+  }
 
   const waveSegments = getWaveSegmentsForWave(wave);
   if (Array.isArray(waveSegments)) {
@@ -3120,28 +5064,34 @@ function animate() {
   }
 
   if (!isPaused) {
-    if (waveState === "PLAYING") {
-      if (enemySystem && enemySystem.isWaveClear()) {
-        waveState = "DELAY";
-        waveDelay = WAVE_CONFIG.upgradeDelaySeconds;
-      }
-    } else if (waveState === "DELAY") {
-      waveDelay -= simulationDeltaSeconds;
-      if (waveDelay <= 0) {
-        startBuildPhase(currentWave + 1);
+    const hostControlsSimulation = shouldHostControlSimulation();
+    if (hostControlsSimulation) {
+      if (waveState === "PLAYING") {
+        if (enemySystem && enemySystem.isWaveClear()) {
+          waveState = "DELAY";
+          waveDelay = WAVE_CONFIG.upgradeDelaySeconds;
+        }
+      } else if (waveState === "DELAY") {
+        waveDelay -= simulationDeltaSeconds;
+        if (waveDelay <= 0) {
+          startBuildPhase(currentWave + 1);
+        }
+      } else if (waveState === "BUILD") {
+        buildPhaseRemainingSeconds = Math.max(0, buildPhaseRemainingSeconds - rawDeltaSeconds);
+        if (buildPhaseRemainingSeconds <= 0) {
+          startQueuedWaveNow();
+        }
+        updateBuildPhasePathPreview(rawDeltaSeconds);
+      } else if (waveState === "EDITOR") {
+        levelEditor?.update?.();
+        updateBuildPhasePathPreview(rawDeltaSeconds);
       }
     } else if (waveState === "BUILD") {
-      buildPhaseRemainingSeconds = Math.max(0, buildPhaseRemainingSeconds - rawDeltaSeconds);
-      if (buildPhaseRemainingSeconds <= 0) {
-        startQueuedWaveNow();
-      }
-      updateBuildPhasePathPreview(rawDeltaSeconds);
-    } else if (waveState === "EDITOR") {
-      levelEditor?.update?.();
       updateBuildPhasePathPreview(rawDeltaSeconds);
     }
 
-    if (isGameplayWaveState(waveState)) {
+    const runMenuSimulation = isCoopNonPausingTechMenuActive();
+    if (isGameplayWaveState(waveState) || runMenuSimulation) {
       applyMobileGameplayInput();
       player.update(simulationDeltaSeconds, enemySystem);
       enemySystem?.update?.(simulationDeltaSeconds, camera);
@@ -3149,6 +5099,10 @@ function animate() {
       updateMoneyDrops(simulationDeltaSeconds);
     } else if (waveState === "EDITOR") {
       player.update(simulationDeltaSeconds, enemySystem);
+    }
+
+    if (isGameplayWaveState(waveState) || runMenuSimulation || waveState === "EDITOR") {
+      updateRemoteWeaponEffects(simulationDeltaSeconds);
     }
   }
 
@@ -3158,6 +5112,36 @@ function animate() {
 
   syncBuildPhasePathPreviewVisibility();
   syncPokiGameplayState();
+  processPendingTowerRequestTimeouts();
+
+  if (isMultiplayerWithPeer()) {
+    multiplayerTransformTimer += rawDeltaSeconds;
+    if (multiplayerTransformTimer >= MULTIPLAYER_TRANSFORM_SEND_INTERVAL) {
+      multiplayerTransformTimer = 0;
+      broadcastLocalPlayerTransform();
+    }
+    multiplayerPreviewTimer += rawDeltaSeconds;
+    if (multiplayerPreviewTimer >= MULTIPLAYER_PREVIEW_SEND_INTERVAL) {
+      multiplayerPreviewTimer = 0;
+      broadcastLocalTowerPreview();
+    }
+  } else {
+    multiplayerTransformTimer = 0;
+    multiplayerPreviewTimer = 0;
+    pendingLocalWeaponFxEvents.length = 0;
+  }
+
+  if (isMultiplayerHost() && isMultiplayerWithPeer()) {
+    multiplayerStateSyncTimer += rawDeltaSeconds;
+    if (multiplayerStateSyncTimer >= MULTIPLAYER_STATE_SYNC_INTERVAL) {
+      multiplayerStateSyncTimer = 0;
+      broadcastHostStateSync(false);
+    }
+  } else {
+    multiplayerStateSyncTimer = 0;
+  }
+
+  flushUnreliableMultiplayerStatsLog(false);
 
   const towerInventory = waveState === "EDITOR"
     ? EDITOR_TOOL_INVENTORY.map((entry) => ({
@@ -3271,6 +5255,12 @@ function initGame() {
     onPickupRangeTechGrant: (addAmount) => {
       upgradeMoneyPickupRange(addAmount);
     },
+    onWeaponVisualEvent: (event) => {
+      if (!isMultiplayerWithPeer()) {
+        return;
+      }
+      queueLocalWeaponFxEvent(event);
+    },
     movementBounds: grid.levelBounds ?? grid.moveBounds,
     getSurfaceYAtWorld: (worldX, worldZ) => {
       if (typeof grid?.getBuildSurfaceYAtWorld === "function") {
@@ -3368,6 +5358,10 @@ function initGame() {
   reportPokiGameLoadingFinished();
   animate();
 }
+
+window.addEventListener("beforeunload", () => {
+  notifyPeersHostEndedSession();
+});
 
 initGame();
 

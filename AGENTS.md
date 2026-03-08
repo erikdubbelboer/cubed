@@ -7,6 +7,38 @@
 - `index.html` loads `/src/main.js`; `three` and `three/addons` resolve from npm dependencies through Vite.
 - Source files live in `src/`; `src/main.js` is the orchestration layer for systems (`grid`, `player`, `enemies`, `towers`, `uiOverlay`) and owns wave state, menu state, and economy state.
 
+### Coop Multiplayer (Latest, Override)
+- Netcode uses `@poki/netlib` through `src/multiplayer.js`, with fixed game ID `ed698dfc-1c2f-482e-a733-22339afeeb55`.
+- Lobbies are capped at 2 players (`maxPlayers: 2`); host role is the lobby creator.
+- Authority model is host-authoritative for wave flow, pause/speed state, and enemy outcomes (spawn/damage/death).
+- Channel split is contractual:
+  - reliable: `state_sync`, `wave_cmd`, `speed_pause_cmd`, `tower_place_commit`, `tech_choice_commit`, `weapon_choice_commit`, `enemy_spawn`, `enemy_damage`, `enemy_death`, `host_ended`
+  - unreliable: `player_transform`, `tower_preview`
+- Enemy health scaling contract:
+  - solo = `1x`, 2-player coop = `2x`
+  - on join/leave, alive enemies are rescaled immediately while preserving current health ratio.
+- Join-in-progress contract:
+  - host must send snapshot with current wave/speed/pause, all placed towers (with `ownerId`), and active enemies (stable `enemyId` + current state).
+- Leave contract:
+  - guest leave => host continues as solo (health scale returns to `1x`)
+  - host leave => guest session is terminated (`host_ended`/disconnect path).
+- Ownership contract:
+  - money, weapon choice, and personal tech-tree progression are per-player and not shared
+  - coin drops are spawned for both clients from host death events; each client collects into its own money total.
+- Tower ownership contract:
+  - tower placements carry `ownerId`
+  - tower tech modifiers are owner-scoped and applied to that owner’s towers.
+- Visual/network UX contract:
+  - remote player avatar is a tall black block
+  - remote players are visuals only and must not enter player collision obstacle lists
+  - other player’s in-progress tower placement is shown as a remote ghost preview (`tower_preview` stream).
+- Coop tech-menu contract:
+  - in coop, level-up tech selection is non-pausing (local modal while world simulation continues).
+- Share UX contract:
+  - in-game `Share` button creates a lobby when needed
+  - share panel shows current page URL with `?lobby=<code>`
+  - adjacent native-share button uses `navigator.share({ url })` when available.
+
 ### Economy System Contract
 - Money is owned in `main.js` (`playerMoney`), initialized from `GAME_CONFIG.economy.startingCash`.
 - Tower placement spending is delegated to `towers.js` through callbacks passed into `createTowerSystem({ getCurrentMoney, spendMoney, refundMoney })`.
