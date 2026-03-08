@@ -98,6 +98,9 @@ export function createMultiplayerController({
     console.log(`[MultiplayerNet] ${message}`, details);
   };
   const warn = (message, details) => {
+    if (!debug) {
+      return;
+    }
     if (details === undefined) {
       console.warn(`[MultiplayerNet] ${message}`);
       return;

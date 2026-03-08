@@ -131,7 +131,7 @@ const MULTIPLAYER_MESSAGE_TYPE = {
   playerTransform: "player_transform",
   towerPreview: "tower_preview",
 };
-const MULTIPLAYER_DEBUG = new URLSearchParams(window.location.search).get("mplog") !== "0";
+const MULTIPLAYER_DEBUG = new URLSearchParams(window.location.search).get("mplog") === "1";
 const MULTIPLAYER_UNRELIABLE_STATS_LOG_INTERVAL_MS = 3000;
 const MAIN_LOOP_MODE_RAF = "raf";
 const MAIN_LOOP_MODE_INTERVAL = "interval";
@@ -154,6 +154,9 @@ function mpLog(message, details) {
 }
 
 function mpWarn(message, details) {
+  if (!MULTIPLAYER_DEBUG) {
+    return;
+  }
   if (details === undefined) {
     console.warn(`[Multiplayer] ${message}`);
     return;
