@@ -2086,12 +2086,12 @@ export function createUiOverlay({
       viewportHeight - primaryRadius - 6
     );
     const leftPrimaryCenterX = clamp(
-      movePadCenterX,
+      defaultMovePadCenterX,
       leftPrimaryRadius + 6,
       viewportWidth - leftPrimaryRadius - 6
     );
     const leftPrimaryCenterY = clamp(
-      movePadCenterY + movePadActivationRadius + leftPrimaryRadius + actionGap,
+      defaultMovePadCenterY + movePadActivationRadius + leftPrimaryRadius + actionGap,
       leftPrimaryRadius + 6,
       viewportHeight - leftPrimaryRadius - 6
     );
