@@ -4,7 +4,6 @@ const FONT_STACK = "\"Segoe UI\", sans-serif";
 const MOBILE_UI_DEFAULTS = {
   movePadRadiusPx: 45,
   actionButtonSizePx: 96,
-  leftFireButtonSizePx: 88,
   jumpButtonSizePx: 78,
   cancelButtonSizePx: 56,
   edgeMarginPx: 18,
@@ -2070,7 +2069,7 @@ export function createUiOverlay({
     );
 
     const primaryRadius = clamp((Number(mobileUiConfig.actionButtonSizePx) || MOBILE_UI_DEFAULTS.actionButtonSizePx) * 0.5, 28, 78);
-    const leftPrimaryRadius = clamp((Number(mobileUiConfig.leftFireButtonSizePx) || MOBILE_UI_DEFAULTS.leftFireButtonSizePx) * 0.5, 24, 72);
+    const leftPrimaryRadius = primaryRadius;
     const jumpRadius = clamp((Number(mobileUiConfig.jumpButtonSizePx) || MOBILE_UI_DEFAULTS.jumpButtonSizePx) * 0.5, 22, 62);
     const cancelRadius = clamp((Number(mobileUiConfig.cancelButtonSizePx) || MOBILE_UI_DEFAULTS.cancelButtonSizePx) * 0.5, 16, 44);
 
@@ -2086,15 +2085,11 @@ export function createUiOverlay({
       viewportHeight - primaryRadius - 6
     );
     const leftPrimaryCenterX = clamp(
-      defaultMovePadCenterX,
+      edgeMargin + leftPrimaryRadius,
       leftPrimaryRadius + 6,
       viewportWidth - leftPrimaryRadius - 6
     );
-    const leftPrimaryCenterY = clamp(
-      defaultMovePadCenterY + movePadActivationRadius + leftPrimaryRadius + actionGap,
-      leftPrimaryRadius + 6,
-      viewportHeight - leftPrimaryRadius - 6
-    );
+    const leftPrimaryCenterY = primaryCenterY;
     const jumpCenterX = clamp(
       primaryCenterX - (primaryRadius + jumpRadius + actionGap),
       jumpRadius + 6,

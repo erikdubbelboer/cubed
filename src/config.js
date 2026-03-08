@@ -65,8 +65,6 @@ export const GAME_CONFIG = {
     mobile: {
       // Primary action button size in pixels.
       actionButtonSizePx: 96,
-      // Left-side secondary fire button size in pixels.
-      leftFireButtonSizePx: 88,
       // Jump/jetpack button size in pixels.
       jumpButtonSizePx: 78,
       // Build-cancel button size in pixels.
