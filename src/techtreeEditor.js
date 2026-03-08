@@ -27,10 +27,14 @@ const WORLD_TO_SCREEN_SCALE = Number.isFinite(Number(techTree.worldToScreenScale
 const NODE_DISPLAY_SIZE = Number.isFinite(Number(techTree.nodeDisplaySize))
   ? Math.max(24, Number(techTree.nodeDisplaySize))
   : 64;
+const GRID_CELL_SIZE_PX = 50;
+const GRID_SNAP_WORLD_STEP = GRID_CELL_SIZE_PX / WORLD_TO_SCREEN_SCALE;
+const GRID_COORDINATE_PRECISION = 1000;
 const EDGE_JOINT_HIT_RADIUS_PX = 10;
 const EDGE_SEGMENT_HIT_DISTANCE_PX = 8;
 
 const workspaceWrap = document.getElementById("workspace-wrap");
+const workspaceGrid = document.getElementById("workspace-grid");
 const workspace = document.getElementById("workspace");
 const connections = document.getElementById("connections");
 const statusEl = document.getElementById("status");
@@ -69,6 +73,8 @@ let dragState = {
   jointIndex: -1,
   lastX: 0,
   lastY: 0,
+  worldX: 0,
+  worldY: 0,
 };
 let edgeJointHitPoints = [];
 let edgeSegmentHitZones = [];
@@ -119,6 +125,48 @@ function setStatus(text, kind = "info") {
 
 function getNodeById(nodeId) {
   return techTree.nodes.find((node) => node?.id === nodeId) ?? null;
+}
+
+function roundGridCoordinate(value) {
+  return Math.round(value * GRID_COORDINATE_PRECISION) / GRID_COORDINATE_PRECISION;
+}
+
+function snapWorldCoordinate(value) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  if (!Number.isFinite(GRID_SNAP_WORLD_STEP) || GRID_SNAP_WORLD_STEP <= 0) {
+    return roundGridCoordinate(value);
+  }
+  const snapped = Math.round(value / GRID_SNAP_WORLD_STEP) * GRID_SNAP_WORLD_STEP;
+  return roundGridCoordinate(snapped);
+}
+
+function formatCoordinate(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "0";
+  }
+  return String(roundGridCoordinate(numeric));
+}
+
+function positiveModulo(value, modulus) {
+  if (!Number.isFinite(value) || !Number.isFinite(modulus) || modulus === 0) {
+    return 0;
+  }
+  return ((value % modulus) + modulus) % modulus;
+}
+
+function updateWorkspaceGrid(rect) {
+  if (!workspaceGrid) {
+    return;
+  }
+  const width = Number(rect?.width) || 0;
+  const height = Number(rect?.height) || 0;
+  const offsetX = positiveModulo((width * 0.5) + panX, GRID_CELL_SIZE_PX);
+  const offsetY = positiveModulo((height * 0.5) + panY, GRID_CELL_SIZE_PX);
+  workspaceGrid.style.backgroundSize = `${GRID_CELL_SIZE_PX}px ${GRID_CELL_SIZE_PX}px`;
+  workspaceGrid.style.backgroundPosition = `${offsetX}px ${offsetY}px`;
 }
 
 function getEdgeKey(fromNodeId, toNodeId) {
@@ -314,10 +362,33 @@ function addEdgeJointAtSegment(edgeKey, segmentIndex, clientX, clientY) {
   const jointList = getEdgeJointList(edgeKey, true);
   const insertIndex = clamp(Math.floor(Number(segmentIndex) || 0), 0, jointList.length);
   jointList.splice(insertIndex, 0, {
-    x: worldPoint.x,
-    y: worldPoint.y,
+    x: snapWorldCoordinate(worldPoint.x),
+    y: snapWorldCoordinate(worldPoint.y),
   });
   return true;
+}
+
+function snapAllTreePositionsToGrid() {
+  for (const node of techTree.nodes) {
+    if (!node || typeof node !== "object" || !node.position || typeof node.position !== "object") {
+      continue;
+    }
+    node.position.x = snapWorldCoordinate(Number(node.position.x) || 0);
+    node.position.y = snapWorldCoordinate(Number(node.position.y) || 0);
+  }
+  ensureEdgeJointsObject();
+  for (const jointList of Object.values(techTree.edgeJoints)) {
+    if (!Array.isArray(jointList)) {
+      continue;
+    }
+    for (const joint of jointList) {
+      if (!joint || typeof joint !== "object") {
+        continue;
+      }
+      joint.x = snapWorldCoordinate(Number(joint.x) || 0);
+      joint.y = snapWorldCoordinate(Number(joint.y) || 0);
+    }
+  }
 }
 
 function normalizeNode(node) {
@@ -389,8 +460,8 @@ function updateInspector() {
   fieldIconEl.value = selected.iconId;
   fieldCostEl.value = String(selected.cost);
   fieldStartsUnlockedEl.value = selected.startsUnlocked ? "true" : "false";
-  fieldPosXEl.value = String(selected.position.x);
-  fieldPosYEl.value = String(selected.position.y);
+  fieldPosXEl.value = formatCoordinate(selected.position.x);
+  fieldPosYEl.value = formatCoordinate(selected.position.y);
   fieldGrantsEl.value = JSON.stringify(selected.grants ?? {}, null, 2);
 
   parentsListEl.innerHTML = "";
@@ -436,6 +507,7 @@ function render() {
   edgeSegmentHitZones = [];
 
   const rect = workspaceWrap.getBoundingClientRect();
+  updateWorkspaceGrid(rect);
   connections.setAttribute("viewBox", `0 0 ${Math.max(1, rect.width)} ${Math.max(1, rect.height)}`);
   connections.setAttribute("width", String(Math.max(1, rect.width)));
   connections.setAttribute("height", String(Math.max(1, rect.height)));
@@ -527,6 +599,8 @@ function render() {
         nodeId: node.id,
         lastX: event.clientX,
         lastY: event.clientY,
+        worldX: node.position.x,
+        worldY: node.position.y,
       };
       card.setPointerCapture?.(event.pointerId);
       render();
@@ -579,11 +653,17 @@ function onPointerMove(event) {
       return;
     }
     const worldDelta = screenToWorldDelta(dx, dy);
-    node.position.x += worldDelta.x;
-    node.position.y += worldDelta.y;
+    if (!Number.isFinite(dragState.worldX) || !Number.isFinite(dragState.worldY)) {
+      dragState.worldX = Number(node.position.x) || 0;
+      dragState.worldY = Number(node.position.y) || 0;
+    }
+    dragState.worldX += worldDelta.x;
+    dragState.worldY += worldDelta.y;
+    node.position.x = snapWorldCoordinate(dragState.worldX);
+    node.position.y = snapWorldCoordinate(dragState.worldY);
     if (node.id === selectedNodeId) {
-      fieldPosXEl.value = String(Math.round(node.position.x));
-      fieldPosYEl.value = String(Math.round(node.position.y));
+      fieldPosXEl.value = formatCoordinate(node.position.x);
+      fieldPosYEl.value = formatCoordinate(node.position.y);
     }
     render();
     return;
@@ -596,8 +676,14 @@ function onPointerMove(event) {
       return;
     }
     const worldDelta = screenToWorldDelta(dx, dy);
-    jointList[dragState.jointIndex].x += worldDelta.x;
-    jointList[dragState.jointIndex].y += worldDelta.y;
+    if (!Number.isFinite(dragState.worldX) || !Number.isFinite(dragState.worldY)) {
+      dragState.worldX = Number(jointList[dragState.jointIndex].x) || 0;
+      dragState.worldY = Number(jointList[dragState.jointIndex].y) || 0;
+    }
+    dragState.worldX += worldDelta.x;
+    dragState.worldY += worldDelta.y;
+    jointList[dragState.jointIndex].x = snapWorldCoordinate(dragState.worldX);
+    jointList[dragState.jointIndex].y = snapWorldCoordinate(dragState.worldY);
     render();
   }
 }
@@ -614,6 +700,8 @@ function onPointerUp(event) {
     jointIndex: -1,
     lastX: 0,
     lastY: 0,
+    worldX: 0,
+    worldY: 0,
   };
   workspace.classList.remove("panning");
 }
@@ -633,6 +721,8 @@ workspace.addEventListener("pointerdown", (event) => {
       jointIndex: jointHit.jointIndex,
       lastX: event.clientX,
       lastY: event.clientY,
+      worldX: Number(getEdgeJointList(jointHit.edgeKey, false)[jointHit.jointIndex]?.x) || 0,
+      worldY: Number(getEdgeJointList(jointHit.edgeKey, false)[jointHit.jointIndex]?.y) || 0,
     };
     workspace.setPointerCapture?.(event.pointerId);
     return;
@@ -646,6 +736,8 @@ workspace.addEventListener("pointerdown", (event) => {
     jointIndex: -1,
     lastX: event.clientX,
     lastY: event.clientY,
+    worldX: 0,
+    worldY: 0,
   };
   workspace.classList.add("panning");
   workspace.setPointerCapture?.(event.pointerId);
@@ -775,12 +867,30 @@ fieldPosXEl.addEventListener("input", () => {
   render();
 });
 
+fieldPosXEl.addEventListener("change", () => {
+  const selected = getNodeById(selectedNodeId);
+  if (!selected) {
+    return;
+  }
+  selected.position.x = snapWorldCoordinate(Number(fieldPosXEl.value) || 0);
+  render();
+});
+
 fieldPosYEl.addEventListener("input", () => {
   const selected = getNodeById(selectedNodeId);
   if (!selected) {
     return;
   }
   selected.position.y = Number.isFinite(Number(fieldPosYEl.value)) ? Number(fieldPosYEl.value) : 0;
+  render();
+});
+
+fieldPosYEl.addEventListener("change", () => {
+  const selected = getNodeById(selectedNodeId);
+  if (!selected) {
+    return;
+  }
+  selected.position.y = snapWorldCoordinate(Number(fieldPosYEl.value) || 0);
   render();
 });
 
@@ -837,5 +947,6 @@ if (!techTree.rootNodeId && techTree.nodes.length > 0) {
   techTree.rootNodeId = techTree.nodes[0].id;
 }
 
+snapAllTreePositionsToGrid();
 render();
 setStatus("Tech tree ready.");
