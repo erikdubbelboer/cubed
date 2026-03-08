@@ -1996,11 +1996,13 @@ export function createUiOverlay({
       movePadActivationRadius + 6,
       viewportHeight - movePadActivationRadius - 6
     );
-    const movePadCenterX = Number.isFinite(Number(state.movePadCenterX))
-      ? clamp(Number(state.movePadCenterX), movePadActivationRadius + 6, viewportWidth - movePadActivationRadius - 6)
+    const movePadCenterX = typeof state.movePadCenterX === "number"
+      && Number.isFinite(state.movePadCenterX)
+      ? clamp(state.movePadCenterX, movePadActivationRadius + 6, viewportWidth - movePadActivationRadius - 6)
       : defaultMovePadCenterX;
-    const movePadCenterY = Number.isFinite(Number(state.movePadCenterY))
-      ? clamp(Number(state.movePadCenterY), movePadActivationRadius + 6, viewportHeight - movePadActivationRadius - 6)
+    const movePadCenterY = typeof state.movePadCenterY === "number"
+      && Number.isFinite(state.movePadCenterY)
+      ? clamp(state.movePadCenterY, movePadActivationRadius + 6, viewportHeight - movePadActivationRadius - 6)
       : defaultMovePadCenterY;
 
     touchControlLayout.movePad = {
