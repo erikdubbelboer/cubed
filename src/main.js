@@ -46,6 +46,15 @@ const TECH_TREE_TOUCH_LONG_PRESS_MS = 420;
 const MOBILE_LOOK_SENSITIVITY_SCALE = Number.isFinite(Number(MOBILE_UI_CONFIG.lookSensitivityScale))
   ? Math.max(0.1, Number(MOBILE_UI_CONFIG.lookSensitivityScale))
   : 1;
+const MOBILE_LOOK_ACCELERATION_DISTANCE = Number.isFinite(Number(MOBILE_UI_CONFIG.lookAccelerationDistancePx))
+  ? Math.max(8, Number(MOBILE_UI_CONFIG.lookAccelerationDistancePx))
+  : 140;
+const MOBILE_LOOK_ACCELERATION_MAX_MULTIPLIER = Number.isFinite(Number(MOBILE_UI_CONFIG.lookAccelerationMaxMultiplier))
+  ? Math.max(1, Number(MOBILE_UI_CONFIG.lookAccelerationMaxMultiplier))
+  : 3.25;
+const MOBILE_LOOK_ACCELERATION_EXPONENT = Number.isFinite(Number(MOBILE_UI_CONFIG.lookAccelerationExponent))
+  ? Math.max(0.1, Number(MOBILE_UI_CONFIG.lookAccelerationExponent))
+  : 1.35;
 const GAME_SPEED_NORMAL = 1;
 const GAME_SPEED_FAST = 2;
 const DESKTOP_SPEED_TOGGLE_KEY = "KeyF";
@@ -1188,10 +1197,14 @@ const mobileInput = {
   lookPointerId: null,
   moveOriginX: 0,
   moveOriginY: 0,
+  movePadCenterX: null,
+  movePadCenterY: null,
   moveX: 0,
   moveY: 0,
   lookLastX: 0,
   lookLastY: 0,
+  lookOriginX: 0,
+  lookOriginY: 0,
   pressedButtons: {
     primary: false,
     jump: false,
@@ -2128,10 +2141,14 @@ function resetMobileInputState() {
   mobileInput.lookPointerId = null;
   mobileInput.moveOriginX = 0;
   mobileInput.moveOriginY = 0;
+  mobileInput.movePadCenterX = null;
+  mobileInput.movePadCenterY = null;
   mobileInput.moveX = 0;
   mobileInput.moveY = 0;
   mobileInput.lookLastX = 0;
   mobileInput.lookLastY = 0;
+  mobileInput.lookOriginX = 0;
+  mobileInput.lookOriginY = 0;
   mobileInput.pressedButtons.primary = false;
   mobileInput.pressedButtons.jump = false;
   mobileInput.pressedButtons.cancel = false;
@@ -2172,11 +2189,15 @@ function releaseMobileButtonPointer(pointerId) {
 function releaseMobilePointer(pointerId) {
   if (mobileInput.movePointerId === pointerId) {
     mobileInput.movePointerId = null;
+    mobileInput.movePadCenterX = null;
+    mobileInput.movePadCenterY = null;
     mobileInput.moveX = 0;
     mobileInput.moveY = 0;
   }
   if (mobileInput.lookPointerId === pointerId) {
     mobileInput.lookPointerId = null;
+    mobileInput.lookOriginX = 0;
+    mobileInput.lookOriginY = 0;
   }
   releaseMobileButtonPointer(pointerId);
 }
@@ -2524,19 +2545,13 @@ if (isTouchDevice) {
     }
 
     const touchLayout = uiOverlay.getTouchControlLayout();
-    const movePad = touchLayout?.movePad ?? {};
-    const movePadActivationRadius = Math.max(
-      1,
-      Number(movePad.activationRadius) || Number(UI_CONFIG.movePadRadiusPx) || 45
-    );
-    const dx = pointer.x - (Number(movePad.centerX) || 0);
-    const dy = pointer.y - (Number(movePad.centerY) || 0);
-    const insideMovePad = (dx * dx) + (dy * dy) <= movePadActivationRadius * movePadActivationRadius;
-
-    if (insideMovePad && mobileInput.movePointerId == null) {
+    const isLeftSideTouch = pointer.x <= (viewportWidth * 0.5);
+    if (isLeftSideTouch && mobileInput.movePointerId == null) {
       mobileInput.movePointerId = event.pointerId;
       mobileInput.moveOriginX = pointer.x;
       mobileInput.moveOriginY = pointer.y;
+      mobileInput.movePadCenterX = pointer.x;
+      mobileInput.movePadCenterY = pointer.y;
       mobileInput.moveX = 0;
       mobileInput.moveY = 0;
       captureTouchPointer(event.pointerId);
@@ -2549,10 +2564,12 @@ if (isTouchDevice) {
       ? Number(touchLayout.lookZoneTop)
       : 0;
     const blockedForLook = pointer.y <= lookZoneTop || isPointInsideAnyRect(pointer.x, pointer.y, blockedRects);
-    if (!blockedForLook && mobileInput.lookPointerId == null) {
+    if (!blockedForLook && pointer.x > (viewportWidth * 0.5) && mobileInput.lookPointerId == null) {
       mobileInput.lookPointerId = event.pointerId;
       mobileInput.lookLastX = pointer.x;
       mobileInput.lookLastY = pointer.y;
+      mobileInput.lookOriginX = pointer.x;
+      mobileInput.lookOriginY = pointer.y;
       captureTouchPointer(event.pointerId);
       event.preventDefault();
     }
@@ -2586,7 +2603,16 @@ if (isTouchDevice) {
       mobileInput.lookLastX = pointer.x;
       mobileInput.lookLastY = pointer.y;
       if (waveState !== "MENU" && !isPaused) {
-        player.addLookInput(deltaX * MOBILE_LOOK_SENSITIVITY_SCALE, deltaY * MOBILE_LOOK_SENSITIVITY_SCALE);
+        const lookFromOriginDistance = Math.hypot(
+          pointer.x - mobileInput.lookOriginX,
+          pointer.y - mobileInput.lookOriginY
+        );
+        const lookDistanceRatio = clamp(lookFromOriginDistance / MOBILE_LOOK_ACCELERATION_DISTANCE, 0, 1);
+        const lookAcceleration = 1
+          + ((MOBILE_LOOK_ACCELERATION_MAX_MULTIPLIER - 1)
+            * Math.pow(lookDistanceRatio, MOBILE_LOOK_ACCELERATION_EXPONENT));
+        const lookScale = MOBILE_LOOK_SENSITIVITY_SCALE * lookAcceleration;
+        player.addLookInput(deltaX * lookScale, deltaY * lookScale);
       }
       event.preventDefault();
       return;
@@ -3218,6 +3244,8 @@ function animate() {
     touchPortrait,
     moveStickX: mobileInput.moveX,
     moveStickY: mobileInput.moveY,
+    movePadCenterX: mobileInput.movePadCenterX,
+    movePadCenterY: mobileInput.movePadCenterY,
     pressedActions: mobileInput.pressedButtons,
   });
   uiOverlay.draw();

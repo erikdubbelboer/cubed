@@ -1008,6 +1008,8 @@ export function createUiOverlay({
     touchPortrait: false,
     moveStickX: 0,
     moveStickY: 0,
+    movePadCenterX: null,
+    movePadCenterY: null,
     pressedActions: {
       primary: false,
       jump: false,
@@ -1158,6 +1160,16 @@ export function createUiOverlay({
     }
     if (typeof partialState.moveStickY === "number") {
       state.moveStickY = clamp(partialState.moveStickY, -1, 1);
+    }
+    if (Object.prototype.hasOwnProperty.call(partialState, "movePadCenterX")) {
+      state.movePadCenterX = Number.isFinite(Number(partialState.movePadCenterX))
+        ? Number(partialState.movePadCenterX)
+        : null;
+    }
+    if (Object.prototype.hasOwnProperty.call(partialState, "movePadCenterY")) {
+      state.movePadCenterY = Number.isFinite(Number(partialState.movePadCenterY))
+        ? Number(partialState.movePadCenterY)
+        : null;
     }
     if (partialState.pressedActions && typeof partialState.pressedActions === "object") {
       state.pressedActions = {
@@ -1972,16 +1984,22 @@ export function createUiOverlay({
       84
     );
 
-    const movePadCenterX = clamp(
+    const defaultMovePadCenterX = clamp(
       edgeMargin + movePadActivationRadius,
       movePadActivationRadius + 6,
       viewportWidth - movePadActivationRadius - 6
     );
-    const movePadCenterY = clamp(
+    const defaultMovePadCenterY = clamp(
       viewportHeight - bottomOffset - movePadActivationRadius,
       movePadActivationRadius + 6,
       viewportHeight - movePadActivationRadius - 6
     );
+    const movePadCenterX = Number.isFinite(Number(state.movePadCenterX))
+      ? clamp(Number(state.movePadCenterX), movePadActivationRadius + 6, viewportWidth - movePadActivationRadius - 6)
+      : defaultMovePadCenterX;
+    const movePadCenterY = Number.isFinite(Number(state.movePadCenterY))
+      ? clamp(Number(state.movePadCenterY), movePadActivationRadius + 6, viewportHeight - movePadActivationRadius - 6)
+      : defaultMovePadCenterY;
 
     touchControlLayout.movePad = {
       centerX: movePadCenterX,
@@ -2150,7 +2168,7 @@ export function createUiOverlay({
       primaryRadius,
       state.buildMode ? "Place" : "Fire"
     );
-    drawActionButton("jump", jumpCenterX, jumpCenterY, jumpRadius, "Jump");
+    drawActionButton("jump", jumpCenterX, jumpCenterY, jumpRadius, "Jetpack");
     if (state.buildMode) {
       drawActionButton("cancel", cancelCenterX, cancelCenterY, cancelRadius, "Cancel");
     }

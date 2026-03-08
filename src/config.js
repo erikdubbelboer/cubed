@@ -79,6 +79,12 @@ export const GAME_CONFIG = {
       lookZoneTopPaddingPx: 108,
       // Multiplier applied to touch look deltas.
       lookSensitivityScale: 1,
+      // Distance from look-touch start (px) to reach max acceleration.
+      lookAccelerationDistancePx: 140,
+      // Max multiplier for look sensitivity at far drag distances.
+      lookAccelerationMaxMultiplier: 3.25,
+      // Curve exponent for look acceleration (higher => slower early ramp).
+      lookAccelerationExponent: 1.35,
     },
   },
 
@@ -92,7 +98,7 @@ export const GAME_CONFIG = {
       // XP granted for each enemy kill.
       xpPerKill: 1,
       // XP required for the first level-up.
-      baseXpToLevel: 9,
+      baseXpToLevel: 17.1,
       // Multiplier applied to each subsequent XP requirement.
       levelXpGrowthMultiplier: 1.1,
     },
