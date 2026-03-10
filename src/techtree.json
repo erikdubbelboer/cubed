@@ -15,7 +15,8 @@
     "tesla": 180,
     "spikes": 400,
     "plasma": 620,
-    "buff": 840
+    "buff": 840,
+    "block": 1040
   },
   "rows": {
     "r0": 0,
@@ -182,6 +183,90 @@
       "cost": 1,
       "grants": {
         "unlockTowerType": "buff"
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "unlock_block",
+      "label": "Build Block",
+      "description": "Unlock build block tower",
+      "iconId": "tower_block",
+      "parents": [
+        "root_gun_core"
+      ],
+      "position": {
+        "x": 1040,
+        "y": 210
+      },
+      "cost": 1,
+      "grants": {
+        "unlockTowerType": "block"
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "block_cost_t1",
+      "label": "Cheap Blocks",
+      "description": "Build blocks now cost $7",
+      "iconId": "tower_block",
+      "parents": [
+        "unlock_block"
+      ],
+      "position": {
+        "x": 1040,
+        "y": 430
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "block": {
+            "costSet": 7
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "block_cost_t2",
+      "label": "Bulk Blocks",
+      "description": "Build blocks now cost $4",
+      "iconId": "tower_block",
+      "parents": [
+        "block_cost_t1"
+      ],
+      "position": {
+        "x": 1040,
+        "y": 650
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "block": {
+            "costSet": 4
+          }
+        }
+      },
+      "startsUnlocked": false
+    },
+    {
+      "id": "block_transparency_t1",
+      "label": "Clear Blocks",
+      "description": "Owned build blocks become translucent",
+      "iconId": "tower_block",
+      "parents": [
+        "block_cost_t2"
+      ],
+      "position": {
+        "x": 1040,
+        "y": 870
+      },
+      "cost": 1,
+      "grants": {
+        "tower": {
+          "block": {
+            "opacitySet": 0.5
+          }
+        }
       },
       "startsUnlocked": false
     },

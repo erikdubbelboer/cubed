@@ -301,6 +301,39 @@ function drawIconTowerSpikes(ctx, x, y, size) {
   }
 }
 
+function drawIconTowerBlock(ctx, x, y, size) {
+  const left = x + size * 0.23;
+  const top = y + size * 0.22;
+  const width = size * 0.54;
+  const height = size * 0.54;
+  drawPanel(
+    ctx,
+    left,
+    top,
+    width,
+    height,
+    size * 0.08,
+    "rgba(93, 114, 125, 0.96)",
+    "rgba(182, 222, 232, 0.94)",
+    Math.max(1.2, size * 0.04)
+  );
+  ctx.fillStyle = "rgba(120, 220, 229, 0.9)";
+  ctx.fillRect(
+    left + width * 0.12,
+    top + height * 0.14,
+    width * 0.76,
+    height * 0.18
+  );
+  ctx.strokeStyle = "rgba(197, 242, 248, 0.92)";
+  ctx.lineWidth = Math.max(1, size * 0.03);
+  ctx.beginPath();
+  ctx.moveTo(left + width * 0.16, top + height * 0.48);
+  ctx.lineTo(left + width * 0.84, top + height * 0.48);
+  ctx.moveTo(left + width * 0.5, top + height * 0.36);
+  ctx.lineTo(left + width * 0.5, top + height * 0.82);
+  ctx.stroke();
+}
+
 function drawIconTowerPlasma(ctx, x, y, size) {
   drawPanel(
     ctx,
@@ -840,6 +873,12 @@ export function drawIconById(ctx, iconId, x, y, size) {
       return;
     case "tower_spikes":
       drawIconTowerSpikes(ctx, x, y, size);
+      return;
+    case "tower_block_add":
+      drawIconTowerBlock(ctx, x, y, size);
+      return;
+    case "tower_block":
+      drawIconTowerBlock(ctx, x, y, size);
       return;
     case "tower_plasma_add":
       drawIconTowerPlasma(ctx, x, y, size);

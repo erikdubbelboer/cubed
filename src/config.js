@@ -692,6 +692,32 @@ export const GAME_CONFIG = {
         projectileMetalness: 0.18,
       },
 
+      block: {
+        // Cash required to place one build block.
+        cost: 10,
+
+        // Block collision/build footprint.
+        halfSize: 1.6,
+        height: 4,
+        roughness: 0.76,
+        metalness: 0.12,
+
+        // Block build preview + placed palette.
+        previewColor: 0x69818a,
+        previewAccentColor: 0xb9d7df,
+        previewGlow: 0x7ad6de,
+        previewOpacity: 0.55,
+        previewInvalidColor: 0xb67373,
+        previewInvalidAccentColor: 0xd09b9b,
+        previewInvalidGlow: 0xa04343,
+        placedColor: 0x4a5e67,
+        placedAccentColor: 0xa5cad3,
+        placedGlow: 0x5bc4d0,
+        placedOpacity: 1,
+        // Final material opacity for owned blocks after the transparency tech.
+        transparencyUpgradeOpacity: 0.5,
+      },
+
       aoe: {
         // Cash required to place one AOE tower. Typical range: 350-700.
         cost: 50,

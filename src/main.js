@@ -15,10 +15,14 @@ const MOBILE_UI_CONFIG = UI_CONFIG.mobile ?? {};
 const WAVE_CONFIG = GAME_CONFIG.waves;
 const TOWER_CONFIG = GAME_CONFIG.towers ?? {};
 const TOWER_SELL_CONFIG = TOWER_CONFIG.sell ?? {};
+const BLOCK_TOWER_CONFIG = TOWER_CONFIG.types?.block ?? {};
 const ECONOMY_CONFIG = GAME_CONFIG.economy ?? {};
 const ENEMY_CONFIG = GAME_CONFIG.enemies ?? {};
 const PLAYER_CONFIG = GAME_CONFIG.player ?? {};
 const TECH_TREE_CONFIG = GAME_CONFIG.techTree ?? {};
+const BLOCK_TRANSPARENCY_UPGRADE_OPACITY = Number.isFinite(Number(BLOCK_TOWER_CONFIG.transparencyUpgradeOpacity))
+  ? THREE.MathUtils.clamp(Number(BLOCK_TOWER_CONFIG.transparencyUpgradeOpacity), 0.05, 1)
+  : 0.2;
 const ENEMY_TYPES = ENEMY_CONFIG.types ?? {};
 const CONFIGURED_ROUNDS = Array.isArray(WAVE_CONFIG.rounds) ? WAVE_CONFIG.rounds : [];
 const DEFAULT_RUN_WEAPON_OPTIONS = [
@@ -445,6 +449,26 @@ const MONEY_DROP_EMISSIVE_BY_VALUE = {
 const rawTechTreeNodes = Array.isArray(TECH_TREE_CONFIG.nodes) ? TECH_TREE_CONFIG.nodes : [];
 const TECH_TREE_NODE_BY_ID = new Map();
 const TECH_TREE_NODES = [];
+
+function resolveTechNodeGrants(rawNode) {
+  const grants = rawNode?.grants && typeof rawNode.grants === "object" ? rawNode.grants : {};
+  if (rawNode?.id !== "block_transparency_t1") {
+    return grants;
+  }
+  const towerGrants = grants.tower && typeof grants.tower === "object" ? grants.tower : {};
+  const blockGrants = towerGrants.block && typeof towerGrants.block === "object" ? towerGrants.block : {};
+  return {
+    ...grants,
+    tower: {
+      ...towerGrants,
+      block: {
+        ...blockGrants,
+        opacitySet: BLOCK_TRANSPARENCY_UPGRADE_OPACITY,
+      },
+    },
+  };
+}
+
 for (const rawNode of rawTechTreeNodes) {
   const id = typeof rawNode?.id === "string" ? rawNode.id.trim() : "";
   if (!id || TECH_TREE_NODE_BY_ID.has(id)) {
@@ -460,7 +484,7 @@ for (const rawNode of rawTechTreeNodes) {
       : [],
     cost: Math.max(0, Math.floor(Number(rawNode.cost) || 0)),
     startsUnlocked: rawNode.startsUnlocked === true,
-    grants: rawNode?.grants && typeof rawNode.grants === "object" ? rawNode.grants : {},
+    grants: resolveTechNodeGrants(rawNode),
     position: {
       x: Number.isFinite(Number(rawNode?.position?.x)) ? Number(rawNode.position.x) : 0,
       y: Number.isFinite(Number(rawNode?.position?.y)) ? Number(rawNode.position.y) : 0,
@@ -5829,6 +5853,7 @@ function runGameFrame({ renderFrame = true } = {}) {
       iconId: (
         {
           gun: "tower_gun",
+          block: "tower_block",
           aoe: "tower_aoe",
           slow: "tower_slow",
           laserSniper: "tower_laser_sniper",

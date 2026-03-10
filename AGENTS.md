@@ -29,7 +29,7 @@ Capture project decisions that are easy to regress but not always obvious from l
   - Money, weapon choice, and tech progression are per-player.
   - Tower placements carry `ownerId`; owner-scoped tech applies only to that owner's towers.
   - Tower selling is allowed for either player on any tower; host validates and commits the sell.
-  - Sell refunds are always full tower cost and are credited to the player that completed the sell hold.
+  - Sell refunds are credited to the player that completed the sell hold; `block` refunds use the seller's current owner-scoped block cost, even for blocks placed before that seller researched cheaper block tech.
   - Host death events spawn drops for both clients; each client collects into its own money total.
 - Remote player is visual-only and must not be included in movement collision obstacles.
 - Co-op tech selection is non-pausing (local modal while simulation continues).
@@ -48,6 +48,7 @@ Capture project decisions that are easy to regress but not always obvious from l
   - Cash is granted on pickup arrival, not on range entry.
 - `grants.pickupRangeAdd` increases pickup radius.
 - Tower availability is unlock-based (not stock). `gun` must always be unlocked as fallback.
+- `tower.block.costSet` and `tower.block.opacitySet` are owner-scoped absolute overrides; block opacity upgrades must update existing owned blocks immediately and new sells refund the seller's current block cost rather than historical spend.
 - Upgrade system is config-driven (`GAME_CONFIG.upgrades[]`) with:
   - `maxCount` gating,
   - unlock-collision filtering for unlock grants,
@@ -64,8 +65,11 @@ Capture project decisions that are easy to regress but not always obvious from l
 
 ## Tower + Combat Contracts
 - Starter/default tower is `gun` (legacy `laser` replaced).
+- `block` is a buildable world-cube tower: it path-blocks, collides with the player, supports stacking by Y layer, contributes build surfaces from its top face, and keeps `topInsetFromRadius: 0` so standing/building on it matches terrain cubes.
 - Gun tower placement is fixed non-rotatable 1x2 footprint (Z-axis), validated atomically across both occupied cells.
 - Path blocking supports multi-cell placement (`canBlockCells`) and uses blocked-revision-aware preview caching.
+- Layered placement may reuse a cell only when the new tower's vertical bounds do not overlap an existing occupant; path validation for layered placements only checks newly blocked cells, not cells already blocked by lower layers.
+- A `block` that is currently supporting a higher tower/block in a shared cell is not sellable; support must be removed from the top down.
 - Gun combat uses projectile cubes from muzzle node (not beam/hitscan).
 - Plasma tower:
   - Wall-mounted only on terrain side faces via `grid.raycastWallAnchor(ray)`.

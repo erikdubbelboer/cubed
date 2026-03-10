@@ -12,6 +12,7 @@ const TESLA_TOWER_CONFIG = TOWER_TYPES.tesla;
 const SPIKES_TOWER_CONFIG = TOWER_TYPES.spikes;
 const PLASMA_TOWER_CONFIG = TOWER_TYPES.plasma;
 const BUFF_TOWER_CONFIG = TOWER_TYPES.buff;
+const BLOCK_TOWER_CONFIG = TOWER_TYPES.block;
 
 const GUN_RANGE = GUN_TOWER_CONFIG.range;
 const GUN_FIRE_INTERVAL = GUN_TOWER_CONFIG.fireInterval;
@@ -87,11 +88,19 @@ const PLASMA_RANGE = PLASMA_TOWER_CONFIG.range;
 const PLASMA_FIRE_INTERVAL = PLASMA_TOWER_CONFIG.fireInterval;
 const PLASMA_DAMAGE = PLASMA_TOWER_CONFIG.damage;
 const BUFF_RANGE = BUFF_TOWER_CONFIG.range;
+const BLOCK_TOWER_DEFAULT_HALF_SIZE = 1;
+const BLOCK_TOWER_HALF_SIZE = Number.isFinite(Number(BLOCK_TOWER_CONFIG.halfSize))
+  ? Math.max(0.05, Number(BLOCK_TOWER_CONFIG.halfSize))
+  : BLOCK_TOWER_DEFAULT_HALF_SIZE;
+const BLOCK_TOWER_HEIGHT = Number.isFinite(Number(BLOCK_TOWER_CONFIG.height))
+  ? Math.max(0.05, Number(BLOCK_TOWER_CONFIG.height))
+  : 2;
 const PATH_RANGE_HIGHLIGHT_VALID_COLOR = GUN_TOWER_CONFIG.rangeHighlightValidColor;
 const PATH_RANGE_HIGHLIGHT_INVALID_COLOR = GUN_TOWER_CONFIG.rangeHighlightInvalidColor;
 const BUILD_FX_CONFIG = TOWER_CONFIG.buildFx ?? {};
 const TOWER_TYPE_ORDER = [
   "gun",
+  "block",
   "aoe",
   "slow",
   "laserSniper",
@@ -103,6 +112,7 @@ const TOWER_TYPE_ORDER = [
 ];
 const TOWER_DISPLAY_NAMES = {
   gun: "Gun Tower",
+  block: "Build Block",
   aoe: "AOE Tower",
   slow: "Slow Tower",
   laserSniper: "Laser Sniper",
@@ -478,6 +488,14 @@ export function createTowerSystem({
       footprintCellsZ: gunFootprintCellsZ,
       usesLineOfSight: true,
     },
+    block: {
+      type: "block",
+      range: 0,
+      radius: BLOCK_TOWER_HALF_SIZE,
+      halfSize: BLOCK_TOWER_HALF_SIZE,
+      height: BLOCK_TOWER_HEIGHT,
+      usesLineOfSight: false,
+    },
     aoe: {
       type: "aoe",
       range: AOE_RANGE,
@@ -590,6 +608,8 @@ export function createTowerSystem({
       buffDamageBonusPerTowerAdd: 0,
       buffFireRateBonusPerTowerAdd: 0,
       buffAffectsBuffTowers: false,
+      costSet: null,
+      opacitySet: null,
     });
   }
 
@@ -612,6 +632,8 @@ export function createTowerSystem({
       buffDamageBonusPerTowerAdd: 0,
       buffFireRateBonusPerTowerAdd: 0,
       buffAffectsBuffTowers: false,
+      costSet: null,
+      opacitySet: null,
     };
   }
 
@@ -738,7 +760,7 @@ export function createTowerSystem({
     unlockedTowerTypes.add("gun");
   }
 
-  function getTowerCost(type) {
+  function getTowerCost(type, ownerId = null) {
     const normalizedType = normalizeTowerType(type);
     if (!normalizedType) {
       return 0;
@@ -747,7 +769,15 @@ export function createTowerSystem({
     if (!Number.isFinite(configuredCost)) {
       return 0;
     }
-    return Math.max(0, Math.floor(configuredCost));
+    let resolvedCost = configuredCost;
+    if (normalizedType === "block") {
+      const blockCostOverride = getTowerTechModifiers("block", ownerId)?.costSet;
+      const blockCostSet = Number(blockCostOverride);
+      if (blockCostOverride != null && Number.isFinite(blockCostSet) && blockCostSet >= 0) {
+        resolvedCost = blockCostSet;
+      }
+    }
+    return Math.max(0, Math.floor(resolvedCost));
   }
 
   function getPlayerMoney() {
@@ -761,16 +791,16 @@ export function createTowerSystem({
     return Math.max(0, Math.floor(money));
   }
 
-  function canAffordTower(type) {
-    const cost = getTowerCost(type);
+  function canAffordTower(type, ownerId = null) {
+    const cost = getTowerCost(type, ownerId);
     if (cost <= 0) {
       return true;
     }
     return getPlayerMoney() >= cost;
   }
 
-  function spendTowerCost(type) {
-    const cost = getTowerCost(type);
+  function spendTowerCost(type, ownerId = null) {
+    const cost = getTowerCost(type, ownerId);
     if (cost <= 0) {
       return true;
     }
@@ -780,8 +810,8 @@ export function createTowerSystem({
     return !!spendMoney(cost, type);
   }
 
-  function refundTowerCost(type) {
-    const cost = getTowerCost(type);
+  function refundTowerCost(type, ownerId = null) {
+    const cost = getTowerCost(type, ownerId);
     if (cost <= 0) {
       return true;
     }
@@ -799,19 +829,135 @@ export function createTowerSystem({
     return reservedCellKeys.has(makeCellKey(cellX, cellZ));
   }
 
-  function findTowerAtCell(cellX, cellZ) {
-    for (const tower of towers) {
-      if (Array.isArray(tower.occupiedCells)) {
-        for (const cell of tower.occupiedCells) {
-          if (cell?.x === cellX && cell?.z === cellZ) {
-            return tower;
-          }
+  function towerOccupiesCell(tower, cellX, cellZ) {
+    if (!tower || typeof tower !== "object") {
+      return false;
+    }
+    if (Array.isArray(tower.occupiedCells)) {
+      for (const cell of tower.occupiedCells) {
+        if (cell?.x === cellX && cell?.z === cellZ) {
+          return true;
         }
-      } else if (tower.cellX === cellX && tower.cellZ === cellZ) {
-        return tower;
+      }
+      return false;
+    }
+    return tower.cellX === cellX && tower.cellZ === cellZ;
+  }
+
+  function getTowersAtCell(cellX, cellZ) {
+    const results = [];
+    for (const tower of towers) {
+      if (towerOccupiesCell(tower, cellX, cellZ)) {
+        results.push(tower);
       }
     }
-    return null;
+    return results;
+  }
+
+  function findTowerAtCell(cellX, cellZ) {
+    return getTowersAtCell(cellX, cellZ)[0] ?? null;
+  }
+
+  function getTowerVerticalBounds(baseY, height) {
+    const safeBaseY = Number(baseY);
+    const safeHeight = Math.max(0.01, Number(height) || gridCellSize);
+    if (!Number.isFinite(safeBaseY)) {
+      return null;
+    }
+    return {
+      minY: safeBaseY,
+      maxY: safeBaseY + safeHeight,
+    };
+  }
+
+  function doVerticalBoundsOverlap(boundsA, boundsB, epsilon = 1e-4) {
+    if (!boundsA || !boundsB) {
+      return true;
+    }
+    return (boundsA.minY < (boundsB.maxY - epsilon)) && (boundsB.minY < (boundsA.maxY - epsilon));
+  }
+
+  function getBlockSurfaceOpacity(targetOpacity) {
+    const clampedTargetOpacity = THREE.MathUtils.clamp(Number(targetOpacity) || 1, 0.05, 1);
+    return clampedTargetOpacity;
+  }
+
+  function getBlockOpacityForOwner(ownerId = null) {
+    const configuredPlacedOpacity = Number(BLOCK_TOWER_CONFIG.placedOpacity);
+    let opacity = Number.isFinite(configuredPlacedOpacity)
+      ? THREE.MathUtils.clamp(configuredPlacedOpacity, 0.05, 1)
+      : 1;
+    const opacityOverride = getTowerTechModifiers("block", ownerId)?.opacitySet;
+    const opacitySet = Number(opacityOverride);
+    if (opacityOverride != null && Number.isFinite(opacitySet)) {
+      opacity = THREE.MathUtils.clamp(opacitySet, 0.05, 1);
+    }
+    return getBlockSurfaceOpacity(opacity);
+  }
+
+  function applyBlockOpacityToMesh(mesh, opacity) {
+    if (!mesh || !mesh.userData) {
+      return;
+    }
+    const safeOpacity = THREE.MathUtils.clamp(Number(opacity) || 1, 0.05, 1);
+    const shouldBeTransparent = safeOpacity < 0.999;
+    const materials = Array.isArray(mesh.userData.materials) ? mesh.userData.materials : [];
+    for (const material of materials) {
+      if (!material) {
+        continue;
+      }
+      if ("transparent" in material) {
+        material.transparent = shouldBeTransparent;
+      }
+      if ("opacity" in material) {
+        material.opacity = safeOpacity;
+      }
+      if ("emissiveIntensity" in material) {
+        const baseEmissiveIntensity = Number(material.userData?.baseEmissiveIntensity);
+        if (Number.isFinite(baseEmissiveIntensity)) {
+          material.emissiveIntensity = shouldBeTransparent
+            ? baseEmissiveIntensity * safeOpacity
+            : baseEmissiveIntensity;
+        }
+      }
+      if ("depthWrite" in material) {
+        material.depthWrite = !shouldBeTransparent;
+      }
+      material.needsUpdate = true;
+    }
+    const outlineMaterial = mesh.userData?.footprintOutlineMaterial;
+    if (outlineMaterial) {
+      const baseOutlineOpacity = Number(outlineMaterial.userData?.baseOpacity);
+      const resolvedBaseOpacity = Number.isFinite(baseOutlineOpacity) ? baseOutlineOpacity : 0.46;
+      outlineMaterial.opacity = shouldBeTransparent
+        ? resolvedBaseOpacity * Math.max(0.2, safeOpacity)
+        : resolvedBaseOpacity;
+      outlineMaterial.needsUpdate = true;
+    }
+  }
+
+  function applyBlockOpacityToTower(tower, ownerId = null, opacityOverride = null) {
+    if (!tower || tower.towerType !== "block") {
+      return;
+    }
+    const resolvedOpacity = opacityOverride != null && Number.isFinite(Number(opacityOverride))
+      ? THREE.MathUtils.clamp(Number(opacityOverride), 0.05, 1)
+      : getBlockOpacityForOwner(ownerId);
+    tower.blockOpacity = resolvedOpacity;
+    applyBlockOpacityToMesh(tower.mesh, resolvedOpacity);
+  }
+
+  function refreshBlockTowerOpacityForOwner(ownerId = null) {
+    const normalizedOwnerId = normalizeOwnerId(ownerId);
+    for (const tower of towers) {
+      if (tower?.towerType !== "block") {
+        continue;
+      }
+      if (normalizeOwnerId(tower.ownerId) !== normalizedOwnerId) {
+        continue;
+      }
+      applyBlockOpacityToTower(tower, normalizedOwnerId);
+    }
   }
 
   function findTowerByAnchorKey(anchorKey) {
@@ -906,6 +1052,81 @@ export function createTowerSystem({
     }
     keys.sort();
     return keys.join("|");
+  }
+
+  function getPlacementFootprintKey(cells, baseY = null) {
+    const cellFootprint = getFootprintKey(cells);
+    if (!cellFootprint || !Number.isFinite(Number(baseY))) {
+      return cellFootprint;
+    }
+    return `${cellFootprint}@${Number(baseY).toFixed(3)}`;
+  }
+
+  function getBlockedCellKeySet() {
+    const blockedKeys = new Set();
+    for (const tower of towers) {
+      if (!doesTowerTypeBlockPath(tower?.towerType)) {
+        continue;
+      }
+      const cells = Array.isArray(tower.occupiedCells)
+        ? tower.occupiedCells
+        : [{ x: tower.cellX, z: tower.cellZ }];
+      for (const cell of cells) {
+        if (!Number.isInteger(cell?.x) || !Number.isInteger(cell?.z)) {
+          continue;
+        }
+        blockedKeys.add(makeCellKey(cell.x, cell.z));
+      }
+    }
+    return blockedKeys;
+  }
+
+  function getNewlyBlockedPlacementCells(placement) {
+    if (
+      !doesTowerTypeBlockPath(placement?.towerType)
+      || !Array.isArray(placement?.occupiedCells)
+      || placement.occupiedCells.length === 0
+    ) {
+      return [];
+    }
+    const existingBlockedKeys = getBlockedCellKeySet();
+    return placement.occupiedCells.filter((cell) => !existingBlockedKeys.has(makeCellKey(cell.x, cell.z)));
+  }
+
+  function towersShareAnyOccupiedCell(a, b) {
+    if (!a || !b) {
+      return false;
+    }
+    const aCells = Array.isArray(a.occupiedCells) ? a.occupiedCells : [];
+    const bCells = Array.isArray(b.occupiedCells) ? b.occupiedCells : [];
+    for (const aCell of aCells) {
+      for (const bCell of bCells) {
+        if (aCell?.x === bCell?.x && aCell?.z === bCell?.z) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function isTowerSupportingOtherTower(tower) {
+    if (!tower || tower.towerType !== "block") {
+      return false;
+    }
+    const supportTopY = Number(tower.baseY) + Math.max(0.01, Number(tower.height) || BLOCK_TOWER_HEIGHT);
+    if (!Number.isFinite(supportTopY)) {
+      return false;
+    }
+    for (const otherTower of towers) {
+      if (otherTower === tower || !towersShareAnyOccupiedCell(tower, otherTower)) {
+        continue;
+      }
+      const otherBaseY = Number(otherTower.baseY);
+      if (Number.isFinite(otherBaseY) && otherBaseY >= (supportTopY - 1e-4)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function canBlockCellsCached(cells) {
@@ -1095,6 +1316,18 @@ export function createTowerSystem({
       appliedAny = true;
     }
 
+    const costSet = Number(modifierPatch.costSet);
+    if (Number.isFinite(costSet) && costSet >= 0) {
+      modifiers.costSet = Math.floor(costSet);
+      appliedAny = true;
+    }
+
+    const opacitySet = Number(modifierPatch.opacitySet);
+    if (Number.isFinite(opacitySet)) {
+      modifiers.opacitySet = THREE.MathUtils.clamp(opacitySet, 0.05, 1);
+      appliedAny = true;
+    }
+
     return appliedAny;
   }
 
@@ -1109,8 +1342,14 @@ export function createTowerSystem({
     const towerGrants = grants?.tower;
     if (towerGrants && typeof towerGrants === "object") {
       for (const [rawType, modifierPatch] of Object.entries(towerGrants)) {
+        const normalizedType = normalizeTowerType(rawType);
         const modifiers = getTowerTechModifiers(rawType, ownerId);
+        const hadOpacityGrant = normalizedType === "block"
+          && Number.isFinite(Number(modifierPatch?.opacitySet));
         appliedAny = applyTowerModifierPatch(modifiers, modifierPatch) || appliedAny;
+        if (hadOpacityGrant) {
+          refreshBlockTowerOpacityForOwner(ownerId);
+        }
       }
     }
 
@@ -1261,6 +1500,91 @@ export function createTowerSystem({
     root.userData.gunMuzzleNode = muzzleNode;
     root.userData.gunGlowColor = new THREE.Color(glowColor);
 
+    applyShadowSettings(root);
+    return root;
+  }
+
+  function createBlockTowerMesh({
+    bodyColor,
+    accentColor,
+    emissiveColor,
+    edgeColor,
+    opacity = 1,
+    transparent = false,
+    footprintOutlineColor = edgeColor,
+  }) {
+    const root = new THREE.Group();
+    const safeOpacity = THREE.MathUtils.clamp(Number(opacity) || 1, 0.05, 1);
+    const safeTransparent = transparent || safeOpacity < 0.999;
+    const halfSize = Math.max(0.05, BLOCK_TOWER_HALF_SIZE);
+    const height = Math.max(0.05, BLOCK_TOWER_HEIGHT);
+
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color: bodyColor,
+      emissive: emissiveColor,
+      emissiveIntensity: 0.18,
+      roughness: BLOCK_TOWER_CONFIG.roughness,
+      metalness: BLOCK_TOWER_CONFIG.metalness,
+      opacity: safeOpacity,
+      transparent: safeTransparent,
+      depthWrite: !safeTransparent,
+    });
+    const accentMaterial = new THREE.MeshStandardMaterial({
+      color: accentColor,
+      emissive: emissiveColor,
+      emissiveIntensity: 0.3,
+      roughness: Math.max(0, Math.min(1, (Number(BLOCK_TOWER_CONFIG.roughness) || 0.72) * 0.9)),
+      metalness: Math.max(0, Math.min(1, (Number(BLOCK_TOWER_CONFIG.metalness) || 0.08) * 1.1)),
+      opacity: safeOpacity,
+      transparent: safeTransparent,
+      depthWrite: !safeTransparent,
+    });
+
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(halfSize * 2, height, halfSize * 2),
+      bodyMaterial
+    );
+    body.position.y = height * 0.5;
+    root.add(body);
+
+    const accentInset = Math.max(0.02, halfSize * 0.14);
+    const accentWidth = Math.max(0.05, (halfSize * 2) - (accentInset * 2));
+    const accentHeight = Math.max(0.05, height * 0.17);
+    const accent = new THREE.Mesh(
+      new THREE.BoxGeometry(accentWidth, accentHeight, accentWidth),
+      accentMaterial
+    );
+    accent.position.y = height - (accentHeight * 0.5) - 0.01;
+    root.add(accent);
+
+    const outline = createFootprintOutlineMesh({
+      halfSizeX: halfSize,
+      halfSizeZ: halfSize,
+      height,
+      inset: Math.min(halfSize * 0.08, 0.08),
+      color: footprintOutlineColor,
+      opacity: 0.46,
+    });
+    root.add(outline);
+
+    root.userData.materials = [bodyMaterial, accentMaterial];
+    root.userData.blockBodyMaterial = bodyMaterial;
+    root.userData.blockAccentMaterial = accentMaterial;
+    root.userData.footprintOutlineMaterial = outline.userData.footprintOutlineMaterial;
+    bodyMaterial.userData = {
+      ...(bodyMaterial.userData || {}),
+      baseEmissiveIntensity: 0.18,
+    };
+    accentMaterial.userData = {
+      ...(accentMaterial.userData || {}),
+      baseEmissiveIntensity: 0.3,
+    };
+    if (outline.userData?.footprintOutlineMaterial) {
+      outline.userData.footprintOutlineMaterial.userData = {
+        ...(outline.userData.footprintOutlineMaterial.userData || {}),
+        baseOpacity: 0.46,
+      };
+    }
     applyShadowSettings(root);
     return root;
   }
@@ -2016,6 +2340,18 @@ export function createTowerSystem({
   }
 
   function createTowerPreviewMesh(type) {
+    if (type === "block") {
+      return createBlockTowerMesh({
+        bodyColor: BLOCK_TOWER_CONFIG.previewColor,
+        accentColor: BLOCK_TOWER_CONFIG.previewAccentColor,
+        emissiveColor: BLOCK_TOWER_CONFIG.previewGlow,
+        edgeColor: BLOCK_TOWER_CONFIG.previewGlow,
+        opacity: BLOCK_TOWER_CONFIG.previewOpacity,
+        transparent: true,
+        footprintOutlineColor: BLOCK_TOWER_CONFIG.previewGlow,
+      });
+    }
+
     if (type === "laserSniper") {
       return createLaserSniperTowerMesh({
         color: LASER_SNIPER_TOWER_CONFIG.previewColor,
@@ -2105,7 +2441,22 @@ export function createTowerSystem({
     });
   }
 
-  function createTowerPlacedMesh(type) {
+  function createTowerPlacedMesh(type, options = {}) {
+    if (type === "block") {
+      const blockOpacity = options?.blockOpacity != null && Number.isFinite(Number(options.blockOpacity))
+        ? THREE.MathUtils.clamp(Number(options.blockOpacity), 0.05, 1)
+        : getBlockOpacityForOwner(options?.ownerId);
+      return createBlockTowerMesh({
+        bodyColor: BLOCK_TOWER_CONFIG.placedColor,
+        accentColor: BLOCK_TOWER_CONFIG.placedAccentColor,
+        emissiveColor: BLOCK_TOWER_CONFIG.placedGlow,
+        edgeColor: BLOCK_TOWER_CONFIG.placedGlow,
+        opacity: blockOpacity,
+        transparent: blockOpacity < 0.999,
+        footprintOutlineColor: BLOCK_TOWER_CONFIG.placedGlow,
+      });
+    }
+
     if (type === "laserSniper") {
       return createLaserSniperTowerMesh({
         color: LASER_SNIPER_TOWER_CONFIG.placedColor,
@@ -2276,6 +2627,34 @@ export function createTowerSystem({
   }
 
   function setPreviewValidityVisual(isValid) {
+    if (selectedTowerType === "block") {
+      const bodyMaterial = preview.userData?.blockBodyMaterial;
+      const accentMaterial = preview.userData?.blockAccentMaterial;
+      const footprintOutlineMaterial = preview.userData?.footprintOutlineMaterial;
+      if (!bodyMaterial || !accentMaterial) {
+        return;
+      }
+
+      if (isValid) {
+        bodyMaterial.color.setHex(BLOCK_TOWER_CONFIG.previewColor);
+        bodyMaterial.emissive.setHex(BLOCK_TOWER_CONFIG.previewGlow);
+        accentMaterial.color.setHex(BLOCK_TOWER_CONFIG.previewAccentColor);
+        accentMaterial.emissive.setHex(BLOCK_TOWER_CONFIG.previewGlow);
+        if (footprintOutlineMaterial) {
+          footprintOutlineMaterial.color.setHex(BLOCK_TOWER_CONFIG.previewGlow);
+        }
+      } else {
+        bodyMaterial.color.setHex(BLOCK_TOWER_CONFIG.previewInvalidColor);
+        bodyMaterial.emissive.setHex(BLOCK_TOWER_CONFIG.previewInvalidGlow);
+        accentMaterial.color.setHex(BLOCK_TOWER_CONFIG.previewInvalidAccentColor);
+        accentMaterial.emissive.setHex(BLOCK_TOWER_CONFIG.previewInvalidGlow);
+        if (footprintOutlineMaterial) {
+          footprintOutlineMaterial.color.setHex(BLOCK_TOWER_CONFIG.previewInvalidGlow);
+        }
+      }
+      return;
+    }
+
     if (
       selectedTowerType === "laserSniper"
       || selectedTowerType === "mortar"
@@ -2581,7 +2960,7 @@ export function createTowerSystem({
         occupiedCells,
         position: null,
         sameSurfaceHeight: false,
-        footprintKey: getFootprintKey(occupiedCells),
+        footprintKey: getPlacementFootprintKey(occupiedCells, firstY),
       };
     }
 
@@ -2596,7 +2975,7 @@ export function createTowerSystem({
       occupiedCells,
       position: tempVecA.clone(),
       sameSurfaceHeight: true,
-      footprintKey: getFootprintKey(occupiedCells),
+      footprintKey: getPlacementFootprintKey(occupiedCells, firstY),
     };
   }
 
@@ -2651,6 +3030,11 @@ export function createTowerSystem({
     if (!Array.isArray(placement.occupiedCells) || placement.occupiedCells.length === 0) {
       return false;
     }
+    const placementSpec = getTowerSpec(placement.towerType);
+    if (!placementSpec) {
+      return false;
+    }
+    const placementBounds = getTowerVerticalBounds(placement.position.y, placementSpec.height);
     for (const cell of placement.occupiedCells) {
       if (!Number.isInteger(cell?.x) || !Number.isInteger(cell?.z)) {
         return false;
@@ -2664,8 +3048,12 @@ export function createTowerSystem({
       if (isReservedCell(cell.x, cell.z)) {
         return false;
       }
-      if (findTowerAtCell(cell.x, cell.z)) {
-        return false;
+      const towersAtCell = getTowersAtCell(cell.x, cell.z);
+      for (const existingTower of towersAtCell) {
+        const existingBounds = getTowerVerticalBounds(existingTower?.baseY, existingTower?.height);
+        if (doVerticalBoundsOverlap(placementBounds, existingBounds)) {
+          return false;
+        }
       }
     }
     return true;
@@ -2678,21 +3066,34 @@ export function createTowerSystem({
     if (!doesTowerTypeBlockPath(placement?.towerType)) {
       return true;
     }
-    if (
-      Array.isArray(placement.occupiedCells)
-      && placement.occupiedCells.length > 0
-      && !canBlockCellsCached(placement.occupiedCells)
-    ) {
+    const newlyBlockedCells = getNewlyBlockedPlacementCells(placement);
+    if (newlyBlockedCells.length > 0 && !canBlockCellsCached(newlyBlockedCells)) {
       return false;
     }
     return true;
   }
 
   function getBuildSurfaceY(x, z) {
-    if (typeof grid.getBuildSurfaceYAtWorld === "function") {
-      return grid.getBuildSurfaceYAtWorld(x, z);
+    const terrainSurfaceY = typeof grid.getBuildSurfaceYAtWorld === "function"
+      ? grid.getBuildSurfaceYAtWorld(x, z)
+      : grid.tileTopY;
+    const cell = typeof grid.worldToCell === "function"
+      ? grid.worldToCell(x, z)
+      : null;
+    if (!cell || !Number.isInteger(cell.x) || !Number.isInteger(cell.z)) {
+      return terrainSurfaceY;
     }
-    return grid.tileTopY;
+    let surfaceY = terrainSurfaceY;
+    for (const tower of getTowersAtCell(cell.x, cell.z)) {
+      if (tower?.towerType !== "block") {
+        continue;
+      }
+      const topY = Number(tower.baseY) + Math.max(0.01, Number(tower.height) || BLOCK_TOWER_HEIGHT);
+      if (Number.isFinite(topY)) {
+        surfaceY = Math.max(surfaceY, topY);
+      }
+    }
+    return surfaceY;
   }
 
   function selectTower(type = "gun") {
@@ -2859,6 +3260,9 @@ export function createTowerSystem({
         y: placement.position.y,
         z: placement.position.z,
       },
+      blockOpacity: placement.blockOpacity != null && Number.isFinite(Number(placement.blockOpacity))
+        ? Number(placement.blockOpacity)
+        : null,
       footprintKey: typeof placement.footprintKey === "string" ? placement.footprintKey : "",
       anchorKey: typeof placement.anchorKey === "string" ? placement.anchorKey : null,
       rotationY: Number.isFinite(Number(placement.rotationY)) ? Number(placement.rotationY) : 0,
@@ -2895,10 +3299,13 @@ export function createTowerSystem({
       towerType: normalizedType,
       occupiedCells,
       position: new THREE.Vector3(px, py, pz),
+      blockOpacity: payload?.blockOpacity != null && Number.isFinite(Number(payload.blockOpacity))
+        ? THREE.MathUtils.clamp(Number(payload.blockOpacity), 0.05, 1)
+        : null,
       sameSurfaceHeight: true,
       footprintKey: typeof payload?.footprintKey === "string" && payload.footprintKey.length > 0
         ? payload.footprintKey
-        : getFootprintKey(occupiedCells),
+        : getPlacementFootprintKey(occupiedCells, py),
       anchorKey: typeof payload?.anchorKey === "string" ? payload.anchorKey : null,
       rotationY: Number.isFinite(Number(payload?.rotationY)) ? Number(payload.rotationY) : 0,
       plasmaDirection: payload?.plasmaDirection
@@ -2941,14 +3348,24 @@ export function createTowerSystem({
     if (requireUnlocked && !isTowerTypeUnlocked(normalizedType)) {
       return { success: false, reason: "locked" };
     }
-    if (requireAffordable && !canAffordTower(normalizedType)) {
+    if (requireAffordable && !canAffordTower(normalizedType, ownerId)) {
       return { success: false, reason: "unaffordable" };
     }
     if (!isPlacementValid(resolvedPlacement)) {
       return { success: false, reason: "invalid_placement" };
     }
 
-    const towerMesh = createTowerPlacedMesh(normalizedType);
+    const resolvedBlockOpacity = normalizedType === "block"
+      ? (
+        resolvedPlacement.blockOpacity != null && Number.isFinite(Number(resolvedPlacement.blockOpacity))
+          ? THREE.MathUtils.clamp(Number(resolvedPlacement.blockOpacity), 0.05, 1)
+          : getBlockOpacityForOwner(ownerId)
+      )
+      : null;
+    const towerMesh = createTowerPlacedMesh(normalizedType, {
+      ownerId,
+      blockOpacity: resolvedBlockOpacity,
+    });
     towerMesh.position.copy(resolvedPlacement.position);
     if (typeof resolvedPlacement.rotationY === "number") {
       towerMesh.rotation.y = resolvedPlacement.rotationY;
@@ -2960,14 +3377,17 @@ export function createTowerSystem({
       towerMesh,
       resolvedPlacement.position,
       resolvedPlacement,
-      { ownerId }
+      {
+        ownerId,
+        blockOpacity: resolvedBlockOpacity,
+      }
     );
     if (!towerEntry) {
       scene.remove(towerMesh);
       disposeMeshResources(towerMesh);
       return { success: false, reason: "entry_creation_failed" };
     }
-    if (spendCost && !spendTowerCost(normalizedType)) {
+    if (spendCost && !spendTowerCost(normalizedType, ownerId)) {
       scene.remove(towerMesh);
       disposeMeshResources(towerMesh);
       return { success: false, reason: "spend_failed" };
@@ -2993,12 +3413,15 @@ export function createTowerSystem({
       scene.remove(towerMesh);
       disposeMeshResources(towerMesh);
       if (spendCost) {
-        refundTowerCost(normalizedType);
+        refundTowerCost(normalizedType, ownerId);
       }
       return { success: false, reason: "path_blocking_rejected" };
     }
 
     const placementPayload = serializePlacementPayload(normalizedType, resolvedPlacement);
+    if (placementPayload && normalizedType === "block" && Number.isFinite(resolvedBlockOpacity)) {
+      placementPayload.blockOpacity = resolvedBlockOpacity;
+    }
     if (typeof onTowerPlaced === "function" && placementPayload) {
       onTowerPlaced({
         ownerId,
@@ -3072,7 +3495,19 @@ export function createTowerSystem({
       buildFxState: null,
       ownerId,
       rotationY: typeof placement?.rotationY === "number" ? placement.rotationY : 0,
+      topInsetFromRadius: towerType === "block" ? 0 : undefined,
+      blockOpacity: towerType === "block"
+        ? (
+          options?.blockOpacity != null && Number.isFinite(Number(options.blockOpacity))
+            ? THREE.MathUtils.clamp(Number(options.blockOpacity), 0.05, 1)
+            : getBlockOpacityForOwner(ownerId)
+        )
+        : null,
     };
+
+    if (towerType === "block") {
+      applyBlockOpacityToTower(entry, ownerId, entry.blockOpacity);
+    }
 
     return entry;
   }
@@ -5208,6 +5643,9 @@ export function createTowerSystem({
     }
   }
 
+  function updateBlockTowerIdle() {
+  }
+
   function updateTowerCombat(deltaSeconds, enemySystem) {
     updateBuffTowerAurasAndBonuses(deltaSeconds);
     for (const tower of towers) {
@@ -5223,6 +5661,7 @@ export function createTowerSystem({
         tesla: updateTeslaCombat,
         spikes: updateSpikesCombat,
         plasma: updatePlasmaCombat,
+        block: updateBlockTowerIdle,
         buff: updateBuffTowerVisualOnly,
       };
       const handler = behaviorByType[tower.towerType] || updateGunTowerCombat;
@@ -5558,10 +5997,11 @@ export function createTowerSystem({
     if (!parsedPlacement) {
       return false;
     }
+    const ownerId = options.ownerId ?? payload?.ownerId ?? normalizeOwnerId(null);
     if (options.requireUnlocked !== false && !isTowerTypeUnlocked(parsedPlacement.towerType)) {
       return false;
     }
-    if (options.requireAffordable !== false && !canAffordTower(parsedPlacement.towerType)) {
+    if (options.requireAffordable !== false && !canAffordTower(parsedPlacement.towerType, ownerId)) {
       return false;
     }
     return isPlacementValid(parsedPlacement);
@@ -5654,7 +6094,10 @@ export function createTowerSystem({
       if (!towerType) {
         continue;
       }
-      const refundAmount = getTowerCost(towerType);
+      if (isTowerSupportingOtherTower(tower)) {
+        continue;
+      }
+      const refundAmount = getTowerCost(towerType, options?.sellerId ?? normalizeOwnerId(null));
       const topY = tower.baseY + Math.max(0.1, Number(tower.height) || gridCellSize);
       tempVecJ.set(
         tower.mesh.position.x,
@@ -5688,7 +6131,16 @@ export function createTowerSystem({
     const towerType = normalizeTowerType(tower.towerType);
     const resolvedTargetId = getTowerTargetId(tower);
     const sellerId = normalizeOwnerId(options?.sellerId);
-    const refundAmount = towerType ? getTowerCost(towerType) : 0;
+    if (isTowerSupportingOtherTower(tower)) {
+      return {
+        success: false,
+        targetId: resolvedTargetId,
+        towerType,
+        refundAmount: 0,
+        sellerId,
+      };
+    }
+    const refundAmount = towerType ? getTowerCost(towerType, sellerId) : 0;
     const applyRefund = options?.applyRefund !== false;
     const didRemove = removeTowerEntry(tower);
     if (!didRemove) {
@@ -5725,6 +6177,7 @@ export function createTowerSystem({
         towerType: tower.towerType,
         occupiedCells: tower.occupiedCells,
         position: tower.mesh?.position ?? new THREE.Vector3(),
+        blockOpacity: tower.blockOpacity,
         footprintKey: tower.footprintKey,
         anchorKey: tower.anchorKey,
         rotationY: tower.rotationY ?? tower.mesh?.rotation?.y ?? 0,
