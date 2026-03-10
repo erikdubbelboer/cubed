@@ -851,13 +851,18 @@ function showHostLobbyToast(message) {
 const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
 
 function getViewportMetrics() {
+  const appRect = app?.getBoundingClientRect?.();
+  const appWidth = Number(appRect?.width);
+  const appHeight = Number(appRect?.height);
   const visualViewport = window.visualViewport;
-  const rawWidth = Number.isFinite(Number(visualViewport?.width))
+  const fallbackWidth = Number.isFinite(Number(visualViewport?.width))
     ? Number(visualViewport.width)
     : Number(window.innerWidth);
-  const rawHeight = Number.isFinite(Number(visualViewport?.height))
+  const fallbackHeight = Number.isFinite(Number(visualViewport?.height))
     ? Number(visualViewport.height)
     : Number(window.innerHeight);
+  const rawWidth = Number.isFinite(appWidth) && appWidth > 0 ? appWidth : fallbackWidth;
+  const rawHeight = Number.isFinite(appHeight) && appHeight > 0 ? appHeight : fallbackHeight;
   const width = Math.max(1, Math.floor(rawWidth));
   const height = Math.max(1, Math.floor(rawHeight));
   const rawPixelRatio = Number(window.devicePixelRatio);
