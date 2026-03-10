@@ -17,6 +17,7 @@ Capture project decisions that are easy to regress but not always obvious from l
   - Reliable: `state_sync`, `wave_cmd`, `speed_pause_cmd`, `tower_place_commit`, `tower_sell_commit`, `tech_choice_commit`, `weapon_choice_commit`, `enemy_spawn`, `enemy_damage`, `enemy_death`, `host_ended`
   - Unreliable: `player_transform`, `tower_preview`
 - Health scaling: solo `1x`, co-op `2x`; on join/leave, alive enemies rescale immediately while preserving health ratio.
+- `GAME_CONFIG.enemies.healthMultiplier` is a global base scalar that multiplies all enemy health before solo/co-op scaling is applied.
 - Join-in-progress snapshot must include: wave/speed/pause, placed towers (`ownerId`), and active enemies (stable `enemyId` + current state).
 - Leave behavior:
   - Guest leaves: host continues solo and scaling returns to `1x`.

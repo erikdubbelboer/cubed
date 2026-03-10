@@ -3,6 +3,9 @@ import { GAME_CONFIG } from "./config.js";
 
 const ENEMY_CONFIG = GAME_CONFIG.enemies;
 const GRID_CONFIG = GAME_CONFIG.grid;
+const CONFIGURED_GLOBAL_ENEMY_HEALTH_MULTIPLIER = Number.isFinite(Number(ENEMY_CONFIG?.healthMultiplier))
+  ? Math.max(0.01, Number(ENEMY_CONFIG.healthMultiplier))
+  : 1;
 const BASE_SPEED = ENEMY_CONFIG.baseSpeed;
 const DISSOLVE_DEATH_DURATION = ENEMY_CONFIG.dissolveDuration;
 const DISSOLVE_EDGE_WIDTH = ENEMY_CONFIG.dissolveEdgeWidth;
@@ -167,7 +170,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     : null;
   let enemyHealthMultiplier = Number.isFinite(Number(options?.enemyHealthMultiplier))
     ? Math.max(0.01, Number(options.enemyHealthMultiplier))
-    : 1;
+    : CONFIGURED_GLOBAL_ENEMY_HEALTH_MULTIPLIER;
   let damageEnabled = options?.damageEnabled !== false;
 
   const activeEnemies = [];

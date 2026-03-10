@@ -20,6 +20,9 @@ const ECONOMY_CONFIG = GAME_CONFIG.economy ?? {};
 const ENEMY_CONFIG = GAME_CONFIG.enemies ?? {};
 const PLAYER_CONFIG = GAME_CONFIG.player ?? {};
 const TECH_TREE_CONFIG = GAME_CONFIG.techTree ?? {};
+const CONFIGURED_GLOBAL_ENEMY_HEALTH_MULTIPLIER = Number.isFinite(Number(ENEMY_CONFIG.healthMultiplier))
+  ? Math.max(0.01, Number(ENEMY_CONFIG.healthMultiplier))
+  : 1;
 const BLOCK_TRANSPARENCY_UPGRADE_OPACITY = Number.isFinite(Number(BLOCK_TOWER_CONFIG.transparencyUpgradeOpacity))
   ? THREE.MathUtils.clamp(Number(BLOCK_TOWER_CONFIG.transparencyUpgradeOpacity), 0.05, 1)
   : 0.2;
@@ -1066,9 +1069,10 @@ function getConnectedPlayerCount() {
 }
 
 function getEnemyHealthMultiplierForCurrentPlayerCount() {
-  return getConnectedPlayerCount() >= 2
+  const multiplayerHealthScale = getConnectedPlayerCount() >= 2
     ? MULTIPLAYER_HEALTH_SCALE_COOP
     : MULTIPLAYER_HEALTH_SCALE_SOLO;
+  return CONFIGURED_GLOBAL_ENEMY_HEALTH_MULTIPLIER * multiplayerHealthScale;
 }
 
 function shouldHostControlSimulation() {

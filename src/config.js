@@ -972,6 +972,9 @@ export const GAME_CONFIG = {
     // Shared movement speed before per-type multipliers.
     // Units/second. Typical range: 0.5-8.
     baseSpeed: 2.5,
+    // Global scalar applied to all enemy archetype health before mode-specific scaling.
+    // Typical range: 0.1-10.
+    healthMultiplier: 2,
     // Spawn cadence (seconds). Typical ranges: initial 0-2, interval 0.1-3.
     waveStartSpawnDelay: 1.0,
     spawnInterval: 1.2,
