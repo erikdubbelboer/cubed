@@ -1450,37 +1450,67 @@ export function createTowerSystem({
     root.add(base);
 
     const turretYawNode = new THREE.Object3D();
-    turretYawNode.position.y = GUN_TOWER_CONFIG.baseHeight + (GUN_TOWER_CONFIG.turretHeight * 0.45);
+    turretYawNode.position.y = GUN_TOWER_CONFIG.baseHeight;
     root.add(turretYawNode);
 
-    const turret = new THREE.Mesh(
-      new THREE.BoxGeometry(
-        GUN_TOWER_CONFIG.turretWidth,
-        GUN_TOWER_CONFIG.turretHeight,
-        GUN_TOWER_CONFIG.turretWidth
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        GUN_TOWER_CONFIG.turretWidth * 0.26,
+        GUN_TOWER_CONFIG.turretWidth * 0.26,
+        GUN_TOWER_CONFIG.turretHeight * 0.95,
+        16
       ),
       turretMaterial
     );
-    turretYawNode.add(turret);
+    body.position.y = GUN_TOWER_CONFIG.turretHeight * 0.48;
+    turretYawNode.add(body);
 
-    const barrel = new THREE.Mesh(
+    const pitchNode = new THREE.Object3D();
+    pitchNode.position.y = GUN_TOWER_CONFIG.turretHeight * 0.95;
+    turretYawNode.add(pitchNode);
+
+    const head = new THREE.Mesh(
       new THREE.BoxGeometry(
-        GUN_TOWER_CONFIG.barrelWidth,
-        GUN_TOWER_CONFIG.barrelHeight,
-        GUN_TOWER_CONFIG.barrelLength
+        GUN_TOWER_CONFIG.turretWidth * 0.86,
+        GUN_TOWER_CONFIG.turretHeight * 0.56,
+        GUN_TOWER_CONFIG.turretWidth * 0.8
       ),
       turretMaterial
     );
-    barrel.position.set(0, GUN_TOWER_CONFIG.muzzleOffsetY, GUN_TOWER_CONFIG.barrelLength * 0.5);
-    turretYawNode.add(barrel);
+    head.position.y = GUN_TOWER_CONFIG.turretHeight * 0.28;
+    pitchNode.add(head);
 
-    const muzzleNode = new THREE.Object3D();
-    muzzleNode.position.set(
-      0,
-      GUN_TOWER_CONFIG.muzzleOffsetY,
-      GUN_TOWER_CONFIG.muzzleOffsetForward
+    const barrelRadius = Math.max(GUN_TOWER_CONFIG.barrelWidth * 0.5, 0.04);
+    const barrelGeometry = new THREE.CylinderGeometry(
+      barrelRadius,
+      barrelRadius,
+      GUN_TOWER_CONFIG.barrelLength,
+      12
     );
-    turretYawNode.add(muzzleNode);
+    barrelGeometry.rotateX(Math.PI * 0.5);
+    const barrelOffsetX = GUN_TOWER_CONFIG.turretWidth * 0.24;
+    const barrelBaseY = GUN_TOWER_CONFIG.turretHeight * 0.28;
+    const barrelBaseZ = GUN_TOWER_CONFIG.turretWidth * 0.4;
+    const barrelNodes = [];
+    const muzzleNodes = [];
+
+    for (const side of [-1, 1]) {
+      const barrelNode = new THREE.Object3D();
+      barrelNode.position.set(side * barrelOffsetX, barrelBaseY, barrelBaseZ);
+      barrelNode.userData.baseZ = barrelBaseZ;
+      pitchNode.add(barrelNode);
+
+      const barrelMesh = new THREE.Mesh(barrelGeometry, turretMaterial);
+      barrelMesh.position.z = GUN_TOWER_CONFIG.barrelLength * 0.5;
+      barrelNode.add(barrelMesh);
+
+      const muzzleNode = new THREE.Object3D();
+      muzzleNode.position.z = GUN_TOWER_CONFIG.barrelLength;
+      barrelNode.add(muzzleNode);
+
+      barrelNodes.push(barrelNode);
+      muzzleNodes.push(muzzleNode);
+    }
 
     const footprintOutline = createFootprintOutlineMesh({
       halfSizeX: baseHalfSizeX,
@@ -1497,7 +1527,10 @@ export function createTowerSystem({
     root.userData.gunTurretMaterial = turretMaterial;
     root.userData.footprintOutlineMaterial = footprintOutline.userData.footprintOutlineMaterial;
     root.userData.gunTurretYawNode = turretYawNode;
-    root.userData.gunMuzzleNode = muzzleNode;
+    root.userData.gunTurretPitchNode = pitchNode;
+    root.userData.gunBarrelNodes = barrelNodes;
+    root.userData.gunMuzzleNodes = muzzleNodes;
+    root.userData.gunMuzzleNode = muzzleNodes[0] || null;
     root.userData.gunGlowColor = new THREE.Color(glowColor);
 
     applyShadowSettings(root);
@@ -3483,6 +3516,8 @@ export function createTowerSystem({
       aoeEmissiveIdle: new THREE.Color(AOE_TOWER_CONFIG.emissiveIdle),
       aoeEmissiveCharge: new THREE.Color(AOE_TOWER_CONFIG.emissiveCharge),
       gunMuzzleFlashTimer: 0,
+      gunNextBarrelIndex: 0,
+      gunBarrelRecoilTimer: 0,
       slowProcFlash: 0,
       spikesCycleTimer: Math.random() * initialSpikesCycleInterval,
       spikesActiveTimer: 0,
@@ -3910,7 +3945,10 @@ export function createTowerSystem({
   }
 
   function getGunMuzzleWorldPosition(tower, out) {
-    const muzzleNode = tower?.mesh?.userData?.gunMuzzleNode;
+    const muzzleNodes = tower?.mesh?.userData?.gunMuzzleNodes;
+    const muzzleNode = Array.isArray(muzzleNodes) && muzzleNodes.length > 0
+      ? muzzleNodes[Math.max(0, Math.min(muzzleNodes.length - 1, Number(tower?.gunActiveBarrelIndex) || 0))]
+      : tower?.mesh?.userData?.gunMuzzleNode;
     if (muzzleNode && typeof muzzleNode.getWorldPosition === "function") {
       muzzleNode.getWorldPosition(out);
       return out;
@@ -4463,6 +4501,13 @@ export function createTowerSystem({
   }
 
   function spawnGunProjectile(tower, targetPoint) {
+    const muzzleNodes = tower?.mesh?.userData?.gunMuzzleNodes;
+    const muzzleCount = Array.isArray(muzzleNodes) && muzzleNodes.length > 0 ? muzzleNodes.length : 1;
+    const selectedBarrelIndex = Math.max(
+      0,
+      Math.min(muzzleCount - 1, Number(tower?.gunNextBarrelIndex) || 0)
+    );
+    tower.gunActiveBarrelIndex = selectedBarrelIndex;
     getGunMuzzleWorldPosition(tower, tempVecA);
     tempVecB.copy(targetPoint).sub(tempVecA);
     if (tempVecB.lengthSq() <= TOWER_CONFIG.segmentEpsilon) {
@@ -4488,6 +4533,9 @@ export function createTowerSystem({
     });
     spawnGunMuzzleFlash(tempVecA);
     tower.gunMuzzleFlashTimer = Math.max(0, Number(GUN_TOWER_CONFIG.muzzleFlashDuration) || 0.08);
+    tower.gunBarrelRecoilTimer = Math.max(0.01, Number(GUN_TOWER_CONFIG.muzzleFlashDuration) || 0.08);
+    tower.gunBarrelRecoilIndex = selectedBarrelIndex;
+    tower.gunNextBarrelIndex = (selectedBarrelIndex + 1) % muzzleCount;
     return true;
   }
 
@@ -4864,6 +4912,7 @@ export function createTowerSystem({
   function updateGunTowerCombat(tower, deltaSeconds, enemySystem) {
     tower.cooldown = Math.max(0, tower.cooldown - deltaSeconds);
     tower.gunMuzzleFlashTimer = Math.max(0, (tower.gunMuzzleFlashTimer || 0) - deltaSeconds);
+    tower.gunBarrelRecoilTimer = Math.max(0, (tower.gunBarrelRecoilTimer || 0) - deltaSeconds);
 
     const target = findTargetWithLineOfSight(tower, enemySystem, { skipSlowed: false });
     if (!target || !target.mesh || !target.mesh.visible) {
@@ -4878,6 +4927,19 @@ export function createTowerSystem({
         const targetYaw = Math.atan2(tempVecA.x, tempVecA.z);
         const maxYawStep = Math.max(0, Number(GUN_TOWER_CONFIG.turretTurnSpeed) || 0) * Math.max(0, deltaSeconds);
         yawNode.rotation.y = rotateYawTowards(yawNode.rotation.y, targetYaw, maxYawStep);
+      }
+    }
+
+    const barrelNodes = tower?.mesh?.userData?.gunBarrelNodes;
+    if (Array.isArray(barrelNodes) && barrelNodes.length > 0) {
+      const recoilMax = Math.max(0.03, (Number(GUN_TOWER_CONFIG.barrelLength) || 1) * 0.14);
+      const recoilDuration = Math.max(0.01, Number(GUN_TOWER_CONFIG.muzzleFlashDuration) || 0.08);
+      const recoilT = THREE.MathUtils.clamp((tower.gunBarrelRecoilTimer || 0) / recoilDuration, 0, 1);
+      const recoilOffset = -recoilMax * recoilT;
+      for (let i = 0; i < barrelNodes.length; i += 1) {
+        const barrelNode = barrelNodes[i];
+        const baseZ = Number(barrelNode?.userData?.baseZ) || 0;
+        barrelNode.position.z = baseZ + (i === tower.gunBarrelRecoilIndex ? recoilOffset : 0);
       }
     }
 
