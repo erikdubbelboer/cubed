@@ -51,8 +51,8 @@
         "root_gun_core"
       ],
       "position": {
-        "x": -819.8270089285713,
-        "y": 5.891462053571473
+        "x": -535.714,
+        "y": 178.571
       },
       "cost": 1,
       "grants": {
@@ -69,8 +69,8 @@
         "root_gun_core"
       ],
       "position": {
-        "x": -620,
-        "y": 210
+        "x": -535.714,
+        "y": -178.571
       },
       "cost": 1,
       "grants": {
@@ -87,8 +87,8 @@
         "root_gun_core"
       ],
       "position": {
-        "x": -400,
-        "y": 210
+        "x": -178.571,
+        "y": 178.571
       },
       "cost": 1,
       "grants": {
@@ -105,8 +105,8 @@
         "root_gun_core"
       ],
       "position": {
-        "x": -312.89620535714306,
-        "y": -289.7837611607143
+        "x": -178.571,
+        "y": -178.571
       },
       "cost": 1,
       "grants": {
@@ -123,8 +123,8 @@
         "root_gun_core"
       ],
       "position": {
-        "x": 180,
-        "y": 210
+        "x": 178.571,
+        "y": 178.571
       },
       "cost": 1,
       "grants": {
@@ -141,8 +141,8 @@
         "root_gun_core"
       ],
       "position": {
-        "x": 400,
-        "y": 210
+        "x": 178.571,
+        "y": -178.571
       },
       "cost": 1,
       "grants": {
@@ -159,8 +159,8 @@
         "root_gun_core"
       ],
       "position": {
-        "x": 620,
-        "y": 210
+        "x": 357.143,
+        "y": -178.571
       },
       "cost": 1,
       "grants": {
@@ -177,8 +177,8 @@
         "root_gun_core"
       ],
       "position": {
-        "x": 840,
-        "y": 210
+        "x": 535.714,
+        "y": 178.571
       },
       "cost": 1,
       "grants": {
@@ -195,8 +195,8 @@
         "root_gun_core"
       ],
       "position": {
-        "x": 1040,
-        "y": 210
+        "x": 892.857,
+        "y": 0
       },
       "cost": 1,
       "grants": {
@@ -213,8 +213,8 @@
         "unlock_block"
       ],
       "position": {
-        "x": 1040,
-        "y": 430
+        "x": 892.857,
+        "y": 178.571
       },
       "cost": 1,
       "grants": {
@@ -235,8 +235,8 @@
         "block_cost_t1"
       ],
       "position": {
-        "x": 1040,
-        "y": 650
+        "x": 892.857,
+        "y": 357.143
       },
       "cost": 1,
       "grants": {
@@ -257,8 +257,8 @@
         "block_cost_t2"
       ],
       "position": {
-        "x": 1040,
-        "y": 870
+        "x": 892.857,
+        "y": 535.714
       },
       "cost": 1,
       "grants": {
@@ -279,8 +279,8 @@
         "root_gun_core"
       ],
       "position": {
-        "x": 258.18309294871784,
-        "y": -165.2504006410256
+        "x": 0,
+        "y": 178.571
       },
       "cost": 1,
       "grants": {
@@ -302,7 +302,7 @@
       ],
       "position": {
         "x": 0,
-        "y": 430
+        "y": 357.143
       },
       "cost": 1,
       "grants": {
@@ -324,7 +324,7 @@
       ],
       "position": {
         "x": 0,
-        "y": 650
+        "y": 535.714
       },
       "cost": 1,
       "grants": {
@@ -346,7 +346,7 @@
       ],
       "position": {
         "x": 0,
-        "y": 870
+        "y": 714.286
       },
       "cost": 1,
       "grants": {
@@ -368,7 +368,7 @@
       ],
       "position": {
         "x": 0,
-        "y": 1090
+        "y": 892.857
       },
       "cost": 1,
       "grants": {
@@ -390,8 +390,8 @@
         "unlock_aoe"
       ],
       "position": {
-        "x": -840,
-        "y": 430
+        "x": -535.714,
+        "y": 357.143
       },
       "cost": 1,
       "grants": {
@@ -412,8 +412,8 @@
         "aoe_damage_t1"
       ],
       "position": {
-        "x": -840,
-        "y": 650
+        "x": -535.714,
+        "y": 535.714
       },
       "cost": 1,
       "grants": {
@@ -434,8 +434,8 @@
         "aoe_radius_t1"
       ],
       "position": {
-        "x": -840,
-        "y": 870
+        "x": -535.714,
+        "y": 714.286
       },
       "cost": 1,
       "grants": {
@@ -456,8 +456,8 @@
         "aoe_damage_t1"
       ],
       "position": {
-        "x": -840,
-        "y": 1090
+        "x": -714.286,
+        "y": 357.143
       },
       "cost": 1,
       "grants": {
@@ -478,8 +478,8 @@
         "unlock_slow"
       ],
       "position": {
-        "x": -620,
-        "y": 430
+        "x": -535.714,
+        "y": -357.143
       },
       "cost": 1,
       "grants": {
@@ -500,8 +500,8 @@
         "slow_strength_t1"
       ],
       "position": {
-        "x": -620,
-        "y": 650
+        "x": -535.714,
+        "y": -535.714
       },
       "cost": 1,
       "grants": {
@@ -522,8 +522,8 @@
         "slow_duration_t1"
       ],
       "position": {
-        "x": -620,
-        "y": 870
+        "x": -535.714,
+        "y": -714.286
       },
       "cost": 1,
       "grants": {
@@ -544,8 +544,8 @@
         "slow_strength_t1"
       ],
       "position": {
-        "x": -620,
-        "y": 1090
+        "x": -714.286,
+        "y": -357.143
       },
       "cost": 1,
       "grants": {
@@ -564,8 +564,8 @@
         "unlock_laser_sniper"
       ],
       "position": {
-        "x": -400,
-        "y": 430
+        "x": -178.571,
+        "y": 357.143
       },
       "cost": 1,
       "grants": {
@@ -586,8 +586,8 @@
         "sniper_pierce_t1"
       ],
       "position": {
-        "x": -400,
-        "y": 650
+        "x": -178.571,
+        "y": 535.714
       },
       "cost": 1,
       "grants": {
@@ -608,8 +608,8 @@
         "sniper_damage_t1"
       ],
       "position": {
-        "x": -400,
-        "y": 870
+        "x": -178.571,
+        "y": 714.286
       },
       "cost": 1,
       "grants": {
@@ -630,8 +630,8 @@
         "sniper_pierce_t1"
       ],
       "position": {
-        "x": -400,
-        "y": 1090
+        "x": -357.143,
+        "y": 357.143
       },
       "cost": 1,
       "grants": {
@@ -652,8 +652,8 @@
         "unlock_mortar"
       ],
       "position": {
-        "x": -180,
-        "y": 430
+        "x": -178.571,
+        "y": -357.143
       },
       "cost": 1,
       "grants": {
@@ -674,8 +674,8 @@
         "mortar_radius_t1"
       ],
       "position": {
-        "x": -180,
-        "y": 650
+        "x": -178.571,
+        "y": -535.714
       },
       "cost": 1,
       "grants": {
@@ -696,8 +696,8 @@
         "mortar_damage_t1"
       ],
       "position": {
-        "x": -180,
-        "y": 870
+        "x": -178.571,
+        "y": -714.286
       },
       "cost": 1,
       "grants": {
@@ -718,8 +718,8 @@
         "mortar_radius_t1"
       ],
       "position": {
-        "x": -180,
-        "y": 1090
+        "x": -357.143,
+        "y": -357.143
       },
       "cost": 1,
       "grants": {
@@ -743,8 +743,8 @@
         "unlock_tesla"
       ],
       "position": {
-        "x": 180,
-        "y": 430
+        "x": 178.571,
+        "y": 357.143
       },
       "cost": 1,
       "grants": {
@@ -765,8 +765,8 @@
         "tesla_chain_t1"
       ],
       "position": {
-        "x": 180,
-        "y": 650
+        "x": 178.571,
+        "y": 535.714
       },
       "cost": 1,
       "grants": {
@@ -787,8 +787,8 @@
         "tesla_damage_t1"
       ],
       "position": {
-        "x": 180,
-        "y": 870
+        "x": 178.571,
+        "y": 714.286
       },
       "cost": 1,
       "grants": {
@@ -809,8 +809,8 @@
         "tesla_chain_t1"
       ],
       "position": {
-        "x": 180,
-        "y": 1090
+        "x": 357.143,
+        "y": 357.143
       },
       "cost": 1,
       "grants": {
@@ -829,8 +829,8 @@
         "unlock_spikes"
       ],
       "position": {
-        "x": 400,
-        "y": 430
+        "x": 178.571,
+        "y": -357.143
       },
       "cost": 1,
       "grants": {
@@ -851,8 +851,8 @@
         "spikes_cycle_t1"
       ],
       "position": {
-        "x": 400,
-        "y": 650
+        "x": 178.571,
+        "y": -535.714
       },
       "cost": 1,
       "grants": {
@@ -873,8 +873,8 @@
         "spikes_damage_t1"
       ],
       "position": {
-        "x": 400,
-        "y": 870
+        "x": 178.571,
+        "y": -714.286
       },
       "cost": 1,
       "grants": {
@@ -895,8 +895,8 @@
         "spikes_cycle_t1"
       ],
       "position": {
-        "x": 400,
-        "y": 1090
+        "x": 0,
+        "y": -357.143
       },
       "cost": 1,
       "grants": {
@@ -915,8 +915,8 @@
         "unlock_plasma"
       ],
       "position": {
-        "x": 620,
-        "y": 430
+        "x": 357.143,
+        "y": -357.143
       },
       "cost": 1,
       "grants": {
@@ -937,8 +937,8 @@
         "plasma_damage_t1"
       ],
       "position": {
-        "x": 620,
-        "y": 650
+        "x": 535.714,
+        "y": -357.143
       },
       "cost": 1,
       "grants": {
@@ -959,8 +959,8 @@
         "plasma_reach_t1"
       ],
       "position": {
-        "x": 620,
-        "y": 870
+        "x": 714.286,
+        "y": -357.143
       },
       "cost": 1,
       "grants": {
@@ -981,8 +981,8 @@
         "plasma_damage_t1"
       ],
       "position": {
-        "x": 620,
-        "y": 1090
+        "x": 357.143,
+        "y": -535.714
       },
       "cost": 1,
       "grants": {
@@ -1003,8 +1003,8 @@
         "unlock_buff"
       ],
       "position": {
-        "x": 840,
-        "y": 430
+        "x": 535.714,
+        "y": 357.143
       },
       "cost": 1,
       "grants": {
@@ -1025,8 +1025,8 @@
         "buff_range_t1"
       ],
       "position": {
-        "x": 840,
-        "y": 650
+        "x": 535.714,
+        "y": 535.714
       },
       "cost": 1,
       "grants": {
@@ -1048,8 +1048,8 @@
         "buff_potency_t1"
       ],
       "position": {
-        "x": 840,
-        "y": 870
+        "x": 535.714,
+        "y": 714.286
       },
       "cost": 1,
       "grants": {
@@ -1070,8 +1070,8 @@
         "buff_range_t1"
       ],
       "position": {
-        "x": 840,
-        "y": 1090
+        "x": 714.286,
+        "y": 357.143
       },
       "cost": 1,
       "grants": {
@@ -1092,7 +1092,7 @@
       ],
       "position": {
         "x": 0,
-        "y": 1310
+        "y": -535.714
       },
       "cost": 1,
       "grants": {
@@ -1108,8 +1108,50 @@
   "edgeJoints": {
     "root_gun_core->unlock_mortar": [
       {
-        "x": -311.3420758928572,
-        "y": -1.9670758928571535
+        "x": -178.571,
+        "y": 0
+      }
+    ],
+    "root_gun_core->unlock_spikes": [
+      {
+        "x": 178.571,
+        "y": 0
+      }
+    ],
+    "root_gun_core->unlock_plasma": [
+      {
+        "x": 357.143,
+        "y": 0
+      }
+    ],
+    "root_gun_core->unlock_tesla": [
+      {
+        "x": 178.571,
+        "y": 0
+      }
+    ],
+    "root_gun_core->unlock_buff": [
+      {
+        "x": 535.714,
+        "y": 0
+      }
+    ],
+    "root_gun_core->unlock_slow": [
+      {
+        "x": -535.714,
+        "y": 0
+      }
+    ],
+    "root_gun_core->unlock_laser_sniper": [
+      {
+        "x": -178.571,
+        "y": 0
+      }
+    ],
+    "root_gun_core->unlock_aoe": [
+      {
+        "x": -535.714,
+        "y": 0
       }
     ]
   }
