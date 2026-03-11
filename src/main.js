@@ -850,19 +850,14 @@ function showHostLobbyToast(message) {
 
 const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
 
-function pickViewportDimension(primaryCandidate, secondaryCandidate) {
+function resolveViewportDimension(primaryCandidate, fallbackCandidate) {
   const primary = Number(primaryCandidate);
-  const secondary = Number(secondaryCandidate);
-  const hasPrimary = Number.isFinite(primary) && primary > 0;
-  const hasSecondary = Number.isFinite(secondary) && secondary > 0;
-  if (hasPrimary && hasSecondary) {
-    return Math.min(primary, secondary);
-  }
-  if (hasPrimary) {
+  if (Number.isFinite(primary) && primary > 0) {
     return primary;
   }
-  if (hasSecondary) {
-    return secondary;
+  const fallback = Number(fallbackCandidate);
+  if (Number.isFinite(fallback) && fallback > 0) {
+    return fallback;
   }
   return 1;
 }
@@ -878,8 +873,8 @@ function getViewportMetrics() {
   const innerHeightValue = Number(window.innerHeight);
   const fallbackWidth = Number.isFinite(visualWidth) ? visualWidth : innerWidthValue;
   const fallbackHeight = Number.isFinite(visualHeight) ? visualHeight : innerHeightValue;
-  const rawWidth = pickViewportDimension(appWidth, fallbackWidth);
-  const rawHeight = pickViewportDimension(appHeight, fallbackHeight);
+  const rawWidth = resolveViewportDimension(appWidth, fallbackWidth);
+  const rawHeight = resolveViewportDimension(appHeight, fallbackHeight);
   const width = Math.max(1, Math.floor(rawWidth));
   const height = Math.max(1, Math.floor(rawHeight));
   const rawPixelRatio = Number(window.devicePixelRatio);
@@ -6186,26 +6181,40 @@ window.addEventListener("beforeunload", () => {
 });
 
 const canAutoRequestFullscreen = (() => {
+  const host = String(window.location?.hostname || "").toLowerCase();
+  const isLocalHost = host === "localhost" || host === "127.0.0.1" || host === "::1";
+  if (isLocalHost) {
+    return false;
+  }
   try {
     return window.top === window.self;
   } catch {
     return false;
   }
 })();
-let hasRequestedAutoFullscreen = false;
+let fullscreenRequestInFlight = false;
+let lastFullscreenAttemptMs = 0;
 
 function requestFullscreenFromInteraction() {
-  if (!canAutoRequestFullscreen || hasRequestedAutoFullscreen || document.fullscreenElement) {
+  if (!canAutoRequestFullscreen || document.fullscreenElement || fullscreenRequestInFlight) {
+    return;
+  }
+  const now = performance.now();
+  if ((now - lastFullscreenAttemptMs) < 800) {
     return;
   }
   const target = app || document.documentElement;
   if (!target || typeof target.requestFullscreen !== "function") {
     return;
   }
-  hasRequestedAutoFullscreen = true;
-  target.requestFullscreen({ navigationUI: "hide" }).catch(() => {
-    hasRequestedAutoFullscreen = false;
-  });
+
+  lastFullscreenAttemptMs = now;
+  fullscreenRequestInFlight = true;
+  target.requestFullscreen({ navigationUI: "hide" })
+    .catch(() => {})
+    .finally(() => {
+      fullscreenRequestInFlight = false;
+    });
 }
 
 function registerFullscreenInteractionHooks() {
@@ -6214,11 +6223,6 @@ function registerFullscreenInteractionHooks() {
   }
   const handleInteraction = () => {
     requestFullscreenFromInteraction();
-    if (document.fullscreenElement) {
-      window.removeEventListener("pointerdown", handleInteraction);
-      window.removeEventListener("keydown", handleInteraction);
-      window.removeEventListener("touchstart", handleInteraction);
-    }
   };
   window.addEventListener("pointerdown", handleInteraction, { passive: true });
   window.addEventListener("keydown", handleInteraction, { passive: true });

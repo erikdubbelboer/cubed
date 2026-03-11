@@ -2045,9 +2045,11 @@ export function createUiOverlay({
   function drawTouchControls() {
     touchActionZones = [];
 
+    const touchLandscape = isTouchLandscapeLayout();
+    const touchScale = touchLandscape ? 0.78 : 1;
     const movePadRadius = clamp(
-      Number(mobileUiConfig.movePadRadiusPx) || MOBILE_UI_DEFAULTS.movePadRadiusPx,
-      28,
+      (Number(mobileUiConfig.movePadRadiusPx) || MOBILE_UI_DEFAULTS.movePadRadiusPx) * touchScale,
+      24,
       92
     );
     const movePadActivationScale = clamp(
@@ -2057,12 +2059,12 @@ export function createUiOverlay({
     );
     const movePadActivationRadius = movePadRadius * movePadActivationScale;
     const edgeMargin = clamp(
-      Number(mobileUiConfig.edgeMarginPx) || MOBILE_UI_DEFAULTS.edgeMarginPx,
-      8,
+      (Number(mobileUiConfig.edgeMarginPx) || MOBILE_UI_DEFAULTS.edgeMarginPx) * (touchLandscape ? 0.72 : 1),
+      6,
       52
     );
     const bottomOffset = clamp(
-      Number(mobileUiConfig.controlBottomOffsetPx) || MOBILE_UI_DEFAULTS.controlBottomOffsetPx,
+      (Number(mobileUiConfig.controlBottomOffsetPx) || MOBILE_UI_DEFAULTS.controlBottomOffsetPx) * (touchLandscape ? 0.45 : 1),
       0,
       84
     );
@@ -2073,7 +2075,8 @@ export function createUiOverlay({
       viewportWidth - movePadActivationRadius - 6
     );
     const movePadVerticalOffset = clamp(
-      Number(mobileUiConfig.movePadVerticalOffsetPx) || MOBILE_UI_DEFAULTS.movePadVerticalOffsetPx,
+      (Number(mobileUiConfig.movePadVerticalOffsetPx) || MOBILE_UI_DEFAULTS.movePadVerticalOffsetPx)
+        * (touchLandscape ? 0.32 : 1),
       0,
       Math.max(0, viewportHeight * 0.45)
     );
@@ -2146,10 +2149,24 @@ export function createUiOverlay({
       movePadActivationRadius * 2
     );
 
-    const primaryRadius = clamp((Number(mobileUiConfig.actionButtonSizePx) || MOBILE_UI_DEFAULTS.actionButtonSizePx) * 0.5, 28, 78);
+    const primaryRadius = clamp(
+      ((Number(mobileUiConfig.actionButtonSizePx) || MOBILE_UI_DEFAULTS.actionButtonSizePx) * 0.5) * touchScale,
+      24,
+      78
+    );
     const leftPrimaryRadius = primaryRadius;
-    const jumpRadius = clamp((Number(mobileUiConfig.jumpButtonSizePx) || MOBILE_UI_DEFAULTS.jumpButtonSizePx) * 0.5, 22, 62);
-    const cancelRadius = clamp((Number(mobileUiConfig.cancelButtonSizePx) || MOBILE_UI_DEFAULTS.cancelButtonSizePx) * 0.5, 16, 44);
+    const jumpRadius = clamp(
+      ((Number(mobileUiConfig.jumpButtonSizePx) || MOBILE_UI_DEFAULTS.jumpButtonSizePx) * 0.5)
+        * (touchLandscape ? 0.84 : 1),
+      20,
+      62
+    );
+    const cancelRadius = clamp(
+      ((Number(mobileUiConfig.cancelButtonSizePx) || MOBILE_UI_DEFAULTS.cancelButtonSizePx) * 0.5)
+        * (touchLandscape ? 0.84 : 1),
+      14,
+      44
+    );
 
     const actionGap = clamp(primaryRadius * 0.18, 8, 22);
     const primaryCenterX = clamp(
