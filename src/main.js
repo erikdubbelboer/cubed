@@ -850,19 +850,36 @@ function showHostLobbyToast(message) {
 
 const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
 
+function pickViewportDimension(primaryCandidate, secondaryCandidate) {
+  const primary = Number(primaryCandidate);
+  const secondary = Number(secondaryCandidate);
+  const hasPrimary = Number.isFinite(primary) && primary > 0;
+  const hasSecondary = Number.isFinite(secondary) && secondary > 0;
+  if (hasPrimary && hasSecondary) {
+    return Math.min(primary, secondary);
+  }
+  if (hasPrimary) {
+    return primary;
+  }
+  if (hasSecondary) {
+    return secondary;
+  }
+  return 1;
+}
+
 function getViewportMetrics() {
   const appRect = app?.getBoundingClientRect?.();
   const appWidth = Number(appRect?.width);
   const appHeight = Number(appRect?.height);
   const visualViewport = window.visualViewport;
-  const fallbackWidth = Number.isFinite(Number(visualViewport?.width))
-    ? Number(visualViewport.width)
-    : Number(window.innerWidth);
-  const fallbackHeight = Number.isFinite(Number(visualViewport?.height))
-    ? Number(visualViewport.height)
-    : Number(window.innerHeight);
-  const rawWidth = Number.isFinite(appWidth) && appWidth > 0 ? appWidth : fallbackWidth;
-  const rawHeight = Number.isFinite(appHeight) && appHeight > 0 ? appHeight : fallbackHeight;
+  const visualWidth = Number(visualViewport?.width);
+  const visualHeight = Number(visualViewport?.height);
+  const innerWidthValue = Number(window.innerWidth);
+  const innerHeightValue = Number(window.innerHeight);
+  const fallbackWidth = Number.isFinite(visualWidth) ? visualWidth : innerWidthValue;
+  const fallbackHeight = Number.isFinite(visualHeight) ? visualHeight : innerHeightValue;
+  const rawWidth = pickViewportDimension(appWidth, fallbackWidth);
+  const rawHeight = pickViewportDimension(appHeight, fallbackHeight);
   const width = Math.max(1, Math.floor(rawWidth));
   const height = Math.max(1, Math.floor(rawHeight));
   const rawPixelRatio = Number(window.devicePixelRatio);
@@ -902,13 +919,15 @@ const camera = new THREE.PerspectiveCamera(
 );
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(viewportWidth, viewportHeight);
+renderer.setSize(viewportWidth, viewportHeight, false);
 renderer.setPixelRatio(viewportPixelRatio);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.localClippingEnabled = true;
 renderer.toneMappingExposure = SCENE_CONFIG.toneMappingExposure;
 renderer.autoClear = false;
+renderer.domElement.style.width = "100%";
+renderer.domElement.style.height = "100%";
 app.appendChild(renderer.domElement);
 
 const uiOverlay = createUiOverlay({
@@ -6166,7 +6185,48 @@ window.addEventListener("beforeunload", () => {
   stopMainLoop();
 });
 
+const canAutoRequestFullscreen = (() => {
+  try {
+    return window.top === window.self;
+  } catch {
+    return false;
+  }
+})();
+let hasRequestedAutoFullscreen = false;
+
+function requestFullscreenFromInteraction() {
+  if (!canAutoRequestFullscreen || hasRequestedAutoFullscreen || document.fullscreenElement) {
+    return;
+  }
+  const target = app || document.documentElement;
+  if (!target || typeof target.requestFullscreen !== "function") {
+    return;
+  }
+  hasRequestedAutoFullscreen = true;
+  target.requestFullscreen({ navigationUI: "hide" }).catch(() => {
+    hasRequestedAutoFullscreen = false;
+  });
+}
+
+function registerFullscreenInteractionHooks() {
+  if (!canAutoRequestFullscreen) {
+    return;
+  }
+  const handleInteraction = () => {
+    requestFullscreenFromInteraction();
+    if (document.fullscreenElement) {
+      window.removeEventListener("pointerdown", handleInteraction);
+      window.removeEventListener("keydown", handleInteraction);
+      window.removeEventListener("touchstart", handleInteraction);
+    }
+  };
+  window.addEventListener("pointerdown", handleInteraction, { passive: true });
+  window.addEventListener("keydown", handleInteraction, { passive: true });
+  window.addEventListener("touchstart", handleInteraction, { passive: true });
+}
+
 initGame();
+registerFullscreenInteractionHooks();
 
 function applyViewportMetrics(nextViewportMetrics = getViewportMetrics()) {
   const previousOrientation = viewportIsPortrait;
@@ -6178,7 +6238,9 @@ function applyViewportMetrics(nextViewportMetrics = getViewportMetrics()) {
   camera.aspect = viewportWidth / viewportHeight;
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(viewportPixelRatio);
-  renderer.setSize(viewportWidth, viewportHeight);
+  renderer.setSize(viewportWidth, viewportHeight, false);
+  renderer.setViewport(0, 0, viewportWidth, viewportHeight);
+  renderer.setScissorTest(false);
   uiOverlay.resize(viewportWidth, viewportHeight);
   vCursorX = clamp(vCursorX, 0, viewportWidth);
   vCursorY = clamp(vCursorY, 0, viewportHeight);

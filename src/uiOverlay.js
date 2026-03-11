@@ -1269,6 +1269,10 @@ export function createUiOverlay({
     drawCtx.stroke();
   }
 
+  function isTouchLandscapeLayout() {
+    return state.showTouchControls && !state.touchPortrait;
+  }
+
   function shouldUseVerticalJetpackHud() {
     return !state.showTouchControls || state.touchPortrait;
   }
@@ -1367,11 +1371,16 @@ export function createUiOverlay({
   }
 
   function getMoneyPanelRect() {
+    const touchLandscape = isTouchLandscapeLayout();
     const panelWidth = state.showTouchControls
-      ? clamp(viewportWidth * 0.14, 108, 170)
+      ? (touchLandscape
+        ? clamp(viewportWidth * 0.12, 96, 152)
+        : clamp(viewportWidth * 0.14, 108, 170))
       : clamp(viewportWidth * 0.13, 112, 176);
     const panelHeight = state.showTouchControls
-      ? clamp(viewportHeight * 0.062, 42, 60)
+      ? (touchLandscape
+        ? clamp(viewportHeight * 0.074, 34, 48)
+        : clamp(viewportHeight * 0.062, 42, 60))
       : clamp(viewportHeight * 0.058, 40, 56);
     const panelX = viewportWidth - panelWidth - clamp(viewportWidth * 0.02, 12, 22);
     const panelY = clamp(viewportHeight * 0.02, 12, 20);
@@ -1637,11 +1646,16 @@ export function createUiOverlay({
     if (!state.buildPhaseActive || state.menuOpen) {
       return null;
     }
+    const touchLandscape = isTouchLandscapeLayout();
     const panelHeight = state.showTouchControls
-      ? clamp(viewportHeight * 0.056, 34, 52)
+      ? (touchLandscape
+        ? clamp(viewportHeight * 0.072, 30, 42)
+        : clamp(viewportHeight * 0.056, 34, 52))
       : clamp(viewportHeight * 0.052, 32, 48);
     const panelWidth = state.showTouchControls
-      ? clamp(viewportWidth * 0.24, 126, 228)
+      ? (touchLandscape
+        ? clamp(viewportWidth * 0.2, 118, 190)
+        : clamp(viewportWidth * 0.24, 126, 228))
       : clamp(viewportWidth * 0.2, 130, 246);
     const panelX = clamp(viewportWidth * 0.02, 12, 20);
     const panelY = clamp(viewportHeight * 0.02, 12, 20);
@@ -1828,9 +1842,12 @@ export function createUiOverlay({
       return;
     }
 
-    const mobileTowerColumn = state.showTouchControls;
-    let slotSize = mobileTowerColumn
-      ? clamp(Math.min(viewportWidth * 0.14, viewportHeight * 0.09), 56, 84)
+    const touchLandscape = isTouchLandscapeLayout();
+    const mobileTowerColumn = state.showTouchControls && !touchLandscape;
+    let slotSize = state.showTouchControls
+      ? (touchLandscape
+        ? clamp(Math.min(viewportWidth * 0.1, viewportHeight * 0.16), 50, 72)
+        : clamp(Math.min(viewportWidth * 0.14, viewportHeight * 0.09), 56, 84))
       : clamp(Math.min(viewportWidth * 0.18, viewportHeight * 0.16), 84, 116);
     let slotGap = mobileTowerColumn
       ? clamp(slotSize * 0.14, 7, 12)
@@ -1863,7 +1880,9 @@ export function createUiOverlay({
     } else {
       const trayWidth = (slotSize * visibleInventory.length) + (slotGap * (visibleInventory.length - 1));
       baseX = (viewportWidth - trayWidth) * 0.5;
-      baseY = viewportHeight - slotSize - clamp(viewportHeight * 0.03, 14, 24);
+      baseY = touchLandscape
+        ? viewportHeight - slotSize - clamp(viewportHeight * 0.02, 8, 14)
+        : viewportHeight - slotSize - clamp(viewportHeight * 0.03, 14, 24);
     }
 
     for (let i = 0; i < visibleInventory.length; i += 1) {
