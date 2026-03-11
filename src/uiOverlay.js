@@ -1444,14 +1444,19 @@ export function createUiOverlay({
       panelWidth: moneyPanelWidth,
       panelHeight: moneyPanelHeight,
     } = getMoneyPanelRect();
+    const touchLandscape = isTouchLandscapeLayout();
     const topGap = state.showTouchControls
-      ? clamp(viewportHeight * 0.008, 4, 8)
+      ? (touchLandscape ? clamp(viewportHeight * 0.006, 3, 6) : clamp(viewportHeight * 0.008, 4, 8))
       : clamp(viewportHeight * 0.008, 5, 10);
     const panelWidth = state.showTouchControls
-      ? clamp(moneyPanelWidth * 0.74, 74, 128)
+      ? (touchLandscape
+        ? clamp(moneyPanelWidth * 0.68, 64, 108)
+        : clamp(moneyPanelWidth * 0.74, 74, 128))
       : clamp(moneyPanelWidth * 0.72, 80, 134);
     const panelHeight = state.showTouchControls
-      ? clamp(moneyPanelHeight * 0.62, 24, 38)
+      ? (touchLandscape
+        ? clamp(moneyPanelHeight * 0.56, 20, 30)
+        : clamp(moneyPanelHeight * 0.62, 24, 38))
       : clamp(moneyPanelHeight * 0.6, 24, 36);
     const panelX = moneyPanelX + moneyPanelWidth - panelWidth;
     const panelY = moneyPanelY + moneyPanelHeight + topGap;
@@ -1538,14 +1543,19 @@ export function createUiOverlay({
       panelHeight: moneyPanelHeight,
     } = getMoneyPanelRect();
     const waveRect = getWaveCounterRect();
+    const touchLandscape = isTouchLandscapeLayout();
     const topGap = state.showTouchControls
-      ? clamp(viewportHeight * 0.008, 4, 8)
+      ? (touchLandscape ? clamp(viewportHeight * 0.006, 3, 6) : clamp(viewportHeight * 0.008, 4, 8))
       : clamp(viewportHeight * 0.008, 5, 10);
     const panelWidth = state.showTouchControls
-      ? clamp(moneyPanelWidth * 0.96, 96, 162)
+      ? (touchLandscape
+        ? clamp(moneyPanelWidth * 0.84, 82, 130)
+        : clamp(moneyPanelWidth * 0.96, 96, 162))
       : clamp(moneyPanelWidth * 0.92, 104, 178);
     const panelHeight = state.showTouchControls
-      ? clamp(moneyPanelHeight * 0.46, 16, 24)
+      ? (touchLandscape
+        ? clamp(moneyPanelHeight * 0.4, 14, 20)
+        : clamp(moneyPanelHeight * 0.46, 16, 24))
       : clamp(moneyPanelHeight * 0.44, 16, 24);
     const panelX = moneyPanelX + moneyPanelWidth - panelWidth;
     const anchorBottom = waveRect
@@ -1649,12 +1659,12 @@ export function createUiOverlay({
     const touchLandscape = isTouchLandscapeLayout();
     const panelHeight = state.showTouchControls
       ? (touchLandscape
-        ? clamp(viewportHeight * 0.072, 30, 42)
+        ? clamp(viewportHeight * 0.058, 24, 34)
         : clamp(viewportHeight * 0.056, 34, 52))
       : clamp(viewportHeight * 0.052, 32, 48);
     const panelWidth = state.showTouchControls
       ? (touchLandscape
-        ? clamp(viewportWidth * 0.2, 118, 190)
+        ? clamp(viewportWidth * 0.15, 94, 146)
         : clamp(viewportWidth * 0.24, 126, 228))
       : clamp(viewportWidth * 0.2, 130, 246);
     const panelX = clamp(viewportWidth * 0.02, 12, 20);
@@ -1755,10 +1765,15 @@ export function createUiOverlay({
       panelY,
       panelHeight,
     } = getMoneyPanelRect();
-    const buttonHeight = clamp(panelHeight * 0.92, 30, 54);
-    const buttonRadius = clamp(buttonHeight * 0.27, 7, 12);
-    const buttonGap = clamp(buttonHeight * 0.18, 6, 12);
-    const labelFontSize = clamp(buttonHeight * 0.42, 11, 18);
+    const touchLandscape = isTouchLandscapeLayout();
+    const buttonHeight = clamp(
+      panelHeight * (touchLandscape ? 0.82 : 0.92),
+      touchLandscape ? 20 : 30,
+      touchLandscape ? 34 : 54
+    );
+    const buttonRadius = clamp(buttonHeight * 0.27, 6, 12);
+    const buttonGap = clamp(buttonHeight * (touchLandscape ? 0.14 : 0.18), 4, 12);
+    const labelFontSize = clamp(buttonHeight * 0.42, touchLandscape ? 9 : 11, 18);
 
     const buttons = [];
     if (showPause) {
@@ -1791,7 +1806,11 @@ export function createUiOverlay({
     let nextRightX = panelX - buttonGap;
     for (const button of buttons) {
       const textWidth = drawCtx.measureText(button.label).width;
-      const buttonWidth = clamp(textWidth + (buttonHeight * 0.86), 44, 126);
+      const buttonWidth = clamp(
+        textWidth + (buttonHeight * (touchLandscape ? 0.7 : 0.86)),
+        touchLandscape ? 38 : 44,
+        touchLandscape ? 96 : 126
+      );
       const x = Math.max(6, nextRightX - buttonWidth);
       const y = panelY + (panelHeight - buttonHeight) * 0.5;
       const fillStyle = button.active
