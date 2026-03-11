@@ -6182,7 +6182,7 @@ window.addEventListener("beforeunload", () => {
   notifyPeersHostEndedSession();
   stopBackgroundKeepAliveOscillators();
   stopMainLoop();
-  clearOrientationResyncTimers();
+  clearViewportResyncTimers();
 });
 
 const canAutoRequestFullscreen = (() => {
@@ -6239,6 +6239,8 @@ registerFullscreenInteractionHooks();
 
 function applyViewportMetrics(nextViewportMetrics = getViewportMetrics()) {
   const previousOrientation = viewportIsPortrait;
+  const previousViewportWidth = viewportWidth;
+  const previousViewportHeight = viewportHeight;
   viewportWidth = Math.max(1, Math.floor(nextViewportMetrics.width));
   viewportHeight = Math.max(1, Math.floor(nextViewportMetrics.height));
   viewportPixelRatio = clamp(nextViewportMetrics.pixelRatio, 1, SCENE_CONFIG.maxPixelRatio);
@@ -6270,7 +6272,10 @@ function applyViewportMetrics(nextViewportMetrics = getViewportMetrics()) {
 
   const didOrientationBucketChange = previousOrientation !== viewportIsPortrait;
   const touchControlsActive = isTouchDevice || forceTouchControls;
-  if (didOrientationBucketChange && touchControlsActive) {
+  const widthDelta = Math.abs(viewportWidth - previousViewportWidth);
+  const heightDelta = Math.abs(viewportHeight - previousViewportHeight);
+  const didViewportJump = widthDelta > 48 || heightDelta > 48;
+  if (touchControlsActive && (didOrientationBucketChange || didViewportJump)) {
     resetMobileInputState();
     if (uiOverlay && typeof uiOverlay.resetLayoutForOrientationChange === "function") {
       uiOverlay.resetLayoutForOrientationChange();
@@ -6278,17 +6283,17 @@ function applyViewportMetrics(nextViewportMetrics = getViewportMetrics()) {
   }
 }
 
-let orientationResyncTimerShortId = null;
-let orientationResyncTimerLongId = null;
+let viewportResyncTimerShortId = null;
+let viewportResyncTimerLongId = null;
 
-function clearOrientationResyncTimers() {
-  if (orientationResyncTimerShortId != null) {
-    window.clearTimeout(orientationResyncTimerShortId);
-    orientationResyncTimerShortId = null;
+function clearViewportResyncTimers() {
+  if (viewportResyncTimerShortId != null) {
+    window.clearTimeout(viewportResyncTimerShortId);
+    viewportResyncTimerShortId = null;
   }
-  if (orientationResyncTimerLongId != null) {
-    window.clearTimeout(orientationResyncTimerLongId);
-    orientationResyncTimerLongId = null;
+  if (viewportResyncTimerLongId != null) {
+    window.clearTimeout(viewportResyncTimerLongId);
+    viewportResyncTimerLongId = null;
   }
 }
 
@@ -6302,21 +6307,31 @@ function scheduleViewportSync() {
   });
 }
 
-function handleOrientationChange() {
-  scheduleViewportSync();
-  clearOrientationResyncTimers();
-  orientationResyncTimerShortId = window.setTimeout(() => {
-    orientationResyncTimerShortId = null;
+function scheduleViewportResyncPasses() {
+  clearViewportResyncTimers();
+  viewportResyncTimerShortId = window.setTimeout(() => {
+    viewportResyncTimerShortId = null;
     scheduleViewportSync();
   }, 120);
-  orientationResyncTimerLongId = window.setTimeout(() => {
-    orientationResyncTimerLongId = null;
+  viewportResyncTimerLongId = window.setTimeout(() => {
+    viewportResyncTimerLongId = null;
     scheduleViewportSync();
   }, 360);
 }
 
+function handleOrientationChange() {
+  scheduleViewportSync();
+  scheduleViewportResyncPasses();
+}
+
+function handleFullscreenChange() {
+  scheduleViewportSync();
+  scheduleViewportResyncPasses();
+}
+
 window.addEventListener("resize", scheduleViewportSync);
 window.addEventListener("orientationchange", handleOrientationChange);
+document.addEventListener("fullscreenchange", handleFullscreenChange);
 if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
   window.visualViewport.addEventListener("resize", scheduleViewportSync);
 }
