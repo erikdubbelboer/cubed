@@ -1822,6 +1822,136 @@ function unlockBackgroundAudioContextFromGesture() {
   finalize();
 }
 
+let fullscreenRequestPending = false;
+let fullscreenAutoRequestEnabled = true;
+let fullscreenInteractionBound = false;
+
+function getFullscreenElement() {
+  return document.fullscreenElement ?? document.webkitFullscreenElement ?? null;
+}
+
+function getGameFullscreenTarget() {
+  if (app && typeof app.requestFullscreen === "function") {
+    return {
+      element: app,
+      request: app.requestFullscreen.bind(app),
+    };
+  }
+  if (app && typeof app.webkitRequestFullscreen === "function") {
+    return {
+      element: app,
+      request: app.webkitRequestFullscreen.bind(app),
+    };
+  }
+  if (document.documentElement && typeof document.documentElement.requestFullscreen === "function") {
+    return {
+      element: document.documentElement,
+      request: document.documentElement.requestFullscreen.bind(document.documentElement),
+    };
+  }
+  return null;
+}
+
+function isGameFullscreen() {
+  const fullscreenElement = getFullscreenElement();
+  if (!fullscreenElement || !app) {
+    return false;
+  }
+  return fullscreenElement === app
+    || fullscreenElement === document.documentElement
+    || (typeof fullscreenElement.contains === "function" && fullscreenElement.contains(app))
+    || (typeof app.contains === "function" && app.contains(fullscreenElement));
+}
+
+function requestGameFullscreen() {
+  if (!fullscreenAutoRequestEnabled || fullscreenRequestPending || isGameFullscreen()) {
+    return;
+  }
+
+  const fullscreenTarget = getGameFullscreenTarget();
+  if (!fullscreenTarget || typeof fullscreenTarget.request !== "function") {
+    fullscreenAutoRequestEnabled = false;
+    return;
+  }
+
+  let maybePromise;
+  fullscreenRequestPending = true;
+  try {
+    maybePromise = fullscreenTarget.request();
+  } catch (error) {
+    fullscreenRequestPending = false;
+    if (error?.name === "TypeError" || error?.name === "NotSupportedError") {
+      fullscreenAutoRequestEnabled = false;
+      return;
+    }
+    if (
+      error?.name !== "AbortError"
+      && error?.name !== "NotAllowedError"
+      && error?.name !== "SecurityError"
+    ) {
+      console.warn("Fullscreen request failed:", error);
+    }
+    return;
+  }
+
+  if (!maybePromise || typeof maybePromise.then !== "function") {
+    fullscreenRequestPending = false;
+    return;
+  }
+
+  maybePromise.then(() => {
+    fullscreenRequestPending = false;
+  }).catch((error) => {
+    fullscreenRequestPending = false;
+    if (error?.name === "TypeError" || error?.name === "NotSupportedError") {
+      fullscreenAutoRequestEnabled = false;
+      return;
+    }
+    if (
+      error?.name !== "AbortError"
+      && error?.name !== "NotAllowedError"
+      && error?.name !== "SecurityError"
+    ) {
+      console.warn("Fullscreen request failed:", error);
+    }
+  });
+}
+
+function handleGameFullscreenInteraction(event) {
+  if (event?.isTrusted === false) {
+    return;
+  }
+  if (typeof event?.button === "number" && event.button !== 0) {
+    return;
+  }
+  requestGameFullscreen();
+}
+
+function bindGameFullscreenInteraction() {
+  if (fullscreenInteractionBound || !renderer?.domElement) {
+    return;
+  }
+
+  renderer.domElement.addEventListener("pointerdown", handleGameFullscreenInteraction, {
+    capture: true,
+    passive: true,
+  });
+  fullscreenInteractionBound = true;
+}
+
+document.addEventListener("fullscreenchange", () => {
+  fullscreenRequestPending = false;
+});
+document.addEventListener("fullscreenerror", () => {
+  fullscreenRequestPending = false;
+}, true);
+document.addEventListener("webkitfullscreenchange", () => {
+  fullscreenRequestPending = false;
+});
+document.addEventListener("webkitfullscreenerror", () => {
+  fullscreenRequestPending = false;
+}, true);
+
 function handleGlobalUserInteraction() {
   markPokiUserInteraction();
   unlockBackgroundAudioContextFromGesture();
@@ -6104,6 +6234,7 @@ function initGame() {
     }
   });
   player.controls.addEventListener("lock", updatePauseState);
+  bindGameFullscreenInteraction();
 
   // Debug API to let browser scripts skip UI
   window.gameDebug = {
