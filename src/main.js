@@ -1826,6 +1826,8 @@ let fullscreenRequestPending = false;
 let fullscreenAutoRequestEnabled = true;
 let fullscreenInteractionBound = false;
 
+const FULLSCREEN_INTERACTION_EVENTS = ["pointerup", "touchend", "click"];
+
 function isRunningInIframe() {
   try {
     return window.self !== window.top;
@@ -1940,17 +1942,19 @@ function handleGameFullscreenInteraction(event) {
 }
 
 function bindGameFullscreenInteraction() {
-  if (fullscreenInteractionBound || !renderer?.domElement || isRunningInIframe()) {
+  if (fullscreenInteractionBound || isRunningInIframe()) {
     if (isRunningInIframe()) {
       fullscreenAutoRequestEnabled = false;
     }
     return;
   }
 
-  renderer.domElement.addEventListener("pointerdown", handleGameFullscreenInteraction, {
-    capture: true,
-    passive: true,
-  });
+  for (const eventName of FULLSCREEN_INTERACTION_EVENTS) {
+    window.addEventListener(eventName, handleGameFullscreenInteraction, {
+      capture: true,
+      passive: true,
+    });
+  }
   fullscreenInteractionBound = true;
 }
 
