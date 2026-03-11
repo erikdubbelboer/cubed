@@ -1273,6 +1273,13 @@ export function createUiOverlay({
     return state.showTouchControls && !state.touchPortrait;
   }
 
+  function getTouchLandscapeHudBase() {
+    if (!isTouchLandscapeLayout()) {
+      return null;
+    }
+    return Math.max(1, Math.min(viewportWidth, viewportHeight * 1.55));
+  }
+
   function shouldUseVerticalJetpackHud() {
     return !state.showTouchControls || state.touchPortrait;
   }
@@ -1372,14 +1379,15 @@ export function createUiOverlay({
 
   function getMoneyPanelRect() {
     const touchLandscape = isTouchLandscapeLayout();
+    const landscapeBase = getTouchLandscapeHudBase();
     const panelWidth = state.showTouchControls
       ? (touchLandscape
-        ? clamp(viewportWidth * 0.12, 96, 152)
+        ? clamp((landscapeBase || viewportWidth) * 0.16, 86, 124)
         : clamp(viewportWidth * 0.14, 108, 170))
       : clamp(viewportWidth * 0.13, 112, 176);
     const panelHeight = state.showTouchControls
       ? (touchLandscape
-        ? clamp(viewportHeight * 0.074, 34, 48)
+        ? clamp(viewportHeight * 0.064, 26, 36)
         : clamp(viewportHeight * 0.062, 42, 60))
       : clamp(viewportHeight * 0.058, 40, 56);
     const panelX = viewportWidth - panelWidth - clamp(viewportWidth * 0.02, 12, 22);
@@ -1657,14 +1665,15 @@ export function createUiOverlay({
       return null;
     }
     const touchLandscape = isTouchLandscapeLayout();
+    const landscapeBase = getTouchLandscapeHudBase();
     const panelHeight = state.showTouchControls
       ? (touchLandscape
-        ? clamp(viewportHeight * 0.058, 24, 34)
+        ? clamp(viewportHeight * 0.05, 20, 30)
         : clamp(viewportHeight * 0.056, 34, 52))
       : clamp(viewportHeight * 0.052, 32, 48);
     const panelWidth = state.showTouchControls
       ? (touchLandscape
-        ? clamp(viewportWidth * 0.15, 94, 146)
+        ? clamp((landscapeBase || viewportWidth) * 0.22, 84, 120)
         : clamp(viewportWidth * 0.24, 126, 228))
       : clamp(viewportWidth * 0.2, 130, 246);
     const panelX = clamp(viewportWidth * 0.02, 12, 20);
@@ -1767,13 +1776,13 @@ export function createUiOverlay({
     } = getMoneyPanelRect();
     const touchLandscape = isTouchLandscapeLayout();
     const buttonHeight = clamp(
-      panelHeight * (touchLandscape ? 0.82 : 0.92),
-      touchLandscape ? 20 : 30,
-      touchLandscape ? 34 : 54
+      panelHeight * (touchLandscape ? 0.76 : 0.92),
+      touchLandscape ? 17 : 30,
+      touchLandscape ? 28 : 54
     );
     const buttonRadius = clamp(buttonHeight * 0.27, 6, 12);
     const buttonGap = clamp(buttonHeight * (touchLandscape ? 0.14 : 0.18), 4, 12);
-    const labelFontSize = clamp(buttonHeight * 0.42, touchLandscape ? 9 : 11, 18);
+    const labelFontSize = clamp(buttonHeight * 0.42, touchLandscape ? 8 : 11, 18);
 
     const buttons = [];
     if (showPause) {
@@ -1807,9 +1816,9 @@ export function createUiOverlay({
     for (const button of buttons) {
       const textWidth = drawCtx.measureText(button.label).width;
       const buttonWidth = clamp(
-        textWidth + (buttonHeight * (touchLandscape ? 0.7 : 0.86)),
-        touchLandscape ? 38 : 44,
-        touchLandscape ? 96 : 126
+        textWidth + (buttonHeight * (touchLandscape ? 0.58 : 0.86)),
+        touchLandscape ? 34 : 44,
+        touchLandscape ? 82 : 126
       );
       const x = Math.max(6, nextRightX - buttonWidth);
       const y = panelY + (panelHeight - buttonHeight) * 0.5;
@@ -2065,7 +2074,7 @@ export function createUiOverlay({
     touchActionZones = [];
 
     const touchLandscape = isTouchLandscapeLayout();
-    const touchScale = touchLandscape ? 0.78 : 1;
+    const touchScale = touchLandscape ? 0.68 : 1;
     const movePadRadius = clamp(
       (Number(mobileUiConfig.movePadRadiusPx) || MOBILE_UI_DEFAULTS.movePadRadiusPx) * touchScale,
       24,
