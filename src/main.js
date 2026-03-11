@@ -6254,6 +6254,9 @@ function applyViewportMetrics(nextViewportMetrics = getViewportMetrics()) {
   const touchControlsActive = isTouchDevice || forceTouchControls;
   if (didOrientationBucketChange && touchControlsActive) {
     resetMobileInputState();
+    if (uiOverlay && typeof uiOverlay.resetLayoutForOrientationChange === "function") {
+      uiOverlay.resetLayoutForOrientationChange();
+    }
   }
 }
 

@@ -3080,6 +3080,19 @@ export function createUiOverlay({
     return result == null ? null : result;
   }
 
+  function resetLayoutForOrientationChange() {
+    menuOptionRects = [];
+    techTreeNodeRects = [];
+    techTreePanelRect = null;
+    towerSlotRects = [];
+    hudButtonRects = [];
+    touchActionZones = [];
+    touchBlockedRects = [];
+    touchControlLayout.blockedRects = [];
+    state.movePadCenterX = null;
+    state.movePadCenterY = null;
+  }
+
   function getTouchControlLayout() {
     const blockedRects = touchBlockedRects.slice();
     for (const rect of towerSlotRects) {
@@ -3113,5 +3126,6 @@ export function createUiOverlay({
     hitTestTouchAction,
     hitTestHudButton,
     getTouchControlLayout,
+    resetLayoutForOrientationChange,
   };
 }
