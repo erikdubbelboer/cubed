@@ -1826,11 +1826,27 @@ let fullscreenRequestPending = false;
 let fullscreenAutoRequestEnabled = true;
 let fullscreenInteractionBound = false;
 
+const FULLSCREEN_INTERACTION_EVENTS = ["pointerup", "touchend", "click"];
+
+function isRunningInIframe() {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
 function getFullscreenElement() {
   return document.fullscreenElement ?? document.webkitFullscreenElement ?? null;
 }
 
 function getGameFullscreenTarget() {
+  if (document.documentElement && typeof document.documentElement.requestFullscreen === "function") {
+    return {
+      element: document.documentElement,
+      request: document.documentElement.requestFullscreen.bind(document.documentElement),
+    };
+  }
   if (app && typeof app.requestFullscreen === "function") {
     return {
       element: app,
@@ -1841,12 +1857,6 @@ function getGameFullscreenTarget() {
     return {
       element: app,
       request: app.webkitRequestFullscreen.bind(app),
-    };
-  }
-  if (document.documentElement && typeof document.documentElement.requestFullscreen === "function") {
-    return {
-      element: document.documentElement,
-      request: document.documentElement.requestFullscreen.bind(document.documentElement),
     };
   }
   return null;
@@ -1864,6 +1874,10 @@ function isGameFullscreen() {
 }
 
 function requestGameFullscreen() {
+  if (isRunningInIframe()) {
+    fullscreenAutoRequestEnabled = false;
+    return;
+  }
   if (!fullscreenAutoRequestEnabled || fullscreenRequestPending || isGameFullscreen()) {
     return;
   }
@@ -1928,14 +1942,19 @@ function handleGameFullscreenInteraction(event) {
 }
 
 function bindGameFullscreenInteraction() {
-  if (fullscreenInteractionBound || !renderer?.domElement) {
+  if (fullscreenInteractionBound || isRunningInIframe()) {
+    if (isRunningInIframe()) {
+      fullscreenAutoRequestEnabled = false;
+    }
     return;
   }
 
-  renderer.domElement.addEventListener("pointerdown", handleGameFullscreenInteraction, {
-    capture: true,
-    passive: true,
-  });
+  for (const eventName of FULLSCREEN_INTERACTION_EVENTS) {
+    window.addEventListener(eventName, handleGameFullscreenInteraction, {
+      capture: true,
+      passive: true,
+    });
+  }
   fullscreenInteractionBound = true;
 }
 
