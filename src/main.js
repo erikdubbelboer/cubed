@@ -6178,6 +6178,7 @@ window.addEventListener("beforeunload", () => {
   notifyPeersHostEndedSession();
   stopBackgroundKeepAliveOscillators();
   stopMainLoop();
+  clearOrientationResyncTimers();
 });
 
 const canAutoRequestFullscreen = (() => {
@@ -6256,6 +6257,20 @@ function applyViewportMetrics(nextViewportMetrics = getViewportMetrics()) {
   }
 }
 
+let orientationResyncTimerShortId = null;
+let orientationResyncTimerLongId = null;
+
+function clearOrientationResyncTimers() {
+  if (orientationResyncTimerShortId != null) {
+    window.clearTimeout(orientationResyncTimerShortId);
+    orientationResyncTimerShortId = null;
+  }
+  if (orientationResyncTimerLongId != null) {
+    window.clearTimeout(orientationResyncTimerLongId);
+    orientationResyncTimerLongId = null;
+  }
+}
+
 function scheduleViewportSync() {
   if (viewportSyncFrameId != null) {
     return;
@@ -6266,8 +6281,21 @@ function scheduleViewportSync() {
   });
 }
 
+function handleOrientationChange() {
+  scheduleViewportSync();
+  clearOrientationResyncTimers();
+  orientationResyncTimerShortId = window.setTimeout(() => {
+    orientationResyncTimerShortId = null;
+    scheduleViewportSync();
+  }, 120);
+  orientationResyncTimerLongId = window.setTimeout(() => {
+    orientationResyncTimerLongId = null;
+    scheduleViewportSync();
+  }, 360);
+}
+
 window.addEventListener("resize", scheduleViewportSync);
-window.addEventListener("orientationchange", scheduleViewportSync);
+window.addEventListener("orientationchange", handleOrientationChange);
 if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
   window.visualViewport.addEventListener("resize", scheduleViewportSync);
 }
