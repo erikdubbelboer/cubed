@@ -1826,11 +1826,25 @@ let fullscreenRequestPending = false;
 let fullscreenAutoRequestEnabled = true;
 let fullscreenInteractionBound = false;
 
+function isRunningInIframe() {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
 function getFullscreenElement() {
   return document.fullscreenElement ?? document.webkitFullscreenElement ?? null;
 }
 
 function getGameFullscreenTarget() {
+  if (document.documentElement && typeof document.documentElement.requestFullscreen === "function") {
+    return {
+      element: document.documentElement,
+      request: document.documentElement.requestFullscreen.bind(document.documentElement),
+    };
+  }
   if (app && typeof app.requestFullscreen === "function") {
     return {
       element: app,
@@ -1841,12 +1855,6 @@ function getGameFullscreenTarget() {
     return {
       element: app,
       request: app.webkitRequestFullscreen.bind(app),
-    };
-  }
-  if (document.documentElement && typeof document.documentElement.requestFullscreen === "function") {
-    return {
-      element: document.documentElement,
-      request: document.documentElement.requestFullscreen.bind(document.documentElement),
     };
   }
   return null;
@@ -1864,6 +1872,10 @@ function isGameFullscreen() {
 }
 
 function requestGameFullscreen() {
+  if (isRunningInIframe()) {
+    fullscreenAutoRequestEnabled = false;
+    return;
+  }
   if (!fullscreenAutoRequestEnabled || fullscreenRequestPending || isGameFullscreen()) {
     return;
   }
@@ -1928,7 +1940,10 @@ function handleGameFullscreenInteraction(event) {
 }
 
 function bindGameFullscreenInteraction() {
-  if (fullscreenInteractionBound || !renderer?.domElement) {
+  if (fullscreenInteractionBound || !renderer?.domElement || isRunningInIframe()) {
+    if (isRunningInIframe()) {
+      fullscreenAutoRequestEnabled = false;
+    }
     return;
   }
 
