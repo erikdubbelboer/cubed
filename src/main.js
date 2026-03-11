@@ -148,6 +148,8 @@ const BACKGROUND_KEEPALIVE_FREQUENCY_HZ = 20000;
 const BACKGROUND_KEEPALIVE_GAIN = 0.001;
 const HOST_LOBBY_TOAST_VISIBLE_MS = 2200;
 const HOST_LOBBY_TOAST_FADE_MS = 180;
+const AUTO_FULLSCREEN_RETRY_THROTTLE_MS = 1600;
+const VIEWPORT_RESYNC_PASS_DELAYS_MS = [0, 80, 220, 420];
 
 function mpLog(message, details) {
   if (!MULTIPLAYER_DEBUG) {
@@ -852,12 +854,36 @@ const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matc
 
 function getViewportMetrics() {
   const visualViewport = window.visualViewport;
-  const rawWidth = Number.isFinite(Number(visualViewport?.width))
-    ? Number(visualViewport.width)
-    : Number(window.innerWidth);
-  const rawHeight = Number.isFinite(Number(visualViewport?.height))
-    ? Number(visualViewport.height)
-    : Number(window.innerHeight);
+  const appRect = typeof app?.getBoundingClientRect === "function"
+    ? app.getBoundingClientRect()
+    : null;
+  const sources = [
+    {
+      width: Number(appRect?.width),
+      height: Number(appRect?.height),
+    },
+    {
+      width: Number(visualViewport?.width),
+      height: Number(visualViewport?.height),
+    },
+    {
+      width: Number(window.innerWidth),
+      height: Number(window.innerHeight),
+    },
+    {
+      width: Number(document.documentElement?.clientWidth),
+      height: Number(document.documentElement?.clientHeight),
+    },
+  ];
+  let rawWidth = 1;
+  let rawHeight = 1;
+  for (const source of sources) {
+    if (Number.isFinite(source.width) && Number.isFinite(source.height) && source.width > 0 && source.height > 0) {
+      rawWidth = source.width;
+      rawHeight = source.height;
+      break;
+    }
+  }
   const width = Math.max(1, Math.floor(rawWidth));
   const height = Math.max(1, Math.floor(rawHeight));
   const rawPixelRatio = Number(window.devicePixelRatio);
@@ -880,6 +906,9 @@ let viewportHeight = initialViewportMetrics.height;
 let viewportPixelRatio = initialViewportMetrics.pixelRatio;
 let viewportIsPortrait = initialViewportMetrics.isPortrait;
 let viewportSyncFrameId = null;
+let viewportResyncTimeoutIds = [];
+let appTransitionResyncTimeoutId = null;
+let lastAutoFullscreenAttemptAt = -Infinity;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SCENE_CONFIG.backgroundColor);
@@ -899,6 +928,9 @@ const camera = new THREE.PerspectiveCamera(
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(viewportWidth, viewportHeight);
 renderer.setPixelRatio(viewportPixelRatio);
+renderer.domElement.style.width = "100%";
+renderer.domElement.style.height = "100%";
+renderer.domElement.style.display = "block";
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.localClippingEnabled = true;
@@ -3195,8 +3227,10 @@ function finishTouchTechTreeDrag(pointerId, pointerX, pointerY) {
 
 function getCanvasPointerPosition(event) {
   const canvasRect = renderer.domElement.getBoundingClientRect();
-  const x = clamp(event.clientX - canvasRect.left, 0, canvasRect.width);
-  const y = clamp(event.clientY - canvasRect.top, 0, canvasRect.height);
+  const normalizedX = clamp((event.clientX - canvasRect.left) / Math.max(1, canvasRect.width), 0, 1);
+  const normalizedY = clamp((event.clientY - canvasRect.top) / Math.max(1, canvasRect.height), 0, 1);
+  const x = normalizedX * viewportWidth;
+  const y = normalizedY * viewportHeight;
   return { x, y };
 }
 
@@ -3802,6 +3836,7 @@ if (!isTouchDevice) {
   }, { passive: false });
 
   window.addEventListener("mousedown", (event) => {
+    tryAutoEnterFullscreen();
     if (!player) {
       return;
     }
@@ -3924,7 +3959,13 @@ if (isTouchDevice) {
   }
 
   mobilePointerTarget.addEventListener("pointerdown", (event) => {
-    if (event.pointerType !== "touch" || !player || !towerSystem) {
+    if (event.pointerType !== "touch") {
+      return;
+    }
+
+    tryAutoEnterFullscreen();
+
+    if (!player || !towerSystem) {
       return;
     }
 
@@ -6159,6 +6200,11 @@ window.addEventListener("beforeunload", () => {
   notifyPeersHostEndedSession();
   stopBackgroundKeepAliveOscillators();
   stopMainLoop();
+  clearViewportResyncTimers();
+  if (appTransitionResyncTimeoutId != null) {
+    window.clearTimeout(appTransitionResyncTimeoutId);
+    appTransitionResyncTimeoutId = null;
+  }
 });
 
 initGame();
@@ -6173,7 +6219,9 @@ function applyViewportMetrics(nextViewportMetrics = getViewportMetrics()) {
   camera.aspect = viewportWidth / viewportHeight;
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(viewportPixelRatio);
-  renderer.setSize(viewportWidth, viewportHeight);
+  renderer.setSize(viewportWidth, viewportHeight, false);
+  renderer.domElement.style.width = `${viewportWidth}px`;
+  renderer.domElement.style.height = `${viewportHeight}px`;
   uiOverlay.resize(viewportWidth, viewportHeight);
   vCursorX = clamp(vCursorX, 0, viewportWidth);
   vCursorY = clamp(vCursorY, 0, viewportHeight);
@@ -6182,6 +6230,9 @@ function applyViewportMetrics(nextViewportMetrics = getViewportMetrics()) {
   const touchControlsActive = isTouchDevice || forceTouchControls;
   if (didOrientationBucketChange && touchControlsActive) {
     resetMobileInputState();
+    if (typeof uiOverlay.resetLayoutForOrientationChange === "function") {
+      uiOverlay.resetLayoutForOrientationChange();
+    }
   }
 }
 
@@ -6195,8 +6246,63 @@ function scheduleViewportSync() {
   });
 }
 
-window.addEventListener("resize", scheduleViewportSync);
-window.addEventListener("orientationchange", scheduleViewportSync);
+function clearViewportResyncTimers() {
+  for (const timeoutId of viewportResyncTimeoutIds) {
+    window.clearTimeout(timeoutId);
+  }
+  viewportResyncTimeoutIds = [];
+}
+
+function scheduleViewportResyncPasses() {
+  clearViewportResyncTimers();
+  viewportResyncTimeoutIds = VIEWPORT_RESYNC_PASS_DELAYS_MS.map((delayMs) => window.setTimeout(() => {
+    scheduleViewportSync();
+  }, delayMs));
+}
+
+function scheduleViewportResyncAfterTransition() {
+  if (appTransitionResyncTimeoutId != null) {
+    window.clearTimeout(appTransitionResyncTimeoutId);
+  }
+  appTransitionResyncTimeoutId = window.setTimeout(() => {
+    appTransitionResyncTimeoutId = null;
+    scheduleViewportResyncPasses();
+  }, 150);
+}
+
+function shouldAttemptAutoFullscreen() {
+  if (!isTouchDevice) {
+    return false;
+  }
+  if (document.fullscreenElement) {
+    return false;
+  }
+  if (isMultiplayerGuest()) {
+    return false;
+  }
+  const now = performance.now();
+  if (now - lastAutoFullscreenAttemptAt < AUTO_FULLSCREEN_RETRY_THROTTLE_MS) {
+    return false;
+  }
+  return typeof document.documentElement?.requestFullscreen === "function";
+}
+
+function tryAutoEnterFullscreen() {
+  if (!shouldAttemptAutoFullscreen()) {
+    return;
+  }
+  lastAutoFullscreenAttemptAt = performance.now();
+  void document.documentElement.requestFullscreen().catch(() => {});
+}
+
+window.addEventListener("resize", scheduleViewportResyncPasses);
+window.addEventListener("orientationchange", scheduleViewportResyncPasses);
 if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
   window.visualViewport.addEventListener("resize", scheduleViewportSync);
 }
+window.addEventListener("fullscreenchange", scheduleViewportResyncPasses);
+if (window.screen?.orientation && typeof window.screen.orientation.addEventListener === "function") {
+  window.screen.orientation.addEventListener("change", scheduleViewportResyncPasses);
+}
+app.addEventListener("transitionend", scheduleViewportResyncAfterTransition);
+app.addEventListener("animationend", scheduleViewportResyncAfterTransition);
