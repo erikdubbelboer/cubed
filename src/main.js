@@ -3214,8 +3214,12 @@ function finishTouchTechTreeDrag(pointerId, pointerX, pointerY) {
 
 function getCanvasPointerPosition(event) {
   const canvasRect = renderer.domElement.getBoundingClientRect();
-  const x = clamp(event.clientX - canvasRect.left, 0, canvasRect.width);
-  const y = clamp(event.clientY - canvasRect.top, 0, canvasRect.height);
+  const localX = clamp(event.clientX - canvasRect.left, 0, canvasRect.width);
+  const localY = clamp(event.clientY - canvasRect.top, 0, canvasRect.height);
+  const normalizedX = canvasRect.width > 0 ? localX / canvasRect.width : 0;
+  const normalizedY = canvasRect.height > 0 ? localY / canvasRect.height : 0;
+  const x = normalizedX * viewportWidth;
+  const y = normalizedY * viewportHeight;
   return { x, y };
 }
 
@@ -6246,6 +6250,20 @@ function applyViewportMetrics(nextViewportMetrics = getViewportMetrics()) {
   renderer.setSize(viewportWidth, viewportHeight, false);
   renderer.setViewport(0, 0, viewportWidth, viewportHeight);
   renderer.setScissorTest(false);
+
+  const canvasRect = renderer.domElement.getBoundingClientRect();
+  const canvasDisplayWidth = Math.max(1, Math.floor(Number(canvasRect.width) || 0));
+  const canvasDisplayHeight = Math.max(1, Math.floor(Number(canvasRect.height) || 0));
+  if (Math.abs(canvasDisplayWidth - viewportWidth) > 1 || Math.abs(canvasDisplayHeight - viewportHeight) > 1) {
+    viewportWidth = canvasDisplayWidth;
+    viewportHeight = canvasDisplayHeight;
+    viewportIsPortrait = viewportHeight >= viewportWidth;
+    camera.aspect = viewportWidth / viewportHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(viewportWidth, viewportHeight, false);
+    renderer.setViewport(0, 0, viewportWidth, viewportHeight);
+  }
+
   uiOverlay.resize(viewportWidth, viewportHeight);
   vCursorX = clamp(vCursorX, 0, viewportWidth);
   vCursorY = clamp(vCursorY, 0, viewportHeight);
