@@ -851,13 +851,21 @@ function showHostLobbyToast(message) {
 const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
 
 function getViewportMetrics() {
-  const visualViewport = window.visualViewport;
-  const rawWidth = Number.isFinite(Number(visualViewport?.width))
-    ? Number(visualViewport.width)
-    : Number(window.innerWidth);
-  const rawHeight = Number.isFinite(Number(visualViewport?.height))
-    ? Number(visualViewport.height)
-    : Number(window.innerHeight);
+  const appRect = app?.getBoundingClientRect?.() ?? null;
+  const rawWidth = Number.isFinite(Number(appRect?.width)) && Number(appRect.width) > 0
+    ? Number(appRect.width)
+    : (
+      Number.isFinite(Number(document.documentElement?.clientWidth))
+        ? Number(document.documentElement.clientWidth)
+        : Number(window.innerWidth)
+    );
+  const rawHeight = Number.isFinite(Number(appRect?.height)) && Number(appRect.height) > 0
+    ? Number(appRect.height)
+    : (
+      Number.isFinite(Number(document.documentElement?.clientHeight))
+        ? Number(document.documentElement.clientHeight)
+        : Number(window.innerHeight)
+    );
   const width = Math.max(1, Math.floor(rawWidth));
   const height = Math.max(1, Math.floor(rawHeight));
   const rawPixelRatio = Number(window.devicePixelRatio);
@@ -880,6 +888,7 @@ let viewportHeight = initialViewportMetrics.height;
 let viewportPixelRatio = initialViewportMetrics.pixelRatio;
 let viewportIsPortrait = initialViewportMetrics.isPortrait;
 let viewportSyncFrameId = null;
+let viewportSyncSettleTimeoutId = null;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SCENE_CONFIG.backgroundColor);
@@ -897,7 +906,7 @@ const camera = new THREE.PerspectiveCamera(
 );
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(viewportWidth, viewportHeight);
+renderer.setSize(viewportWidth, viewportHeight, false);
 renderer.setPixelRatio(viewportPixelRatio);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -910,6 +919,7 @@ const uiOverlay = createUiOverlay({
   width: viewportWidth,
   height: viewportHeight,
   maxPixelRatio: SCENE_CONFIG.maxPixelRatio,
+  mount: app,
   mobileConfig: {
     movePadRadiusPx: UI_CONFIG.movePadRadiusPx,
     ...MOBILE_UI_CONFIG,
@@ -3195,8 +3205,12 @@ function finishTouchTechTreeDrag(pointerId, pointerX, pointerY) {
 
 function getCanvasPointerPosition(event) {
   const canvasRect = renderer.domElement.getBoundingClientRect();
-  const x = clamp(event.clientX - canvasRect.left, 0, canvasRect.width);
-  const y = clamp(event.clientY - canvasRect.top, 0, canvasRect.height);
+  const rectWidth = Math.max(1, canvasRect.width);
+  const rectHeight = Math.max(1, canvasRect.height);
+  const localX = clamp(event.clientX - canvasRect.left, 0, rectWidth);
+  const localY = clamp(event.clientY - canvasRect.top, 0, rectHeight);
+  const x = (localX / rectWidth) * viewportWidth;
+  const y = (localY / rectHeight) * viewportHeight;
   return { x, y };
 }
 
@@ -5944,8 +5958,10 @@ function runGameFrame({ renderFrame = true } = {}) {
 
   renderer.clear();
   renderer.render(scene, camera);
-  renderer.clearDepth();
-  renderer.render(uiOverlay.scene, uiOverlay.camera);
+  if (uiOverlay.scene && uiOverlay.camera) {
+    renderer.clearDepth();
+    renderer.render(uiOverlay.scene, uiOverlay.camera);
+  }
 }
 
 function shouldUseHiddenIntervalLoop() {
@@ -6173,7 +6189,7 @@ function applyViewportMetrics(nextViewportMetrics = getViewportMetrics()) {
   camera.aspect = viewportWidth / viewportHeight;
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(viewportPixelRatio);
-  renderer.setSize(viewportWidth, viewportHeight);
+  renderer.setSize(viewportWidth, viewportHeight, false);
   uiOverlay.resize(viewportWidth, viewportHeight);
   vCursorX = clamp(vCursorX, 0, viewportWidth);
   vCursorY = clamp(vCursorY, 0, viewportHeight);
@@ -6187,12 +6203,26 @@ function applyViewportMetrics(nextViewportMetrics = getViewportMetrics()) {
 
 function scheduleViewportSync() {
   if (viewportSyncFrameId != null) {
+    if (viewportSyncSettleTimeoutId != null) {
+      window.clearTimeout(viewportSyncSettleTimeoutId);
+    }
+    viewportSyncSettleTimeoutId = window.setTimeout(() => {
+      viewportSyncSettleTimeoutId = null;
+      applyViewportMetrics(getViewportMetrics());
+    }, 250);
     return;
   }
   viewportSyncFrameId = window.requestAnimationFrame(() => {
     viewportSyncFrameId = null;
     applyViewportMetrics(getViewportMetrics());
   });
+  if (viewportSyncSettleTimeoutId != null) {
+    window.clearTimeout(viewportSyncSettleTimeoutId);
+  }
+  viewportSyncSettleTimeoutId = window.setTimeout(() => {
+    viewportSyncSettleTimeoutId = null;
+    applyViewportMetrics(getViewportMetrics());
+  }, 250);
 }
 
 window.addEventListener("resize", scheduleViewportSync);

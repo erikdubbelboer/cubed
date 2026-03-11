@@ -1,5 +1,3 @@
-import * as THREE from "three";
-
 const FONT_STACK = "\"Segoe UI\", sans-serif";
 const MOBILE_UI_DEFAULTS = {
   movePadRadiusPx: 45,
@@ -984,32 +982,23 @@ export function createUiOverlay({
   height,
   maxPixelRatio = 2,
   mobileConfig = {},
+  mount = null,
 } = {}) {
-  const scene = new THREE.Scene();
-  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const drawCanvas = document.createElement("canvas");
   const drawCtx = drawCanvas.getContext("2d");
+  drawCanvas.style.position = "absolute";
+  drawCanvas.style.inset = "0";
+  drawCanvas.style.width = "100%";
+  drawCanvas.style.height = "100%";
+  drawCanvas.style.pointerEvents = "none";
+  drawCanvas.style.zIndex = "10";
+  if (mount && typeof mount.appendChild === "function") {
+    mount.appendChild(drawCanvas);
+  }
   const mobileUiConfig = {
     ...MOBILE_UI_DEFAULTS,
     ...(mobileConfig && typeof mobileConfig === "object" ? mobileConfig : {}),
   };
-
-  const texture = new THREE.CanvasTexture(drawCanvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.generateMipmaps = false;
-
-  const material = new THREE.MeshBasicMaterial({
-    map: texture,
-    transparent: true,
-    depthTest: false,
-    depthWrite: false,
-  });
-  material.toneMapped = false;
-  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
-  quad.renderOrder = 9999;
-  scene.add(quad);
 
   let viewportWidth = Math.max(1, Math.floor(width));
   let viewportHeight = Math.max(1, Math.floor(height));
@@ -1103,7 +1092,6 @@ export function createUiOverlay({
     drawCanvas.height = Math.max(1, Math.floor(viewportHeight * pixelRatio));
     state.menuCursorX = clamp(state.menuCursorX, 0, viewportWidth);
     state.menuCursorY = clamp(state.menuCursorY, 0, viewportHeight);
-    texture.needsUpdate = true;
   }
 
   function setState(partialState) {
@@ -2903,8 +2891,6 @@ export function createUiOverlay({
     drawSellPrompt();
     drawMenuOverlay();
     touchControlLayout.blockedRects = touchBlockedRects.slice();
-
-    texture.needsUpdate = true;
   }
 
   function hitTestRectList(rects, x, y, mapResult) {
@@ -3036,8 +3022,9 @@ export function createUiOverlay({
   resize(width, height);
 
   return {
-    scene,
-    camera,
+    scene: null,
+    camera: null,
+    domElement: drawCanvas,
     resize,
     setState,
     draw,
