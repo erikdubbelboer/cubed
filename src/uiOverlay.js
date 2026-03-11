@@ -3033,6 +3033,20 @@ export function createUiOverlay({
     };
   }
 
+  function resetLayoutForOrientationChange() {
+    state.movePadCenterX = null;
+    state.movePadCenterY = null;
+    touchActionZones = [];
+    touchBlockedRects = [];
+    touchControlLayout.lookZoneTop = mobileUiConfig.lookZoneTopPaddingPx;
+    touchControlLayout.movePad = {
+      centerX: 0,
+      centerY: 0,
+      radius: mobileUiConfig.movePadRadiusPx,
+      activationRadius: mobileUiConfig.movePadRadiusPx * mobileUiConfig.moveStickActivationScale,
+    };
+  }
+
   resize(width, height);
 
   return {
@@ -3049,5 +3063,6 @@ export function createUiOverlay({
     hitTestTouchAction,
     hitTestHudButton,
     getTouchControlLayout,
+    resetLayoutForOrientationChange,
   };
 }

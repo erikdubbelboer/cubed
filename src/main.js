@@ -148,6 +148,8 @@ const BACKGROUND_KEEPALIVE_FREQUENCY_HZ = 20000;
 const BACKGROUND_KEEPALIVE_GAIN = 0.001;
 const HOST_LOBBY_TOAST_VISIBLE_MS = 2200;
 const HOST_LOBBY_TOAST_FADE_MS = 180;
+const FULLSCREEN_RETRY_COOLDOWN_MS = 1800;
+const VIEWPORT_RESYNC_MULTI_PASS_DELAYS_MS = [0, 80, 220, 420];
 
 function mpLog(message, details) {
   if (!MULTIPLAYER_DEBUG) {
@@ -851,13 +853,26 @@ function showHostLobbyToast(message) {
 const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
 
 function getViewportMetrics() {
+  const appRect = typeof app?.getBoundingClientRect === "function"
+    ? app.getBoundingClientRect()
+    : null;
   const visualViewport = window.visualViewport;
-  const rawWidth = Number.isFinite(Number(visualViewport?.width))
-    ? Number(visualViewport.width)
-    : Number(window.innerWidth);
-  const rawHeight = Number.isFinite(Number(visualViewport?.height))
-    ? Number(visualViewport.height)
-    : Number(window.innerHeight);
+  const viewportWidthCandidate = Number(visualViewport?.width);
+  const viewportHeightCandidate = Number(visualViewport?.height);
+  const appWidthCandidate = Number(appRect?.width);
+  const appHeightCandidate = Number(appRect?.height);
+  const windowWidthCandidate = Number(window.innerWidth);
+  const windowHeightCandidate = Number(window.innerHeight);
+  const rawWidth = Number.isFinite(appWidthCandidate) && appWidthCandidate > 0
+    ? appWidthCandidate
+    : (Number.isFinite(viewportWidthCandidate) && viewportWidthCandidate > 0
+      ? viewportWidthCandidate
+      : windowWidthCandidate);
+  const rawHeight = Number.isFinite(appHeightCandidate) && appHeightCandidate > 0
+    ? appHeightCandidate
+    : (Number.isFinite(viewportHeightCandidate) && viewportHeightCandidate > 0
+      ? viewportHeightCandidate
+      : windowHeightCandidate);
   const width = Math.max(1, Math.floor(rawWidth));
   const height = Math.max(1, Math.floor(rawHeight));
   const rawPixelRatio = Number(window.devicePixelRatio);
@@ -880,6 +895,8 @@ let viewportHeight = initialViewportMetrics.height;
 let viewportPixelRatio = initialViewportMetrics.pixelRatio;
 let viewportIsPortrait = initialViewportMetrics.isPortrait;
 let viewportSyncFrameId = null;
+const viewportResyncTimeoutIds = new Set();
+let nextAutoFullscreenAllowedAtMs = 0;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SCENE_CONFIG.backgroundColor);
@@ -899,6 +916,9 @@ const camera = new THREE.PerspectiveCamera(
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(viewportWidth, viewportHeight);
 renderer.setPixelRatio(viewportPixelRatio);
+renderer.domElement.style.width = "100%";
+renderer.domElement.style.height = "100%";
+renderer.domElement.style.display = "block";
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.localClippingEnabled = true;
@@ -3195,8 +3215,14 @@ function finishTouchTechTreeDrag(pointerId, pointerX, pointerY) {
 
 function getCanvasPointerPosition(event) {
   const canvasRect = renderer.domElement.getBoundingClientRect();
-  const x = clamp(event.clientX - canvasRect.left, 0, canvasRect.width);
-  const y = clamp(event.clientY - canvasRect.top, 0, canvasRect.height);
+  const normalizedX = canvasRect.width > 0
+    ? clamp((event.clientX - canvasRect.left) / canvasRect.width, 0, 1)
+    : 0;
+  const normalizedY = canvasRect.height > 0
+    ? clamp((event.clientY - canvasRect.top) / canvasRect.height, 0, 1)
+    : 0;
+  const x = normalizedX * viewportWidth;
+  const y = normalizedY * viewportHeight;
   return { x, y };
 }
 
@@ -6182,6 +6208,56 @@ function applyViewportMetrics(nextViewportMetrics = getViewportMetrics()) {
   const touchControlsActive = isTouchDevice || forceTouchControls;
   if (didOrientationBucketChange && touchControlsActive) {
     resetMobileInputState();
+    if (typeof uiOverlay.resetLayoutForOrientationChange === "function") {
+      uiOverlay.resetLayoutForOrientationChange();
+    }
+  }
+}
+
+function clearViewportResyncTimers() {
+  for (const timeoutId of viewportResyncTimeoutIds) {
+    window.clearTimeout(timeoutId);
+  }
+  viewportResyncTimeoutIds.clear();
+}
+
+function scheduleViewportResyncPasses() {
+  clearViewportResyncTimers();
+  for (const delayMs of VIEWPORT_RESYNC_MULTI_PASS_DELAYS_MS) {
+    const timeoutId = window.setTimeout(() => {
+      viewportResyncTimeoutIds.delete(timeoutId);
+      scheduleViewportSync();
+    }, delayMs);
+    viewportResyncTimeoutIds.add(timeoutId);
+  }
+}
+
+function maybeRequestAutoFullscreen() {
+  if (!isTouchDevice) {
+    return;
+  }
+  if (document.fullscreenElement) {
+    return;
+  }
+  if (isMultiplayerLobbyActive() && !isMultiplayerHost()) {
+    return;
+  }
+  const nowMs = typeof performance?.now === "function" ? performance.now() : Date.now();
+  if (nowMs < nextAutoFullscreenAllowedAtMs) {
+    return;
+  }
+  if (typeof app?.requestFullscreen !== "function") {
+    return;
+  }
+  const maybePromise = app.requestFullscreen({ navigationUI: "hide" });
+  nextAutoFullscreenAllowedAtMs = nowMs + FULLSCREEN_RETRY_COOLDOWN_MS;
+  if (maybePromise && typeof maybePromise.catch === "function") {
+    maybePromise.catch(() => {
+      nextAutoFullscreenAllowedAtMs = Math.max(
+        nextAutoFullscreenAllowedAtMs,
+        (typeof performance?.now === "function" ? performance.now() : Date.now()) + FULLSCREEN_RETRY_COOLDOWN_MS
+      );
+    });
   }
 }
 
@@ -6196,7 +6272,13 @@ function scheduleViewportSync() {
 }
 
 window.addEventListener("resize", scheduleViewportSync);
-window.addEventListener("orientationchange", scheduleViewportSync);
+window.addEventListener("orientationchange", scheduleViewportResyncPasses);
 if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
   window.visualViewport.addEventListener("resize", scheduleViewportSync);
+}
+document.addEventListener("fullscreenchange", scheduleViewportResyncPasses);
+app.addEventListener("transitionend", scheduleViewportResyncPasses);
+window.addEventListener("beforeunload", clearViewportResyncTimers);
+for (const eventName of ["pointerdown", "touchstart"]) {
+  window.addEventListener(eventName, maybeRequestAutoFullscreen, { passive: true });
 }
