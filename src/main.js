@@ -4030,10 +4030,6 @@ if (!isTouchDevice) {
       }
     }
 
-    if (isPaused) {
-      return;
-    }
-
     if (waveState === "MENU") {
       if (event.button !== 0) {
         return;
@@ -4058,6 +4054,10 @@ if (!isTouchDevice) {
       }
       updateDesktopTechTreeHover(pointer.x, pointer.y);
       beginDesktopTechTreeDrag(pointer.x, pointer.y, player.controls.isLocked);
+      return;
+    }
+
+    if (isPaused) {
       return;
     }
 
