@@ -6428,6 +6428,8 @@ if (window.visualViewport && typeof window.visualViewport.addEventListener === "
   window.visualViewport.addEventListener("resize", scheduleViewportSync);
 }
 
-// Ensure mobile browsers that report transient early viewport sizes (before first gesture)
-// still get a post-layout sync so initial menus render immediately.
-scheduleViewportSync();
+// Ensure mobile browsers get a post-layout startup sync without triggering the
+// delayed settle path that can momentarily collapse the viewport on Android.
+window.requestAnimationFrame(() => {
+  applyViewportMetrics(getViewportMetrics());
+});
