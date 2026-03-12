@@ -2028,6 +2028,9 @@ function getAutoPauseRequested() {
   if (isMultiplayerWithPeer()) {
     return false;
   }
+  if (waveState === "MENU") {
+    return document.hidden || !document.hasFocus();
+  }
   const isLocked = !!document.pointerLockElement;
   return document.hidden || !document.hasFocus() || (!isTouchDevice && !isLocked);
 }

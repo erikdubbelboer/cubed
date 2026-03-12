@@ -22,6 +22,10 @@ const GUN_PROJECTILE_LIFETIME = GUN_TOWER_CONFIG.projectileLifetime;
 const GUN_PROJECTILE_SIZE = GUN_TOWER_CONFIG.projectileSize;
 const GUN_PROJECTILE_HIT_RADIUS = GUN_TOWER_CONFIG.projectileHitRadius;
 const GUN_TOWER_HEIGHT = GUN_TOWER_CONFIG.height;
+const GUN_TURRET_IDLE_TURN_SPEED_MIN = 0.22;
+const GUN_TURRET_IDLE_TURN_SPEED_MAX = 0.65;
+const GUN_TURRET_IDLE_SEGMENT_DURATION_MIN = 0.7;
+const GUN_TURRET_IDLE_SEGMENT_DURATION_MAX = 2.4;
 const GUN_TOWER_HALF_SIZE_X = Number.isFinite(Number(GUN_TOWER_CONFIG.halfSizeX))
   ? Number(GUN_TOWER_CONFIG.halfSizeX)
   : 1.9;
@@ -3917,6 +3921,17 @@ export function createTowerSystem({
       gunMuzzleFlashTimer: 0,
       gunPortalClock: Math.random() * Math.PI * 2,
       gunPortalPulse: 0,
+      gunIdleSearchDirection: Math.random() < 0.5 ? -1 : 1,
+      gunIdleSearchSpeed: THREE.MathUtils.lerp(
+        GUN_TURRET_IDLE_TURN_SPEED_MIN,
+        GUN_TURRET_IDLE_TURN_SPEED_MAX,
+        Math.random()
+      ),
+      gunIdleSearchSegmentRemaining: THREE.MathUtils.lerp(
+        GUN_TURRET_IDLE_SEGMENT_DURATION_MIN,
+        GUN_TURRET_IDLE_SEGMENT_DURATION_MAX,
+        Math.random()
+      ),
       slowProcFlash: 0,
       spikesCycleTimer: Math.random() * initialSpikesCycleInterval,
       spikesActiveTimer: 0,
@@ -5365,7 +5380,30 @@ export function createTowerSystem({
     const target = findTargetWithLineOfSight(tower, enemySystem, { skipSlowed: false });
     updateGunBlackHoleVisualState(tower, deltaSeconds, !!(target?.mesh?.visible));
     if (!target || !target.mesh || !target.mesh.visible) {
+      const yawNode = tower.mesh?.userData?.gunTurretYawNode;
       const pitchNode = tower.mesh?.userData?.gunTurretPitchNode;
+      if (yawNode) {
+        tower.gunIdleSearchSegmentRemaining = Math.max(
+          0,
+          Number(tower.gunIdleSearchSegmentRemaining) || 0
+        ) - Math.max(0, deltaSeconds);
+        if (tower.gunIdleSearchSegmentRemaining <= 0) {
+          tower.gunIdleSearchDirection = Math.random() < 0.5 ? -1 : 1;
+          tower.gunIdleSearchSpeed = THREE.MathUtils.lerp(
+            GUN_TURRET_IDLE_TURN_SPEED_MIN,
+            GUN_TURRET_IDLE_TURN_SPEED_MAX,
+            Math.random()
+          );
+          tower.gunIdleSearchSegmentRemaining = THREE.MathUtils.lerp(
+            GUN_TURRET_IDLE_SEGMENT_DURATION_MIN,
+            GUN_TURRET_IDLE_SEGMENT_DURATION_MAX,
+            Math.random()
+          );
+        }
+        yawNode.rotation.y += (tower.gunIdleSearchDirection || 1)
+          * Math.max(0.02, Number(tower.gunIdleSearchSpeed) || 0)
+          * Math.max(0, deltaSeconds);
+      }
       if (pitchNode) {
         pitchNode.rotation.x = 0;
       }
