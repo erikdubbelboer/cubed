@@ -22,6 +22,10 @@ const GUN_PROJECTILE_LIFETIME = GUN_TOWER_CONFIG.projectileLifetime;
 const GUN_PROJECTILE_SIZE = GUN_TOWER_CONFIG.projectileSize;
 const GUN_PROJECTILE_HIT_RADIUS = GUN_TOWER_CONFIG.projectileHitRadius;
 const GUN_TOWER_HEIGHT = GUN_TOWER_CONFIG.height;
+const GUN_TURRET_IDLE_TURN_SPEED_MIN = 0.22;
+const GUN_TURRET_IDLE_TURN_SPEED_MAX = 0.65;
+const GUN_TURRET_IDLE_SEGMENT_DURATION_MIN = 0.7;
+const GUN_TURRET_IDLE_SEGMENT_DURATION_MAX = 2.4;
 const GUN_TOWER_HALF_SIZE_X = Number.isFinite(Number(GUN_TOWER_CONFIG.halfSizeX))
   ? Number(GUN_TOWER_CONFIG.halfSizeX)
   : 1.9;
@@ -418,6 +422,33 @@ const GUN_BLACK_HOLE_FRAGMENT_SHADER = `
     gl_FragColor = vec4(finalColor, min(alpha, 1.0));
   }
 `;
+
+const GUN_PORTAL_SHADER_QUERY_PARAM = "gunPortalShader";
+
+function shouldUseGunPortalShaderMaterial() {
+  if (typeof window !== "undefined") {
+    const query = new URLSearchParams(window.location.search);
+    const queryValue = query.get(GUN_PORTAL_SHADER_QUERY_PARAM);
+    if (queryValue === "0") {
+      return false;
+    }
+    if (queryValue === "1") {
+      return true;
+    }
+  }
+
+  if (typeof navigator === "undefined") {
+    return true;
+  }
+
+  const userAgent = String(navigator.userAgent || "");
+  const isAndroid = /Android/i.test(userAgent);
+  const isChrome = /(Chrome|CriOS)/i.test(userAgent);
+  if (isAndroid && isChrome) {
+    return false;
+  }
+  return true;
+}
 
 export function createTowerSystem({
   scene,
@@ -1656,6 +1687,24 @@ export function createTowerSystem({
     glowColor,
     opacity = 1,
   }) {
+    if (!shouldUseGunPortalShaderMaterial()) {
+      const material = new THREE.MeshBasicMaterial({
+        color: glowColor,
+        transparent: true,
+        opacity: Math.max(0.08, Math.min(1, opacity * 0.8)),
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      material.name = "GunBlackHoleFallbackMaterial";
+      material.toneMapped = false;
+      material.userData = {
+        ...(material.userData || {}),
+        isFallbackMaterial: true,
+      };
+      syncMaterialProxyState(material);
+      return { material, uniforms: null };
+    }
+
     const uniforms = {
       uAccentColor: { value: new THREE.Color(accentColor) },
       uGlowColor: { value: new THREE.Color(glowColor) },
@@ -3872,6 +3921,17 @@ export function createTowerSystem({
       gunMuzzleFlashTimer: 0,
       gunPortalClock: Math.random() * Math.PI * 2,
       gunPortalPulse: 0,
+      gunIdleSearchDirection: Math.random() < 0.5 ? -1 : 1,
+      gunIdleSearchSpeed: THREE.MathUtils.lerp(
+        GUN_TURRET_IDLE_TURN_SPEED_MIN,
+        GUN_TURRET_IDLE_TURN_SPEED_MAX,
+        Math.random()
+      ),
+      gunIdleSearchSegmentRemaining: THREE.MathUtils.lerp(
+        GUN_TURRET_IDLE_SEGMENT_DURATION_MIN,
+        GUN_TURRET_IDLE_SEGMENT_DURATION_MAX,
+        Math.random()
+      ),
       slowProcFlash: 0,
       spikesCycleTimer: Math.random() * initialSpikesCycleInterval,
       spikesActiveTimer: 0,
@@ -4548,11 +4608,7 @@ export function createTowerSystem({
           continue;
         }
 
-        tempVecD.copy(enemyMesh.position);
-        const aimOffsetY = enemyMesh.userData?.bodyCenterOffsetY;
-        if (typeof aimOffsetY === "number") {
-          tempVecD.y += aimOffsetY;
-        }
+        getEnemyCollisionCenter(enemyMesh, tempVecD);
 
         const distSq = tower.mesh.position.distanceToSquared(tempVecD);
         if (distSq > bestDistSq) {
@@ -4582,10 +4638,7 @@ export function createTowerSystem({
           return null;
         }
         const fallbackAimPoint = fallbackTarget.position.clone();
-        const fallbackOffsetY = fallbackTarget.mesh?.userData?.bodyCenterOffsetY;
-        if (typeof fallbackOffsetY === "number") {
-          fallbackAimPoint.y += fallbackOffsetY;
-        }
+        getEnemyCollisionCenter(fallbackTarget.mesh, fallbackAimPoint);
         if (hasLineOfSightToPoint(tower, fallbackAimPoint)) {
           return {
             ...fallbackTarget,
@@ -4684,6 +4737,10 @@ export function createTowerSystem({
 
   function getEnemyCollisionCenter(enemyMesh, out) {
     out.copy(enemyMesh.position);
+    const visualRootOffsetY = Number(enemyMesh.userData?.visualRootOffsetY);
+    if (Number.isFinite(visualRootOffsetY)) {
+      out.y += visualRootOffsetY;
+    }
     const centerOffsetY = enemyMesh.userData?.bodyCenterOffsetY;
     if (typeof centerOffsetY === "number") {
       out.y += centerOffsetY;
@@ -5320,7 +5377,30 @@ export function createTowerSystem({
     const target = findTargetWithLineOfSight(tower, enemySystem, { skipSlowed: false });
     updateGunBlackHoleVisualState(tower, deltaSeconds, !!(target?.mesh?.visible));
     if (!target || !target.mesh || !target.mesh.visible) {
+      const yawNode = tower.mesh?.userData?.gunTurretYawNode;
       const pitchNode = tower.mesh?.userData?.gunTurretPitchNode;
+      if (yawNode) {
+        tower.gunIdleSearchSegmentRemaining = Math.max(
+          0,
+          Number(tower.gunIdleSearchSegmentRemaining) || 0
+        ) - Math.max(0, deltaSeconds);
+        if (tower.gunIdleSearchSegmentRemaining <= 0) {
+          tower.gunIdleSearchDirection = Math.random() < 0.5 ? -1 : 1;
+          tower.gunIdleSearchSpeed = THREE.MathUtils.lerp(
+            GUN_TURRET_IDLE_TURN_SPEED_MIN,
+            GUN_TURRET_IDLE_TURN_SPEED_MAX,
+            Math.random()
+          );
+          tower.gunIdleSearchSegmentRemaining = THREE.MathUtils.lerp(
+            GUN_TURRET_IDLE_SEGMENT_DURATION_MIN,
+            GUN_TURRET_IDLE_SEGMENT_DURATION_MAX,
+            Math.random()
+          );
+        }
+        yawNode.rotation.y += (tower.gunIdleSearchDirection || 1)
+          * Math.max(0.02, Number(tower.gunIdleSearchSpeed) || 0)
+          * Math.max(0, deltaSeconds);
+      }
       if (pitchNode) {
         pitchNode.rotation.x = 0;
       }
@@ -6426,7 +6506,7 @@ export function createTowerSystem({
         : tower.halfSizeZ;
       const baseHeight = Number.isFinite(Number(tower.supportHeight))
         ? Number(tower.supportHeight)
-        : GUN_TOWER_SUPPORT_HEIGHT;
+        : GUN_TOWER_CONFIG.baseHeight;
       obstacles.push({
         kind: "box",
         towerType: tower.towerType,

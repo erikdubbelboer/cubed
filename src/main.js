@@ -595,6 +595,50 @@ const EDITOR_TOOL_INVENTORY = [
 ];
 
 const app = document.getElementById("app");
+
+const ERUDA_QUERY_PARAM = "eruda";
+const shouldEnableEruda = (() => {
+  const params = new URLSearchParams(window.location.search);
+  const erudaParam = params.get(ERUDA_QUERY_PARAM);
+  if (erudaParam === "0") {
+    return false;
+  }
+  if (erudaParam === "1") {
+    return true;
+  }
+  return window.matchMedia("(hover: none), (pointer: coarse)").matches;
+})();
+
+function loadErudaConsole() {
+  if (!shouldEnableEruda || typeof document === "undefined") {
+    return;
+  }
+  if (window.eruda?.init) {
+    window.eruda.init();
+    return;
+  }
+  const existingScript = document.querySelector('script[data-eruda-loader="true"]');
+  if (existingScript) {
+    return;
+  }
+  const script = document.createElement("script");
+  script.src = "https://cdn.jsdelivr.net/npm/eruda";
+  script.async = true;
+  script.dataset.erudaLoader = "true";
+  script.onload = () => {
+    if (window.eruda?.init) {
+      window.eruda.init();
+      console.info("[Debug] Eruda console enabled.");
+    }
+  };
+  script.onerror = () => {
+    console.warn("[Debug] Failed to load Eruda console.");
+  };
+  document.head.appendChild(script);
+}
+
+loadErudaConsole();
+
 const initialLobbyQueryCode = (() => {
   const params = new URLSearchParams(window.location.search);
   const code = params.get("lobby");
@@ -1983,6 +2027,9 @@ initPokiSdkEarly();
 function getAutoPauseRequested() {
   if (isMultiplayerWithPeer()) {
     return false;
+  }
+  if (waveState === "MENU") {
+    return document.hidden || !document.hasFocus();
   }
   const isLocked = !!document.pointerLockElement;
   return document.hidden || !document.hasFocus() || (!isTouchDevice && !isLocked);
@@ -3983,10 +4030,6 @@ if (!isTouchDevice) {
       }
     }
 
-    if (isPaused) {
-      return;
-    }
-
     if (waveState === "MENU") {
       if (event.button !== 0) {
         return;
@@ -4011,6 +4054,10 @@ if (!isTouchDevice) {
       }
       updateDesktopTechTreeHover(pointer.x, pointer.y);
       beginDesktopTechTreeDrag(pointer.x, pointer.y, player.controls.isLocked);
+      return;
+    }
+
+    if (isPaused) {
       return;
     }
 

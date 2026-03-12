@@ -1165,6 +1165,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       enemy.pathSlopePitch = 0;
       enemy.visualRoot.rotation.x = 0;
       enemy.visualRoot.position.y = ENEMY_SURFACE_HOVER_HEIGHT;
+      enemy.mesh.userData.visualRootOffsetY = enemy.visualRoot.position.y;
       return;
     }
 
@@ -1176,6 +1177,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       enemy.pathSlopePitch = 0;
       enemy.visualRoot.rotation.x = 0;
       enemy.visualRoot.position.y = ENEMY_SURFACE_HOVER_HEIGHT;
+      enemy.mesh.userData.visualRootOffsetY = enemy.visualRoot.position.y;
       return;
     }
 
@@ -1211,6 +1213,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       : centerSurfaceY;
     const predictedAverageY = enemy.mesh.position.y + (localBottomY * cosPitch);
     enemy.visualRoot.position.y = (targetAverageY - predictedAverageY) + ENEMY_SURFACE_HOVER_HEIGHT;
+    enemy.mesh.userData.visualRootOffsetY = enemy.visualRoot.position.y;
   }
 
   function getEnemyCollisionCenter(enemy, out) {
@@ -1752,6 +1755,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     applyEnemyOrientation(enemy);
 
     enemyMesh.userData.bodyCenterOffsetY = bodyMesh.position.y;
+    enemyMesh.userData.visualRootOffsetY = visualRoot.position.y;
     enemyMesh.userData.bodyHalfSize = enemyType.size * 0.5;
     enemyMesh.userData.hitSphereRadius = enemyType.radius;
     enemyMesh.userData.networkId = enemy.networkId;
