@@ -4608,11 +4608,7 @@ export function createTowerSystem({
           continue;
         }
 
-        tempVecD.copy(enemyMesh.position);
-        const aimOffsetY = enemyMesh.userData?.bodyCenterOffsetY;
-        if (typeof aimOffsetY === "number") {
-          tempVecD.y += aimOffsetY;
-        }
+        getEnemyCollisionCenter(enemyMesh, tempVecD);
 
         const distSq = tower.mesh.position.distanceToSquared(tempVecD);
         if (distSq > bestDistSq) {
@@ -4642,10 +4638,7 @@ export function createTowerSystem({
           return null;
         }
         const fallbackAimPoint = fallbackTarget.position.clone();
-        const fallbackOffsetY = fallbackTarget.mesh?.userData?.bodyCenterOffsetY;
-        if (typeof fallbackOffsetY === "number") {
-          fallbackAimPoint.y += fallbackOffsetY;
-        }
+        getEnemyCollisionCenter(fallbackTarget.mesh, fallbackAimPoint);
         if (hasLineOfSightToPoint(tower, fallbackAimPoint)) {
           return {
             ...fallbackTarget,
@@ -4744,6 +4737,10 @@ export function createTowerSystem({
 
   function getEnemyCollisionCenter(enemyMesh, out) {
     out.copy(enemyMesh.position);
+    const visualRootOffsetY = Number(enemyMesh.userData?.visualRootOffsetY);
+    if (Number.isFinite(visualRootOffsetY)) {
+      out.y += visualRootOffsetY;
+    }
     const centerOffsetY = enemyMesh.userData?.bodyCenterOffsetY;
     if (typeof centerOffsetY === "number") {
       out.y += centerOffsetY;
