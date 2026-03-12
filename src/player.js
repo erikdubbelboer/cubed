@@ -1157,10 +1157,43 @@ export function createPlayer({
     return position.y >= (obstacleBaseY - padding) && position.y <= (rampSurfaceY + padding);
   }
 
+  function pointHitsCylinderObstacle(position, obstacle, padding) {
+    const obstaclePos = obstacle?.position ?? obstacle?.mesh?.position;
+    const obstacleBaseY = Number(obstacle?.baseY ?? 0);
+    const obstacleHeight = Number(obstacle?.height);
+    const obstacleRadius = Number(obstacle?.radius);
+    if (
+      !obstaclePos
+      || !Number.isFinite(obstacleBaseY)
+      || !Number.isFinite(obstacleHeight)
+      || obstacleHeight <= 0
+      || !Number.isFinite(obstacleRadius)
+      || obstacleRadius <= 0
+    ) {
+      return false;
+    }
+
+    if (position.y < (obstacleBaseY - padding) || position.y > (obstacleBaseY + obstacleHeight + padding)) {
+      return false;
+    }
+
+    const dx = position.x - obstaclePos.x;
+    const dz = position.z - obstaclePos.z;
+    const maxDistance = obstacleRadius + padding;
+    return ((dx * dx) + (dz * dz)) <= (maxDistance * maxDistance);
+  }
+
   function pointHitsObstacle(position, obstacles, padding = towerHitPadding) {
     for (const obstacle of obstacles) {
       if (obstacle?.kind === "ramp") {
         if (pointHitsRampObstacle(position, obstacle, padding)) {
+          return true;
+        }
+        continue;
+      }
+
+      if (obstacle?.kind === "cylinder") {
+        if (pointHitsCylinderObstacle(position, obstacle, padding)) {
           return true;
         }
         continue;
@@ -1705,6 +1738,36 @@ export function createPlayer({
         }
 
         const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
+        if (obstacle?.kind === "cylinder") {
+          if (obstacle?.supportsPlayer === false) {
+            continue;
+          }
+
+          const obstacleRadius = Number(obstacle?.radius);
+          const obstacleHeight = Number(obstacle?.height);
+          const obstacleBaseY = obstacle?.baseY ?? 0;
+          if (
+            !obstaclePos
+            || !Number.isFinite(obstacleRadius)
+            || obstacleRadius <= 0
+            || !Number.isFinite(obstacleHeight)
+            || obstacleHeight <= 0
+          ) {
+            continue;
+          }
+
+          const topY = obstacleBaseY + obstacleHeight;
+          const dx = x - obstaclePos.x;
+          const dz = z - obstaclePos.z;
+          const withinTop = ((dx * dx) + (dz * dz))
+            <= Math.pow(obstacleRadius + SUPPORT_EDGE_EPSILON, 2);
+          const nearTop = feetY >= (topY - TOWER_TOP_SNAP_DOWN) && feetY <= (topY + TOWER_TOP_SNAP_UP);
+          if (withinTop && nearTop) {
+            supportY = Math.max(supportY, topY + eyeHeight);
+          }
+          continue;
+        }
+
         const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
           ? Number(obstacle.halfSizeX)
           : Number(obstacle?.halfSize);
@@ -1901,6 +1964,58 @@ export function createPlayer({
           }
 
           const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
+          if (obstacle?.kind === "cylinder") {
+            const obstacleRadius = Number(obstacle?.radius);
+            const obstacleHeight = Number(obstacle?.height);
+            const obstacleBaseY = obstacle?.baseY ?? 0;
+
+            if (
+              !obstaclePos
+              || !Number.isFinite(obstacleRadius)
+              || obstacleRadius <= 0
+              || !Number.isFinite(obstacleHeight)
+              || obstacleHeight <= 0
+            ) {
+              continue;
+            }
+
+            const playerFeetY = camera.position.y - eyeHeight;
+            const playerHeadY = camera.position.y + PLAYER_HEAD_CLEARANCE;
+            const obstacleTopY = obstacleBaseY + obstacleHeight;
+            const verticalOverlap = playerHeadY > obstacleBaseY && playerFeetY < obstacleTopY;
+            if (!verticalOverlap) {
+              continue;
+            }
+
+            const dx = camera.position.x - obstaclePos.x;
+            const dz = camera.position.z - obstaclePos.z;
+            const minDistance = PLAYER_COLLISION_RADIUS + obstacleRadius;
+            const distSq = (dx * dx) + (dz * dz);
+            if (distSq >= (minDistance * minDistance)) {
+              continue;
+            }
+
+            if (distSq <= MIN_COLLISION_DISTANCE_SQ) {
+              const prevDx = movementStartPosition.x - obstaclePos.x;
+              const prevDz = movementStartPosition.z - obstaclePos.z;
+              const prevDistSq = (prevDx * prevDx) + (prevDz * prevDz);
+              if (prevDistSq > MIN_COLLISION_DISTANCE_SQ) {
+                const prevDist = Math.sqrt(prevDistSq);
+                camera.position.x = obstaclePos.x + (prevDx / prevDist) * minDistance;
+                camera.position.z = obstaclePos.z + (prevDz / prevDist) * minDistance;
+              } else {
+                camera.position.x += minDistance;
+              }
+              continue;
+            }
+
+            const dist = Math.sqrt(distSq);
+            const push = (minDistance - dist) / dist;
+            camera.position.x += dx * push;
+            camera.position.z += dz * push;
+            continue;
+          }
+
           const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
             ? Number(obstacle.halfSizeX)
             : Number(obstacle?.halfSize);
