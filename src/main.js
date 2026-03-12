@@ -6427,3 +6427,7 @@ window.addEventListener("orientationchange", scheduleViewportSync);
 if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
   window.visualViewport.addEventListener("resize", scheduleViewportSync);
 }
+
+// Ensure mobile browsers that report transient early viewport sizes (before first gesture)
+// still get a post-layout sync so initial menus render immediately.
+scheduleViewportSync();
