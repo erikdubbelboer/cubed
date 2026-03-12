@@ -52,6 +52,7 @@ const MENU_MODE_WEAPON_SELECT = "weapon_select";
 const TECH_TREE_MENU_TITLE = "Research Tree";
 const WEAPON_MENU_TITLE = "Choose Your Weapon";
 const WEAPON_MENU_SUBTITLE = "Pick one for this run";
+const WEAPON_MENU_DEBUG = new URLSearchParams(window.location.search).get("weaponmenudebug") === "1";
 const TECH_TREE_DRAG_THRESHOLD_PX = 8;
 const TECH_TREE_TOUCH_LONG_PRESS_MS = 420;
 const MOBILE_LOOK_SENSITIVITY_SCALE = Number.isFinite(Number(MOBILE_UI_CONFIG.lookSensitivityScale))
@@ -3208,6 +3209,42 @@ function addExperience(amount) {
   return false;
 }
 
+function logWeaponMenuState(context, extra = {}) {
+  if (!WEAPON_MENU_DEBUG) {
+    return;
+  }
+  console.log("[WeaponMenu]", context, {
+    waveState,
+    currentMenuMode,
+    weaponOptionCount: currentWeaponOptions.length,
+    isPaused,
+    hasFocus: document.hasFocus(),
+    visibilityState: document.visibilityState,
+    ...extra,
+  });
+}
+
+function ensureWeaponSelectionMenuState() {
+  if (currentWeaponOptions.length <= 0) {
+    return;
+  }
+  if (waveState === "MENU" && currentMenuMode === MENU_MODE_WEAPON_SELECT) {
+    return;
+  }
+  waveState = "MENU";
+  currentMenuMode = MENU_MODE_WEAPON_SELECT;
+  currentMenuTitle = WEAPON_MENU_TITLE;
+  currentMenuSubtitle = WEAPON_MENU_SUBTITLE;
+  hoveredUpgradeIndex = -1;
+  player?.setMenuMode?.(true);
+  setPrimaryDownState(false);
+  resetMobileInputState();
+  vCursorX = viewportWidth * 0.5;
+  vCursorY = viewportHeight * 0.5;
+  updateMenuHoverFromVirtualCursor();
+  logWeaponMenuState("Repaired unexpected menu state");
+}
+
 function showWeaponSelectionMenu() {
   if (!player) {
     return false;
@@ -3239,6 +3276,7 @@ function showWeaponSelectionMenu() {
   vCursorX = viewportWidth * 0.5;
   vCursorY = viewportHeight * 0.5;
   updateMenuHoverFromVirtualCursor();
+  logWeaponMenuState("Opened weapon selection menu");
   return true;
 }
 
@@ -3253,6 +3291,7 @@ function finishWeaponSelectionChoice() {
   setPrimaryDownState(false);
   resetMobileInputState();
   clearTechTreeDragState();
+  logWeaponMenuState("Finished weapon selection menu");
   startBuildPhase(WAVE_CONFIG.initialWave);
 }
 
@@ -5980,6 +6019,8 @@ function runGameFrame({ renderFrame = true } = {}) {
       fpsSampleFrames = 0;
     }
   }
+
+  ensureWeaponSelectionMenuState();
 
   if (!isPaused) {
     const hostControlsSimulation = shouldHostControlSimulation();
