@@ -6471,7 +6471,7 @@ export function createTowerSystem({
         : tower.halfSizeZ;
       const baseHeight = Number.isFinite(Number(tower.supportHeight))
         ? Number(tower.supportHeight)
-        : GUN_TOWER_SUPPORT_HEIGHT;
+        : GUN_TOWER_CONFIG.baseHeight;
       obstacles.push({
         kind: "box",
         towerType: tower.towerType,
