@@ -419,6 +419,33 @@ const GUN_BLACK_HOLE_FRAGMENT_SHADER = `
   }
 `;
 
+const GUN_PORTAL_SHADER_QUERY_PARAM = "gunPortalShader";
+
+function shouldUseGunPortalShaderMaterial() {
+  if (typeof window !== "undefined") {
+    const query = new URLSearchParams(window.location.search);
+    const queryValue = query.get(GUN_PORTAL_SHADER_QUERY_PARAM);
+    if (queryValue === "0") {
+      return false;
+    }
+    if (queryValue === "1") {
+      return true;
+    }
+  }
+
+  if (typeof navigator === "undefined") {
+    return true;
+  }
+
+  const userAgent = String(navigator.userAgent || "");
+  const isAndroid = /Android/i.test(userAgent);
+  const isChrome = /(Chrome|CriOS)/i.test(userAgent);
+  if (isAndroid && isChrome) {
+    return false;
+  }
+  return true;
+}
+
 export function createTowerSystem({
   scene,
   camera,
@@ -1656,6 +1683,24 @@ export function createTowerSystem({
     glowColor,
     opacity = 1,
   }) {
+    if (!shouldUseGunPortalShaderMaterial()) {
+      const material = new THREE.MeshBasicMaterial({
+        color: glowColor,
+        transparent: true,
+        opacity: Math.max(0.08, Math.min(1, opacity * 0.8)),
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      material.name = "GunBlackHoleFallbackMaterial";
+      material.toneMapped = false;
+      material.userData = {
+        ...(material.userData || {}),
+        isFallbackMaterial: true,
+      };
+      syncMaterialProxyState(material);
+      return { material, uniforms: null };
+    }
+
     const uniforms = {
       uAccentColor: { value: new THREE.Color(accentColor) },
       uGlowColor: { value: new THREE.Color(glowColor) },
