@@ -894,24 +894,37 @@ function showHostLobbyToast(message) {
 
 const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
 
+function getLargestPositiveMetric(values = []) {
+  let largest = Number.NaN;
+  for (const value of values) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      continue;
+    }
+    if (!Number.isFinite(largest) || numeric > largest) {
+      largest = numeric;
+    }
+  }
+  return largest;
+}
+
 function getViewportMetrics() {
   const appRect = app?.getBoundingClientRect?.() ?? null;
-  const rawWidth = Number.isFinite(Number(appRect?.width)) && Number(appRect.width) > 0
-    ? Number(appRect.width)
-    : (
-      Number.isFinite(Number(document.documentElement?.clientWidth))
-        ? Number(document.documentElement.clientWidth)
-        : Number(window.innerWidth)
-    );
-  const rawHeight = Number.isFinite(Number(appRect?.height)) && Number(appRect.height) > 0
-    ? Number(appRect.height)
-    : (
-      Number.isFinite(Number(document.documentElement?.clientHeight))
-        ? Number(document.documentElement.clientHeight)
-        : Number(window.innerHeight)
-    );
-  const width = Math.max(1, Math.floor(rawWidth));
-  const height = Math.max(1, Math.floor(rawHeight));
+  const visualViewport = window.visualViewport ?? null;
+  const rawWidth = getLargestPositiveMetric([
+    appRect?.width,
+    visualViewport?.width,
+    document.documentElement?.clientWidth,
+    window.innerWidth,
+  ]);
+  const rawHeight = getLargestPositiveMetric([
+    appRect?.height,
+    visualViewport?.height,
+    document.documentElement?.clientHeight,
+    window.innerHeight,
+  ]);
+  const width = Math.max(1, Math.floor(Number.isFinite(rawWidth) ? rawWidth : 1));
+  const height = Math.max(1, Math.floor(Number.isFinite(rawHeight) ? rawHeight : 1));
   const rawPixelRatio = Number(window.devicePixelRatio);
   const pixelRatio = clamp(
     Number.isFinite(rawPixelRatio) ? rawPixelRatio : 1,
