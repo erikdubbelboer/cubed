@@ -2245,8 +2245,8 @@ export function createTowerSystem({
     const beamRadius = Math.max(0.05, gridCellSize * 0.06);
     const coreBeamMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        uColor: { value: new THREE.Color(0xff2a2a) },
-        uHotColor: { value: new THREE.Color(0xfff0e8) },
+        uColor: { value: new THREE.Color(0xff1f1f) },
+        uHotColor: { value: new THREE.Color(0xffebe0) },
         uOpacity: { value: Math.max(0.05, LASER_SNIPER_TOWER_CONFIG.beamOpacity * 0.82) * opacity },
         uTime: { value: 0 },
         uPulse: { value: 0 },
@@ -2267,15 +2267,18 @@ export function createTowerSystem({
         uniform float uPulse;
 
         void main() {
-          float radial = abs((vUv.x * 2.0) - 1.0);
-          float edgeFade = pow(max(0.0, 1.0 - radial), 2.15);
-          float scan = 0.72 + (0.28 * sin((vUv.y * 24.0) - (uTime * 12.0)));
-          float shimmer = 0.88 + (0.12 * sin((vUv.y * 46.0) + (uTime * 18.0)));
-          float pulseGlow = 1.0 + (uPulse * 2.4);
-          float intensity = edgeFade * scan * shimmer * pulseGlow;
-          float coreMask = smoothstep(0.34, 0.0, radial);
-          vec3 beamColor = mix(uColor, uHotColor, coreMask * (0.65 + (uPulse * 0.2)));
-          float alpha = clamp(uOpacity * intensity, 0.0, 1.0);
+          float x = abs((vUv.x * 2.0) - 1.0);
+          float tubeMask = smoothstep(1.0, 0.05, x);
+          float movingBandA = 0.5 + (0.5 * sin((vUv.y * 36.0) - (uTime * 11.0)));
+          float movingBandB = 0.5 + (0.5 * sin((vUv.y * 19.0) + (uTime * 7.5)));
+          float pattern = 0.55 + (movingBandA * 0.28) + (movingBandB * 0.17);
+          float pulseGlow = 1.0 + (uPulse * 2.25);
+          float coreHot = smoothstep(0.36, 0.0, x);
+          vec3 beamColor = mix(uColor, uHotColor, coreHot * (0.68 + (uPulse * 0.22)));
+          float alpha = clamp(uOpacity * tubeMask * pattern * pulseGlow, 0.0, 1.0);
+          if (alpha <= 0.001) {
+            discard;
+          }
           gl_FragColor = vec4(beamColor, alpha);
         }
       `,
@@ -2330,7 +2333,7 @@ export function createTowerSystem({
     root.add(dishYawNode);
 
     const emitterNode = new THREE.Object3D();
-    emitterNode.position.set(0, centerBeam.position.y - dishYawNode.position.y, 0);
+    emitterNode.position.set(0, centerBeam.position.y, 0);
     root.add(emitterNode);
 
     const outline = createFootprintOutlineMesh({
