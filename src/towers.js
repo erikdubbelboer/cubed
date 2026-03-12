@@ -2238,10 +2238,16 @@ export function createTowerSystem({
     transparent = false,
   }) {
     const root = new THREE.Group();
+    const tileWidth = Math.max(0.2, gridCellSize);
+    const baseHeight = Math.max(0.16, gridCellSize * 0.14);
+    const towerTopY = Math.max(gridCellSize * 1.18, 2.2);
+    const beamHeight = Math.max(0.1, towerTopY - baseHeight);
+    const beamRadius = Math.max(0.05, gridCellSize * 0.06);
     const coreBeamMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        uColor: { value: new THREE.Color(glow) },
-        uOpacity: { value: Math.max(0.05, LASER_SNIPER_TOWER_CONFIG.beamOpacity * 0.65) * opacity },
+        uColor: { value: new THREE.Color(0xff2a2a) },
+        uHotColor: { value: new THREE.Color(0xfff0e8) },
+        uOpacity: { value: Math.max(0.05, LASER_SNIPER_TOWER_CONFIG.beamOpacity * 0.82) * opacity },
         uTime: { value: 0 },
         uPulse: { value: 0 },
       },
@@ -2255,17 +2261,22 @@ export function createTowerSystem({
       fragmentShader: `
         varying vec2 vUv;
         uniform vec3 uColor;
+        uniform vec3 uHotColor;
         uniform float uOpacity;
         uniform float uTime;
         uniform float uPulse;
 
         void main() {
-          float radial = 1.0 - abs((vUv.x * 2.0) - 1.0);
-          float wave = 0.5 + (0.5 * sin((vUv.y * 17.0) - (uTime * 10.0)));
-          float pulseGlow = 1.0 + (uPulse * 1.8);
-          float intensity = pow(max(0.0, radial), 1.7) * (0.58 + (wave * 0.42)) * pulseGlow;
+          float radial = abs((vUv.x * 2.0) - 1.0);
+          float edgeFade = pow(max(0.0, 1.0 - radial), 2.15);
+          float scan = 0.72 + (0.28 * sin((vUv.y * 24.0) - (uTime * 12.0)));
+          float shimmer = 0.88 + (0.12 * sin((vUv.y * 46.0) + (uTime * 18.0)));
+          float pulseGlow = 1.0 + (uPulse * 2.4);
+          float intensity = edgeFade * scan * shimmer * pulseGlow;
+          float coreMask = smoothstep(0.34, 0.0, radial);
+          vec3 beamColor = mix(uColor, uHotColor, coreMask * (0.65 + (uPulse * 0.2)));
           float alpha = clamp(uOpacity * intensity, 0.0, 1.0);
-          gl_FragColor = vec4(uColor * (0.9 + (uPulse * 0.5)), alpha);
+          gl_FragColor = vec4(beamColor, alpha);
         }
       `,
       transparent: true,
@@ -2294,51 +2305,32 @@ export function createTowerSystem({
     });
 
     const lowerBase = new THREE.Mesh(
-      new THREE.BoxGeometry(1, 0.28, 1),
+      new THREE.BoxGeometry(tileWidth, baseHeight, tileWidth),
       baseMaterial
     );
-    lowerBase.position.y = 0.14;
+    lowerBase.position.y = baseHeight * 0.5;
     root.add(lowerBase);
 
     const upperBase = new THREE.Mesh(
-      new THREE.BoxGeometry(1, 0.28, 1),
+      new THREE.BoxGeometry(tileWidth, baseHeight, tileWidth),
       baseMaterial
     );
-    upperBase.position.y = 2.22;
+    upperBase.position.y = towerTopY;
     root.add(upperBase);
 
     const centerBeam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.09, 0.09, 1.9, 12, 1, true),
+      new THREE.CylinderGeometry(beamRadius, beamRadius, beamHeight, 16, 1, true),
       coreBeamMaterial
     );
-    centerBeam.position.y = 1.18;
+    centerBeam.position.y = (lowerBase.position.y + upperBase.position.y) * 0.5;
     root.add(centerBeam);
 
-    const topTurretBase = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.2, 0.22, 0.16, 12),
-      accentMaterial
-    );
-    topTurretBase.position.y = 2.38;
-    root.add(topTurretBase);
-
     const dishYawNode = new THREE.Object3D();
-    dishYawNode.position.y = 2.38;
+    dishYawNode.position.y = upperBase.position.y;
     root.add(dishYawNode);
 
-    const dish = new THREE.Mesh(
-      new THREE.CylinderGeometry(
-        LASER_SNIPER_TOWER_CONFIG.dishRadius * 0.35,
-        LASER_SNIPER_TOWER_CONFIG.dishRadius,
-        0.28,
-        14
-      ),
-      accentMaterial
-    );
-    dish.rotation.x = Math.PI * 0.5;
-    dishYawNode.add(dish);
-
     const emitterNode = new THREE.Object3D();
-    emitterNode.position.set(0, 1.18 - dishYawNode.position.y, 0);
+    emitterNode.position.set(0, centerBeam.position.y - dishYawNode.position.y, 0);
     root.add(emitterNode);
 
     const outline = createFootprintOutlineMesh({
