@@ -574,9 +574,9 @@ export function createTowerSystem({
 
   const laserBeamGeometry = new THREE.CylinderGeometry(1, 1, 1, 8, 1, true);
   const laserBeamMaterial = new THREE.MeshBasicMaterial({
-    color: LASER_SNIPER_TOWER_CONFIG.beamColor,
+    color: 0xff3a3a,
     transparent: true,
-    opacity: LASER_SNIPER_TOWER_CONFIG.beamOpacity,
+    opacity: Math.max(0.2, LASER_SNIPER_TOWER_CONFIG.beamOpacity),
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
@@ -708,9 +708,11 @@ export function createTowerSystem({
     laserSniper: {
       type: "laserSniper",
       range: LASER_SNIPER_RANGE,
-      radius: Math.max(0.1, Number(LASER_SNIPER_TOWER_CONFIG.halfSize) || 0.95),
-      halfSize: Math.max(0.1, Number(LASER_SNIPER_TOWER_CONFIG.halfSize) || 0.95),
-      height: Math.max(0.1, Number(LASER_SNIPER_TOWER_CONFIG.height) || 2.4),
+      radius: gridCubeHalfSize,
+      halfSize: gridCubeHalfSize,
+      halfSizeX: gridCubeHalfSize,
+      halfSizeZ: gridCubeHalfSize,
+      height: gridCellSize,
       usesLineOfSight: true,
     },
     mortar: {
@@ -2238,6 +2240,57 @@ export function createTowerSystem({
     transparent = false,
   }) {
     const root = new THREE.Group();
+    const tileWidth = Math.max(0.2, gridCellSize);
+    const towerHeight = Math.max(0.2, gridCellSize);
+    const baseHeight = Math.max(0.08, towerHeight * 0.2);
+    const lowerBaseCenterY = baseHeight * 0.5;
+    const upperBaseCenterY = towerHeight - (baseHeight * 0.5);
+    const beamHeight = Math.max(0.08, upperBaseCenterY - lowerBaseCenterY - baseHeight);
+    const beamRadius = Math.max(0.035, gridCellSize * 0.055);
+    const coreBeamMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: new THREE.Color(0xff1f1f) },
+        uHotColor: { value: new THREE.Color(0xffebe0) },
+        uOpacity: { value: Math.max(0.05, LASER_SNIPER_TOWER_CONFIG.beamOpacity * 0.82) * opacity },
+        uTime: { value: 0 },
+        uPulse: { value: 0 },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec2 vUv;
+        uniform vec3 uColor;
+        uniform vec3 uHotColor;
+        uniform float uOpacity;
+        uniform float uTime;
+        uniform float uPulse;
+
+        void main() {
+          float x = abs((vUv.x * 2.0) - 1.0);
+          float movingBandA = 0.5 + (0.5 * sin((vUv.y * 36.0) - (uTime * 11.0)));
+          float movingBandB = 0.5 + (0.5 * sin((vUv.y * 19.0) + (uTime * 7.5)));
+          float pattern = 0.6 + (movingBandA * 0.25) + (movingBandB * 0.15);
+          float pulseGlow = 1.0 + (uPulse * 2.25);
+          float coreHot = smoothstep(0.58, 0.0, x);
+          vec3 beamColor = mix(uColor, uHotColor, coreHot * (0.7 + (uPulse * 0.2)));
+          float alpha = clamp(uOpacity * pattern * pulseGlow * (0.78 + (coreHot * 0.22)), 0.0, 1.0);
+          if (alpha <= 0.001) {
+            discard;
+          }
+          gl_FragColor = vec4(beamColor, alpha);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    coreBeamMaterial.toneMapped = false;
+
     const baseMaterial = new THREE.MeshStandardMaterial({
       color,
       emissive: glow,
@@ -2257,44 +2310,34 @@ export function createTowerSystem({
       opacity,
     });
 
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(
-        LASER_SNIPER_TOWER_CONFIG.baseRadius * 0.84,
-        LASER_SNIPER_TOWER_CONFIG.baseRadius,
-        0.85,
-        16
-      ),
+    const lowerBase = new THREE.Mesh(
+      new THREE.BoxGeometry(tileWidth, baseHeight, tileWidth),
       baseMaterial
     );
-    base.position.y = 0.42;
-    root.add(base);
+    lowerBase.position.y = lowerBaseCenterY;
+    root.add(lowerBase);
 
-    const spine = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.14, 0.22, LASER_SNIPER_TOWER_CONFIG.spineHeight, 12),
-      accentMaterial
+    const upperBase = new THREE.Mesh(
+      new THREE.BoxGeometry(tileWidth, baseHeight, tileWidth),
+      baseMaterial
     );
-    spine.position.y = 0.85 + (LASER_SNIPER_TOWER_CONFIG.spineHeight * 0.5);
-    root.add(spine);
+    upperBase.position.y = upperBaseCenterY;
+    root.add(upperBase);
+
+    const centerBeam = new THREE.Mesh(
+      new THREE.CylinderGeometry(beamRadius, beamRadius, beamHeight, 16, 1, true),
+      coreBeamMaterial
+    );
+    centerBeam.position.y = towerHeight * 0.5;
+    root.add(centerBeam);
 
     const dishYawNode = new THREE.Object3D();
-    dishYawNode.position.y = spine.position.y + (LASER_SNIPER_TOWER_CONFIG.spineHeight * 0.38);
+    dishYawNode.position.y = upperBase.position.y;
     root.add(dishYawNode);
 
-    const dish = new THREE.Mesh(
-      new THREE.CylinderGeometry(
-        LASER_SNIPER_TOWER_CONFIG.dishRadius * 0.35,
-        LASER_SNIPER_TOWER_CONFIG.dishRadius,
-        0.28,
-        14
-      ),
-      accentMaterial
-    );
-    dish.rotation.x = Math.PI * 0.5;
-    dishYawNode.add(dish);
-
     const emitterNode = new THREE.Object3D();
-    emitterNode.position.set(0, 0, LASER_SNIPER_TOWER_CONFIG.dishRadius * 0.74);
-    dishYawNode.add(emitterNode);
+    emitterNode.position.set(0, centerBeam.position.y, 0);
+    root.add(emitterNode);
 
     const outline = createFootprintOutlineMesh({
       halfSizeX: gridCubeHalfSize,
@@ -2306,11 +2349,14 @@ export function createTowerSystem({
     });
     root.add(outline);
 
-    root.userData.materials = [baseMaterial, accentMaterial];
+    root.userData.materials = [baseMaterial, accentMaterial, coreBeamMaterial];
     root.userData.footprintOutlineMaterial = outline.userData.footprintOutlineMaterial;
     root.userData.laserSniperYawNode = dishYawNode;
     root.userData.laserSniperEmitterNode = emitterNode;
+    root.userData.laserSniperCoreBeamMaterial = coreBeamMaterial;
     applyShadowSettings(root);
+    centerBeam.castShadow = false;
+    centerBeam.receiveShadow = false;
     return root;
   }
 
@@ -3944,7 +3990,7 @@ export function createTowerSystem({
       buildFxState: null,
       ownerId,
       rotationY: typeof placement?.rotationY === "number" ? placement.rotationY : 0,
-      topInsetFromRadius: towerType === "block" ? 0 : undefined,
+      topInsetFromRadius: (towerType === "block" || towerType === "laserSniper") ? 0 : undefined,
       blockOpacity: towerType === "block"
         ? (
           options?.blockOpacity != null && Number.isFinite(Number(options.blockOpacity))
@@ -4372,6 +4418,61 @@ export function createTowerSystem({
     return out;
   }
 
+  function getLaserSniperCapHeight(tower) {
+    const towerHeight = Math.max(0.1, Number(tower?.height) || gridCellSize);
+    return Math.max(0.04, towerHeight * 0.2);
+  }
+
+  function segmentIntersectsLaserSniperCaps(origin, targetPosition, tower, halfSizeX, halfSizeZ, baseY) {
+    const towerHeight = Math.max(0.1, Number(tower?.height) || gridCellSize);
+    const capHeight = getLaserSniperCapHeight(tower);
+    const centerX = tower.mesh.position.x;
+    const centerZ = tower.mesh.position.z;
+    const minX = centerX - halfSizeX;
+    const maxX = centerX + halfSizeX;
+    const minZ = centerZ - halfSizeZ;
+    const maxZ = centerZ + halfSizeZ;
+    const lowerTopY = baseY + capHeight;
+    const upperBaseY = baseY + Math.max(capHeight, towerHeight - capHeight);
+
+    return segmentIntersectsAabb(origin, targetPosition, minX, baseY, minZ, maxX, lowerTopY, maxZ)
+      || segmentIntersectsAabb(origin, targetPosition, minX, upperBaseY, minZ, maxX, baseY + towerHeight, maxZ);
+  }
+
+  function pointInsideLaserSniperCaps(position, tower, padding = 0) {
+    const obstaclePos = tower?.mesh?.position ?? tower?.position;
+    const halfSizeX = Number.isFinite(Number(tower?.halfSizeX))
+      ? Number(tower.halfSizeX)
+      : Number(tower?.halfSize);
+    const halfSizeZ = Number.isFinite(Number(tower?.halfSizeZ))
+      ? Number(tower.halfSizeZ)
+      : Number(tower?.halfSize);
+    const towerHeight = Math.max(0.1, Number(tower?.height) || gridCellSize);
+    const baseY = Number(tower?.baseY ?? grid.tileTopY);
+    if (
+      !obstaclePos
+      || !Number.isFinite(halfSizeX)
+      || !Number.isFinite(halfSizeZ)
+    ) {
+      return false;
+    }
+
+    const inX = position.x >= obstaclePos.x - halfSizeX - padding
+      && position.x <= obstaclePos.x + halfSizeX + padding;
+    const inZ = position.z >= obstaclePos.z - halfSizeZ - padding
+      && position.z <= obstaclePos.z + halfSizeZ + padding;
+    if (!inX || !inZ) {
+      return false;
+    }
+
+    const capHeight = getLaserSniperCapHeight(tower);
+    const lowerTopY = baseY + capHeight;
+    const upperBaseY = baseY + Math.max(capHeight, towerHeight - capHeight);
+    const inLower = position.y >= baseY - padding && position.y <= lowerTopY + padding;
+    const inUpper = position.y >= upperBaseY - padding && position.y <= (baseY + towerHeight + padding);
+    return inLower || inUpper;
+  }
+
   function lineOfSightBlockedByOtherTower(origin, targetPosition, sourceTower) {
     for (const otherTower of towers) {
       if (otherTower === sourceTower) {
@@ -4391,8 +4492,9 @@ export function createTowerSystem({
       const minZ = otherTower.mesh.position.z - halfSizeZ;
       const maxZ = otherTower.mesh.position.z + halfSizeZ;
 
-      if (
-        segmentIntersectsAabb(
+      const blocked = otherTower.towerType === "laserSniper"
+        ? segmentIntersectsLaserSniperCaps(origin, targetPosition, otherTower, halfSizeX, halfSizeZ, baseY)
+        : segmentIntersectsAabb(
           origin,
           targetPosition,
           minX,
@@ -4401,8 +4503,8 @@ export function createTowerSystem({
           maxX,
           topY,
           maxZ
-        )
-      ) {
+        );
+      if (blocked) {
         return true;
       }
     }
@@ -5531,12 +5633,28 @@ export function createTowerSystem({
     }
     laserBeamEffects.push({
       mesh: beamMesh,
-      life: Math.max(0.01, LASER_SNIPER_BEAM_DURATION),
-      maxLife: Math.max(0.01, LASER_SNIPER_BEAM_DURATION),
+      life: Math.max(0.01, LASER_SNIPER_BEAM_DURATION * 1.7),
+      maxLife: Math.max(0.01, LASER_SNIPER_BEAM_DURATION * 1.7),
     });
   }
 
+  function updateLaserSniperVisualState(tower, deltaSeconds) {
+    const coreBeamMaterial = tower.mesh?.userData?.laserSniperCoreBeamMaterial;
+    if (!coreBeamMaterial?.uniforms) {
+      return;
+    }
+    tower.laserSniperBeamClock = (tower.laserSniperBeamClock || 0) + Math.max(0, deltaSeconds);
+    tower.laserSniperPulse = Math.max(0, (tower.laserSniperPulse || 0) - (deltaSeconds * 3.25));
+    if (coreBeamMaterial.uniforms.uTime) {
+      coreBeamMaterial.uniforms.uTime.value = tower.laserSniperBeamClock;
+    }
+    if (coreBeamMaterial.uniforms.uPulse) {
+      coreBeamMaterial.uniforms.uPulse.value = THREE.MathUtils.clamp(tower.laserSniperPulse || 0, 0, 1.4);
+    }
+  }
+
   function updateLaserSniperCombat(tower, deltaSeconds, enemySystem) {
+    updateLaserSniperVisualState(tower, deltaSeconds);
     tower.cooldown = Math.max(0, tower.cooldown - deltaSeconds);
     const target = findTargetWithUnlimitedLineOfSight(tower, enemySystem);
     const yawNode = tower.mesh?.userData?.laserSniperYawNode;
@@ -5600,6 +5718,7 @@ export function createTowerSystem({
 
     const beamEnd = hitTargets[hitTargets.length - 1]?.aimPoint || primaryAimPoint;
     spawnLaserBeam(tempVecB, beamEnd);
+    tower.laserSniperPulse = 1.2;
     tower.cooldown = LASER_SNIPER_FIRE_INTERVAL * getTowerFireIntervalScale(tower);
   }
 
@@ -5751,6 +5870,9 @@ export function createTowerSystem({
         return false;
       }
       return position.y <= (rampSurfaceY + padding) && position.y >= (obstacle.baseY - padding);
+    }
+    if (obstacle?.towerType === "laserSniper") {
+      return pointInsideLaserSniperCaps(position, obstacle, padding);
     }
 
     const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
