@@ -120,7 +120,9 @@ const MULTIPLAYER_HEALTH_SCALE_SOLO = 1;
 const MULTIPLAYER_HEALTH_SCALE_COOP = 2;
 const MULTIPLAYER_TRANSFORM_SEND_INTERVAL = 1 / 20;
 const MULTIPLAYER_PREVIEW_SEND_INTERVAL = 1 / 15;
+const MULTIPLAYER_ENEMY_STATE_SEND_INTERVAL = 0.1;
 const MULTIPLAYER_STATE_SYNC_INTERVAL = 0.75;
+const MULTIPLAYER_DAMAGE_BATCH_SEND_INTERVAL = 0.05;
 const MULTIPLAYER_MAX_WEAPON_FX_EVENTS_PER_PACKET = 8;
 const MULTIPLAYER_MAX_PENDING_WEAPON_FX_EVENTS = 48;
 const MULTIPLAYER_MESSAGE_TYPE = {
@@ -132,6 +134,7 @@ const MULTIPLAYER_MESSAGE_TYPE = {
   techChoiceCommit: "tech_choice_commit",
   weaponChoiceCommit: "weapon_choice_commit",
   enemySpawn: "enemy_spawn",
+  enemyState: "enemy_state",
   enemyDamage: "enemy_damage",
   enemyDeath: "enemy_death",
   hostEnded: "host_ended",
@@ -303,10 +306,16 @@ function summarizeMultiplayerPayloadForLog(type, payload = {}) {
   if (type === MULTIPLAYER_MESSAGE_TYPE.enemySpawn) {
     return {
       enemyId: typeof payload.enemyId === "string" ? payload.enemyId : null,
-      enemyType: typeof payload.enemyType === "string" ? payload.enemyType : null,
+      enemyType: typeof payload.type === "string" ? payload.type : null,
       health: roundMultiplayerLogNumber(payload.health, 2),
       maxHealth: roundMultiplayerLogNumber(payload.maxHealth, 2),
       position: summarizePositionForLog(payload.position),
+    };
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.enemyState) {
+    return {
+      seq: Number.isFinite(Number(payload.seq)) ? Number(payload.seq) : null,
+      enemies: Array.isArray(payload.enemies) ? payload.enemies.length : 0,
     };
   }
   if (type === MULTIPLAYER_MESSAGE_TYPE.enemyDamage) {
@@ -314,6 +323,7 @@ function summarizeMultiplayerPayloadForLog(type, payload = {}) {
       request: payload.request === true,
       enemyId: typeof payload.enemyId === "string" ? payload.enemyId : null,
       damage: roundMultiplayerLogNumber(payload.damage, 2),
+      entries: Array.isArray(payload.entries) ? payload.entries.length : 0,
       health: roundMultiplayerLogNumber(payload.health, 2),
       maxHealth: roundMultiplayerLogNumber(payload.maxHealth, 2),
     };
@@ -674,11 +684,15 @@ const pendingTowerRequestsById = new Map();
 let nextTowerRequestId = 1;
 const pendingTowerSellRequestsById = new Map();
 let nextTowerSellRequestId = 1;
+const pendingGuestDamageByEnemyId = new Map();
 let pendingAutoJoinLobbyCode = initialLobbyQueryCode;
 let localMultiplayerPeerId = "local";
 let multiplayerTransformTimer = 0;
 let multiplayerPreviewTimer = 0;
+let multiplayerEnemyStateTimer = 0;
 let multiplayerStateSyncTimer = 0;
+let multiplayerDamageBatchTimer = 0;
+let nextMultiplayerEnemyStateSeq = 1;
 let lastBroadcastHostStateSignature = "";
 let hasAppliedHostSnapshot = false;
 const multiplayerUnreliableStats = {
@@ -4489,16 +4503,99 @@ function sendReliableToHost(type, payload = {}) {
   return sent;
 }
 
+function queueGuestDamageRequest(damageRequest = {}) {
+  const enemyId = String(damageRequest?.enemyId || "").trim();
+  const damage = Number(damageRequest?.damage);
+  if (!enemyId || !Number.isFinite(damage) || damage <= 0) {
+    return false;
+  }
+  pendingGuestDamageByEnemyId.set(
+    enemyId,
+    (pendingGuestDamageByEnemyId.get(enemyId) || 0) + damage
+  );
+  return true;
+}
+
+function flushGuestDamageRequests(force = false) {
+  if (pendingGuestDamageByEnemyId.size === 0) {
+    return false;
+  }
+  if (!isMultiplayerGuest()) {
+    pendingGuestDamageByEnemyId.clear();
+    return false;
+  }
+  const entries = [];
+  for (const [enemyId, damage] of pendingGuestDamageByEnemyId.entries()) {
+    if (!enemyId || !Number.isFinite(damage) || damage <= 0) {
+      continue;
+    }
+    entries.push({ enemyId, damage });
+  }
+  if (entries.length === 0) {
+    pendingGuestDamageByEnemyId.clear();
+    return false;
+  }
+  const sent = sendReliableToHost(MULTIPLAYER_MESSAGE_TYPE.enemyDamage, {
+    request: true,
+    entries,
+  });
+  if (sent || force) {
+    pendingGuestDamageByEnemyId.clear();
+  }
+  mpLog("Flushed guest damage batch", {
+    force,
+    sent,
+    entries: entries.length,
+  });
+  return sent;
+}
+
+function buildHostEnemyStatePayload() {
+  return {
+    seq: nextMultiplayerEnemyStateSeq++,
+    enemies: enemySystem && typeof enemySystem.getActiveEnemySnapshots === "function"
+      ? enemySystem.getActiveEnemySnapshots()
+      : [],
+  };
+}
+
+function broadcastHostEnemyState() {
+  if (!multiplayerController || !isMultiplayerHost() || !isMultiplayerWithPeer()) {
+    return false;
+  }
+  const payload = buildHostEnemyStatePayload();
+  multiplayerController.broadcastUnreliable(MULTIPLAYER_MESSAGE_TYPE.enemyState, payload);
+  mpLog("Broadcast host enemy state", summarizeMultiplayerPayloadForLog(MULTIPLAYER_MESSAGE_TYPE.enemyState, payload));
+  return true;
+}
+
+function applyHostEnemyStatePayload(payload = {}) {
+  if (isMultiplayerHost() || !enemySystem || typeof enemySystem.applyNetworkEnemyStateBatch !== "function") {
+    return false;
+  }
+  const applied = enemySystem.applyNetworkEnemyStateBatch(payload);
+  if (applied) {
+    mpLog("Applied host enemy state batch", summarizeMultiplayerPayloadForLog(MULTIPLAYER_MESSAGE_TYPE.enemyState, payload));
+  }
+  return applied;
+}
+
 function applyMultiplayerAuthorityForCurrentSystems() {
   if (towerSystem && typeof towerSystem.setLocalOwnerId === "function") {
     towerSystem.setLocalOwnerId(localMultiplayerPeerId);
   }
+  const hostAuthority = shouldHostControlSimulation();
+  if (towerSystem && typeof towerSystem.setCombatEnabled === "function") {
+    towerSystem.setCombatEnabled(hostAuthority);
+  }
   if (!enemySystem) {
     return;
   }
-  const hostAuthority = shouldHostControlSimulation();
   if (typeof enemySystem.setDamageEnabled === "function") {
     enemySystem.setDamageEnabled(hostAuthority);
+  }
+  if (typeof enemySystem.setNetworkViewMode === "function") {
+    enemySystem.setNetworkViewMode(!hostAuthority);
   }
   if (typeof enemySystem.setEnemyHealthMultiplier === "function") {
     enemySystem.setEnemyHealthMultiplier(getEnemyHealthMultiplierForCurrentPlayerCount());
@@ -4635,8 +4732,15 @@ function applyHostStateSyncPayload(payload = {}) {
     }
     if (enemySystem) {
       enemySystem.clearAll();
-      for (const enemySnapshot of snapshotEnemies) {
-        enemySystem.spawnNetworkEnemy(enemySnapshot);
+      if (typeof enemySystem.applyNetworkEnemyStateBatch === "function") {
+        enemySystem.applyNetworkEnemyStateBatch({
+          seq: 0,
+          enemies: snapshotEnemies,
+        });
+      } else {
+        for (const enemySnapshot of snapshotEnemies) {
+          enemySystem.spawnNetworkEnemy(enemySnapshot);
+        }
       }
     }
     hasAppliedHostSnapshot = true;
@@ -4780,6 +4884,7 @@ function requestTowerPlacementFromLocalPlayer() {
       ownerId: localMultiplayerPeerId,
       placement: placementPayload,
     });
+    broadcastHostEnemyState();
     broadcastHostStateSync(true);
     return true;
   }
@@ -4863,6 +4968,7 @@ function requestTowerSellFromLocalPlayer(candidate) {
       sellerId: result.sellerId,
       refundAmount: result.refundAmount,
     });
+    broadcastHostEnemyState();
     broadcastHostStateSync(true);
     return true;
   }
@@ -4960,6 +5066,8 @@ function clearPendingTowerSellRequests() {
 function handleHostEndedSession() {
   mpWarn("Handling host-ended session");
   flushUnreliableMultiplayerStatsLog(true);
+  pendingGuestDamageByEnemyId.clear();
+  multiplayerDamageBatchTimer = 0;
   refundAllPendingTowerRequests();
   clearPendingTowerSellRequests();
   clearAllRemotePlayers();
@@ -5060,6 +5168,7 @@ function handleTowerCommitMessage(peer, payload = {}) {
       ownerId,
       placement: summarizeTowerPlacementForLog(placementPayload),
     });
+    broadcastHostEnemyState();
     broadcastHostStateSync(true);
     return;
   }
@@ -5159,6 +5268,7 @@ function handleTowerSellCommitMessage(peer, payload = {}) {
       sellerId: peer.id,
       refundAmount: result.refundAmount,
     });
+    broadcastHostEnemyState();
     broadcastHostStateSync(true);
     return;
   }
@@ -5245,10 +5355,15 @@ function handleMultiplayerLobbyChanged() {
   hasAppliedHostSnapshot = isMultiplayerHost();
   towerSystem?.setLocalOwnerId?.(localMultiplayerPeerId);
   applyMultiplayerAuthorityForCurrentSystems();
+  nextMultiplayerEnemyStateSeq = 1;
+  multiplayerEnemyStateTimer = 0;
+  multiplayerDamageBatchTimer = 0;
+  pendingGuestDamageByEnemyId.clear();
   updateShareOverlayFromLobbyState();
   if (isMultiplayerHost()) {
     mpLog("Host entered lobby and is broadcasting initial state sync");
     broadcastHostStateSync(true);
+    broadcastHostEnemyState();
   }
   refreshBackgroundKeepAlive();
   refreshMainLoopMode();
@@ -5257,6 +5372,10 @@ function handleMultiplayerLobbyChanged() {
 function handleMultiplayerLeftLobby() {
   mpLog("Left lobby", summarizeMultiplayerStateForLog(getMultiplayerState()));
   flushUnreliableMultiplayerStatsLog(true);
+  pendingGuestDamageByEnemyId.clear();
+  multiplayerDamageBatchTimer = 0;
+  multiplayerEnemyStateTimer = 0;
+  nextMultiplayerEnemyStateSeq = 1;
   clearAllRemotePlayers();
   clearAllRemoteWeaponEffects();
   refundAllPendingTowerRequests();
@@ -5288,6 +5407,7 @@ function handleMultiplayerPeerConnected(peer) {
   if (hostNow && peer?.id) {
     sendHostSnapshotToPeer(peer.id);
     broadcastHostStateSync(true);
+    broadcastHostEnemyState();
   }
   refreshBackgroundKeepAlive();
   refreshMainLoopMode();
@@ -5310,6 +5430,7 @@ function handleMultiplayerPeerDisconnected(peer) {
   refreshMainLoopMode();
   if (hostNow) {
     broadcastHostStateSync(true);
+    broadcastHostEnemyState();
     return;
   }
   if (isMultiplayerLobbyActive() && getMultiplayerState().peerCount <= 0) {
@@ -5435,10 +5556,18 @@ function handleMultiplayerReliableMessage(peer, type, payload) {
   if (type === MULTIPLAYER_MESSAGE_TYPE.enemyDamage) {
     if (payload?.request === true) {
       if (isMultiplayerHost()) {
-        enemySystem?.applyDamageToEnemyId?.(payload.enemyId, payload.damage);
-        mpLog("Host applied damage request", {
-          enemyId: payload?.enemyId || null,
-          damage: roundMultiplayerLogNumber(payload?.damage, 2),
+        const entries = Array.isArray(payload?.entries)
+          ? payload.entries
+          : [{ enemyId: payload?.enemyId, damage: payload?.damage }];
+        let appliedCount = 0;
+        for (const entry of entries) {
+          if (enemySystem?.applyDamageToEnemyId?.(entry?.enemyId, entry?.damage)) {
+            appliedCount += 1;
+          }
+        }
+        mpLog("Host applied damage request batch", {
+          entries: entries.length,
+          appliedCount,
         });
       }
       return;
@@ -5481,6 +5610,10 @@ function handleMultiplayerReliableMessage(peer, type, payload) {
 
 function handleMultiplayerUnreliableMessage(peer, type, payload) {
   noteUnreliableMultiplayerTraffic("rx", type);
+  if (type === MULTIPLAYER_MESSAGE_TYPE.enemyState) {
+    applyHostEnemyStatePayload(payload);
+    return;
+  }
   if (type === MULTIPLAYER_MESSAGE_TYPE.playerTransform) {
     if (peer?.id) {
       applyRemotePlayerTransform(peer.id, payload);
@@ -5636,12 +5769,7 @@ function createEnemySystemForCurrentGrid() {
         multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.enemySpawn, enemySnapshot);
       }
     },
-    onEnemyDamaged: (damageSnapshot) => {
-      if (shouldHostControlSimulation() && isMultiplayerWithPeer() && multiplayerController) {
-        mpLog("Host broadcasting enemy damage", summarizeMultiplayerPayloadForLog(MULTIPLAYER_MESSAGE_TYPE.enemyDamage, damageSnapshot));
-        multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.enemyDamage, damageSnapshot);
-      }
-    },
+    onEnemyDamaged: () => {},
     onDamageRequested: (damageRequest) => {
       if (shouldHostControlSimulation()) {
         mpLog("Host handling local damage request", {
@@ -5655,14 +5783,11 @@ function createEnemySystemForCurrentGrid() {
         enemyId: damageRequest?.enemyId || null,
         damage: roundMultiplayerLogNumber(damageRequest?.damage, 2),
       });
-      sendReliableToHost(MULTIPLAYER_MESSAGE_TYPE.enemyDamage, {
-        request: true,
-        enemyId: damageRequest?.enemyId,
-        damage: damageRequest?.damage,
-      });
+      queueGuestDamageRequest(damageRequest);
     },
     enemyHealthMultiplier: getEnemyHealthMultiplierForCurrentPlayerCount(),
     damageEnabled: shouldHostControlSimulation(),
+    networkViewMode: !shouldHostControlSimulation(),
   });
 }
 
@@ -6034,7 +6159,31 @@ function runGameFrame({ renderFrame = true } = {}) {
   } else {
     multiplayerTransformTimer = 0;
     multiplayerPreviewTimer = 0;
+    multiplayerEnemyStateTimer = 0;
+    multiplayerDamageBatchTimer = 0;
+    pendingGuestDamageByEnemyId.clear();
     pendingLocalWeaponFxEvents.length = 0;
+  }
+
+  if (isMultiplayerGuest() && pendingGuestDamageByEnemyId.size > 0) {
+    multiplayerDamageBatchTimer += rawDeltaSeconds;
+    if (multiplayerDamageBatchTimer >= MULTIPLAYER_DAMAGE_BATCH_SEND_INTERVAL) {
+      multiplayerDamageBatchTimer = 0;
+      flushGuestDamageRequests(false);
+    }
+  } else if (!isMultiplayerGuest()) {
+    multiplayerDamageBatchTimer = 0;
+    pendingGuestDamageByEnemyId.clear();
+  }
+
+  if (isMultiplayerHost() && isMultiplayerWithPeer()) {
+    multiplayerEnemyStateTimer += rawDeltaSeconds;
+    if (multiplayerEnemyStateTimer >= MULTIPLAYER_ENEMY_STATE_SEND_INTERVAL) {
+      multiplayerEnemyStateTimer = 0;
+      broadcastHostEnemyState();
+    }
+  } else {
+    multiplayerEnemyStateTimer = 0;
   }
 
   if (isMultiplayerHost() && isMultiplayerWithPeer()) {

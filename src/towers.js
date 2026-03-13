@@ -468,6 +468,7 @@ export function createTowerSystem({
   let activeLocalOwnerId = typeof localOwnerId === "string" && localOwnerId.length > 0
     ? localOwnerId
     : "local";
+  let combatEnabled = true;
   const aimPoint = new THREE.Vector2(0, 0);
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -grid.tileTopY);
   const groundHit = new THREE.Vector3();
@@ -6357,6 +6358,9 @@ export function createTowerSystem({
   function update(deltaSeconds, enemySystem) {
     updatePreviewFromCamera();
     updateTowerBuildEffects(deltaSeconds);
+    if (!combatEnabled) {
+      return;
+    }
     updateTowerCombat(deltaSeconds, enemySystem);
     updateGunProjectiles(deltaSeconds, enemySystem);
     updateGunMuzzleFlashes(deltaSeconds);
@@ -6365,35 +6369,7 @@ export function createTowerSystem({
     updateTransientTowerEffects(deltaSeconds, enemySystem);
   }
 
-  function disposeMeshResources(root, { disposeGeometry = true } = {}) {
-    if (!root) {
-      return;
-    }
-    const disposedMaterials = new Set();
-    const disposedGeometries = new Set();
-    root.traverse((child) => {
-      if (disposeGeometry && child?.geometry && typeof child.geometry.dispose === "function" && !disposedGeometries.has(child.geometry)) {
-        disposedGeometries.add(child.geometry);
-        child.geometry.dispose();
-      }
-      if (!child?.material) {
-        return;
-      }
-      const materials = Array.isArray(child.material) ? child.material : [child.material];
-      for (const material of materials) {
-        if (!material || disposedMaterials.has(material) || typeof material.dispose !== "function") {
-          continue;
-        }
-        disposedMaterials.add(material);
-        material.dispose();
-      }
-    });
-  }
-
-  function clearAllTowers() {
-    cancelPlacement();
-    clearAllPeerPreviews();
-
+  function clearCombatState() {
     for (let i = gunProjectiles.length - 1; i >= 0; i -= 1) {
       destroyGunProjectile(gunProjectiles[i]);
     }
@@ -6448,6 +6424,49 @@ export function createTowerSystem({
       effect?.mesh?.material?.dispose?.();
     }
     teslaBoltEffects.length = 0;
+  }
+
+  function setCombatEnabled(nextEnabled) {
+    const nextValue = !!nextEnabled;
+    if (combatEnabled === nextValue) {
+      return combatEnabled;
+    }
+    combatEnabled = nextValue;
+    if (!combatEnabled) {
+      clearCombatState();
+    }
+    return combatEnabled;
+  }
+
+  function disposeMeshResources(root, { disposeGeometry = true } = {}) {
+    if (!root) {
+      return;
+    }
+    const disposedMaterials = new Set();
+    const disposedGeometries = new Set();
+    root.traverse((child) => {
+      if (disposeGeometry && child?.geometry && typeof child.geometry.dispose === "function" && !disposedGeometries.has(child.geometry)) {
+        disposedGeometries.add(child.geometry);
+        child.geometry.dispose();
+      }
+      if (!child?.material) {
+        return;
+      }
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (!material || disposedMaterials.has(material) || typeof material.dispose !== "function") {
+          continue;
+        }
+        disposedMaterials.add(material);
+        material.dispose();
+      }
+    });
+  }
+
+  function clearAllTowers() {
+    cancelPlacement();
+    clearAllPeerPreviews();
+    clearCombatState();
 
     for (let i = activeBuildEffects.length - 1; i >= 0; i -= 1) {
       const tower = activeBuildEffects[i];
@@ -7004,6 +7023,7 @@ export function createTowerSystem({
     getSelectedTowerType,
     getMovementObstacles,
     setLocalOwnerId,
+    setCombatEnabled,
     getCurrentPreviewPayload,
     canPlaceTowerFromPayload,
     placeTowerFromPayload,

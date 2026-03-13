@@ -48,6 +48,8 @@ const ENEMY_DEATH_EXPLOSION_VISUAL_DURATION = Math.max(
   0.05,
   Number(ENEMY_CONFIG.deathExplosionVisualDuration) || 0.2
 );
+const NETWORK_ENEMY_POSITION_DAMPING = Math.max(1, Number(ENEMY_CONFIG.networkPositionDamping) || 18);
+const NETWORK_ENEMY_STALE_REMOVE_MS = Math.max(150, Number(ENEMY_CONFIG.networkStaleRemoveMs) || 350);
 
 function getDirectionOnPlane(from, to) {
   const direction = to.clone().sub(from);
@@ -172,6 +174,8 @@ export function createEnemySystem(scene, grid, options = {}) {
     ? Math.max(0.01, Number(options.enemyHealthMultiplier))
     : CONFIGURED_GLOBAL_ENEMY_HEALTH_MULTIPLIER;
   let damageEnabled = options?.damageEnabled !== false;
+  let networkViewMode = options?.networkViewMode === true;
+  let lastAppliedNetworkStateSeq = -1;
 
   const activeEnemies = [];
   const enemyByNetworkId = new Map();
@@ -271,6 +275,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     ? grid.cellToWorldCenter(endCell.x, endCell.z, endCellSurfaceY)
     : new THREE.Vector3();
   const endHalfSize = gridCellSize * 0.5;
+  const networkSnapDistance = gridCellSize;
 
   function isCellInsideLevel(cellX, cellZ) {
     if (typeof grid?.isCellInsideLevel === "function") {
@@ -1041,6 +1046,9 @@ export function createEnemySystem(scene, grid, options = {}) {
   }
 
   function rerouteActiveEnemies() {
+    if (networkViewMode) {
+      return;
+    }
     const startMs = getNowMs();
     pathPerfStats.rerouteCalls += 1;
     for (const enemy of activeEnemies) {
@@ -1142,6 +1150,57 @@ export function createEnemySystem(scene, grid, options = {}) {
       tempRightDirection.set(-enemy.pathForward.z, 0, enemy.pathForward.x);
       enemy.mesh.position.addScaledVector(tempRightDirection, enemy.pathOffsetLateral);
     }
+  }
+
+  function updateEnemyNetworkPosition(enemy, position, { immediate = false } = {}) {
+    if (!enemy?.mesh || !position) {
+      return false;
+    }
+    const px = Number(position.x);
+    const py = Number(position.y);
+    const pz = Number(position.z);
+    if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) {
+      return false;
+    }
+    const currentCenter = enemy.pathCenter ?? enemy.networkTargetPosition ?? tempCenterPosition.set(0, 0, 0);
+    tempCenterPosition.set(px, py, pz);
+    enemy.networkTargetPosition.copy(tempCenterPosition);
+    enemy.networkLastSeenAtMs = getNowMs();
+    const deltaSq = currentCenter.distanceToSquared(tempCenterPosition);
+    if (immediate || deltaSq >= (networkSnapDistance * networkSnapDistance)) {
+      tempForwardDirection.copy(tempCenterPosition).sub(currentCenter);
+      tempForwardDirection.y = 0;
+      setEnemyWorldPosition(enemy, tempCenterPosition, tempForwardDirection);
+      applyEnemyOrientation(enemy);
+    }
+    return true;
+  }
+
+  function updateEnemyFromNetworkSnapshot(enemy, snapshot = {}, options = {}) {
+    if (!enemy) {
+      return false;
+    }
+    const applyHealth = setEnemyHealthFromNetwork(enemy.networkId, snapshot?.health, snapshot?.maxHealth);
+    const applyPosition = updateEnemyNetworkPosition(enemy, snapshot?.position, options);
+    return applyHealth || applyPosition;
+  }
+
+  function updateEnemyNetworkView(enemy, deltaSeconds) {
+    if (!enemy?.alive || enemy.dying || !enemy.networkTargetPosition || !enemy.pathCenter) {
+      return;
+    }
+    const deltaSq = enemy.pathCenter.distanceToSquared(enemy.networkTargetPosition);
+    if (deltaSq <= ENEMY_CONFIG.directionEpsilon) {
+      setEnemyWorldPosition(enemy, enemy.pathCenter, enemy.pathForward);
+      applyEnemyOrientation(enemy);
+      return;
+    }
+    const lerpT = 1 - Math.exp(-NETWORK_ENEMY_POSITION_DAMPING * Math.max(0, deltaSeconds));
+    tempCenterPosition.copy(enemy.pathCenter).lerp(enemy.networkTargetPosition, THREE.MathUtils.clamp(lerpT, 0, 1));
+    tempForwardDirection.copy(tempCenterPosition).sub(enemy.pathCenter);
+    tempForwardDirection.y = 0;
+    setEnemyWorldPosition(enemy, tempCenterPosition, tempForwardDirection);
+    applyEnemyOrientation(enemy);
   }
 
   function applyEnemyOrientation(enemy) {
@@ -1728,6 +1787,8 @@ export function createEnemySystem(scene, grid, options = {}) {
       spawnIndex,
       deathExplosionProcessed: false,
       networkId: 0,
+      networkLastSeenAtMs: 0,
+      networkTargetPosition: travelWaypoints[0].clone(),
     };
 
     const baseHealth = Math.max(0.01, Number(enemyType.health) || 0.01);
@@ -1769,6 +1830,13 @@ export function createEnemySystem(scene, grid, options = {}) {
         setEnemyWorldPosition(enemy, tempCenterPosition, enemy.pathForward);
         applyEnemyOrientation(enemy);
       }
+    }
+    if (networkViewMode) {
+      enemy.pathOffsetLateral = 0;
+      enemy.networkTargetPosition.copy(enemy.pathCenter);
+      enemy.networkLastSeenAtMs = getNowMs();
+      setEnemyWorldPosition(enemy, enemy.pathCenter, enemy.pathForward);
+      applyEnemyOrientation(enemy);
     }
 
     updateHealthBar(enemy);
@@ -2213,7 +2281,7 @@ export function createEnemySystem(scene, grid, options = {}) {
   function update(deltaSeconds, camera) {
     runVariantBuildStep();
 
-    if (spawnEventCursor < scheduledSpawns.length) {
+    if (!networkViewMode && spawnEventCursor < scheduledSpawns.length) {
       waveElapsedTime += deltaSeconds;
       while (
         spawnEventCursor < scheduledSpawns.length
@@ -2260,9 +2328,13 @@ export function createEnemySystem(scene, grid, options = {}) {
         continue;
       }
 
-      updateEnemyTravel(enemy, deltaSeconds);
+      if (networkViewMode) {
+        updateEnemyNetworkView(enemy, deltaSeconds);
+      } else {
+        updateEnemyTravel(enemy, deltaSeconds);
+      }
 
-      if (isEnemyFullyInsideEndCube(enemy)) {
+      if (!networkViewMode && isEnemyFullyInsideEndCube(enemy)) {
         enemy.alive = false;
         scene.remove(enemy.mesh);
         removeEnemyAtIndex(i);
@@ -2273,6 +2345,23 @@ export function createEnemySystem(scene, grid, options = {}) {
 
       if (enemy.alive && camera && enemy.healthBarRoot) {
         enemy.healthBarRoot.lookAt(camera.position);
+      }
+    }
+
+    if (networkViewMode) {
+      const nowMs = getNowMs();
+      for (let i = activeEnemies.length - 1; i >= 0; i -= 1) {
+        const enemy = activeEnemies[i];
+        if (!enemy?.alive || enemy.dying) {
+          continue;
+        }
+        if ((nowMs - (enemy.networkLastSeenAtMs || 0)) < NETWORK_ENEMY_STALE_REMOVE_MS) {
+          continue;
+        }
+        if (enemy.mesh?.parent) {
+          enemy.mesh.parent.remove(enemy.mesh);
+        }
+        removeEnemyAtIndex(i);
       }
     }
 
@@ -2389,19 +2478,24 @@ export function createEnemySystem(scene, grid, options = {}) {
     return damageEnabled;
   }
 
-  function spawnNetworkEnemy(snapshot = {}) {
+  function applyNetworkEnemyStateBatch(payload = {}) {
+    const seq = Number(payload?.seq);
+    if (!Number.isFinite(seq) || seq < lastAppliedNetworkStateSeq) {
+      return false;
+    }
+    lastAppliedNetworkStateSeq = seq;
+    const snapshots = Array.isArray(payload?.enemies) ? payload.enemies : [];
+    for (const snapshot of snapshots) {
+      spawnNetworkEnemy(snapshot, { immediate: false });
+    }
+    return true;
+  }
+
+  function spawnNetworkEnemy(snapshot = {}, options = {}) {
     const existingEnemyId = parseEnemyNetworkId(snapshot?.enemyId);
     if (existingEnemyId != null && enemyByNetworkId.has(existingEnemyId)) {
       const existingEnemy = enemyByNetworkId.get(existingEnemyId);
-      if (existingEnemy && snapshot?.position && typeof snapshot.position === "object") {
-        const px = Number(snapshot.position.x);
-        const py = Number(snapshot.position.y);
-        const pz = Number(snapshot.position.z);
-        if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
-          existingEnemy.mesh.position.set(px, py, pz);
-        }
-      }
-      setEnemyHealthFromNetwork(existingEnemyId, snapshot?.health, snapshot?.maxHealth);
+      updateEnemyFromNetworkSnapshot(existingEnemy, snapshot, options);
       return true;
     }
 
@@ -2421,6 +2515,9 @@ export function createEnemySystem(scene, grid, options = {}) {
     );
     if (!enemy) {
       return false;
+    }
+    if (networkViewMode) {
+      updateEnemyFromNetworkSnapshot(enemy, snapshot, options);
     }
     return addEnemyToActiveList(enemy, { emitSpawn: false });
   }
@@ -2595,6 +2692,29 @@ export function createEnemySystem(scene, grid, options = {}) {
     waveElapsedTime = 0;
     spawnCellCursor = 0;
     nextEnemyNetworkId = 1;
+    lastAppliedNetworkStateSeq = -1;
+  }
+
+  function setNetworkViewMode(nextEnabled) {
+    networkViewMode = !!nextEnabled;
+    if (networkViewMode) {
+      scheduledSpawns = [];
+      spawnEventCursor = 0;
+      waveElapsedTime = 0;
+      spawnCellCursor = 0;
+      lastAppliedNetworkStateSeq = -1;
+      for (const enemy of activeEnemies) {
+        if (!enemy) {
+          continue;
+        }
+        enemy.pathOffsetLateral = 0;
+        enemy.networkTargetPosition.copy(enemy.pathCenter ?? enemy.mesh?.position ?? tempCenterPosition.set(0, 0, 0));
+        enemy.networkLastSeenAtMs = getNowMs();
+        setEnemyWorldPosition(enemy, enemy.networkTargetPosition, enemy.pathForward);
+        applyEnemyOrientation(enemy);
+      }
+    }
+    return networkViewMode;
   }
 
   function dispose() {
@@ -2657,6 +2777,8 @@ export function createEnemySystem(scene, grid, options = {}) {
     setEnemyHealthMultiplier,
     setDamageEnabled,
     getDamageEnabled,
+    setNetworkViewMode,
+    applyNetworkEnemyStateBatch,
     spawnNetworkEnemy,
     canBlockCells,
     canBlockCell,

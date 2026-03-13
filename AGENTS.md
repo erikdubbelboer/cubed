@@ -14,11 +14,13 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Lobby size: 2 players max. Host is authoritative.
 - Host authority includes wave progression, pause/speed, enemy spawn/damage/death outcomes.
 - Channel split:
-  - Reliable: `state_sync`, `wave_cmd`, `speed_pause_cmd`, `tower_place_commit`, `tower_sell_commit`, `tech_choice_commit`, `weapon_choice_commit`, `enemy_spawn`, `enemy_damage`, `enemy_death`, `host_ended`
-  - Unreliable: `player_transform`, `tower_preview`
+  - Reliable: `state_sync`, `wave_cmd`, `speed_pause_cmd`, `tower_place_commit`, `tower_sell_commit`, `tech_choice_commit`, `weapon_choice_commit`, `enemy_spawn`, batched guest-to-host `enemy_damage` requests, `enemy_death`, `host_ended`
+  - Unreliable: `player_transform`, `tower_preview`, `enemy_state`
 - Health scaling: solo `1x`, co-op `2x`; on join/leave, alive enemies rescale immediately while preserving health ratio.
 - `GAME_CONFIG.enemies.healthMultiplier` is a global base scalar that multiplies all enemy health before solo/co-op scaling is applied.
 - Join-in-progress snapshot must include: wave/speed/pause, placed towers (`ownerId`), and active enemies (stable `enemyId` + current state).
+- Host streams active enemy state batches to guests at roughly `10Hz`; guests drop stale `enemy_state` packets by sequence and render enemies from host-provided position/health rather than autonomous local path travel.
+- Guest enemy presentation may be approximate between `enemy_state` packets, but `enemy_death` remains the final authoritative removal event; enemies absent from host state batches are culled on the guest after a short stale timeout.
 - Leave behavior:
   - Guest leaves: host continues solo and scaling returns to `1x`.
   - Host leaves: guest session terminates (`host_ended`/disconnect).
@@ -32,6 +34,7 @@ Capture project decisions that are easy to regress but not always obvious from l
   - Tower selling is allowed for either player on any tower; host validates and commits the sell.
   - Sell refunds are credited to the player that completed the sell hold; `block` refunds use the seller's current owner-scoped block cost, even for blocks placed before that seller researched cheaper block tech.
   - Host death events spawn drops for both clients; each client collects into its own money total.
+  - Guest local player weapon hits are still trusted, but damage proposals are coalesced into short reliable batches before being sent to the host.
 - Remote player is visual-only and must not be included in movement collision obstacles.
 - Co-op tech selection is non-pausing (local modal while simulation continues).
 - Co-op hidden-tab resilience:
@@ -80,6 +83,7 @@ Capture project decisions that are easy to regress but not always obvious from l
 - `spikes` and `plasma` do not block player movement; `spikes` also do not block enemy pathing.
 - Buff towers stack additively per in-range buff source on non-buff towers only.
 - Tower build FX exists: spending and path blocking are immediate, tower attacking starts only after build FX completes.
+- In co-op, tower combat simulates on the host only; the guest tower system remains active for previews, build FX, selection, ownership visuals, and replicated placements, but must not spawn projectiles or apply damage.
 - Tower targeting/damage must ignore enemies still intersecting spawn marker cubes.
 - LOS checks include ramp wedge blocking (not only terrain cube AABBs).
 
