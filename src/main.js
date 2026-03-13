@@ -1885,6 +1885,7 @@ let fullscreenAutoRequestEnabled = true;
 let fullscreenInteractionBound = false;
 
 const FULLSCREEN_INTERACTION_EVENTS = ["pointerup", "touchend", "click"];
+const FULLSCREEN_BLOCKED_HOSTNAMES = new Set(["localhost", "127.0.0.1"]);
 
 function isRunningInIframe() {
   try {
@@ -1892,6 +1893,11 @@ function isRunningInIframe() {
   } catch {
     return true;
   }
+}
+
+function isFullscreenBlockedEnvironment() {
+  const hostname = window.location?.hostname?.toLowerCase?.() ?? "";
+  return isRunningInIframe() || FULLSCREEN_BLOCKED_HOSTNAMES.has(hostname);
 }
 
 function getFullscreenElement() {
@@ -1932,7 +1938,7 @@ function isGameFullscreen() {
 }
 
 function requestGameFullscreen() {
-  if (isRunningInIframe()) {
+  if (isFullscreenBlockedEnvironment()) {
     fullscreenAutoRequestEnabled = false;
     return;
   }
@@ -2000,8 +2006,8 @@ function handleGameFullscreenInteraction(event) {
 }
 
 function bindGameFullscreenInteraction() {
-  if (fullscreenInteractionBound || isRunningInIframe()) {
-    if (isRunningInIframe()) {
+  if (fullscreenInteractionBound || isFullscreenBlockedEnvironment()) {
+    if (isFullscreenBlockedEnvironment()) {
       fullscreenAutoRequestEnabled = false;
     }
     return;
