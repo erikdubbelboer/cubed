@@ -4418,6 +4418,61 @@ export function createTowerSystem({
     return out;
   }
 
+  function getLaserSniperCapHeight(tower) {
+    const towerHeight = Math.max(0.1, Number(tower?.height) || gridCellSize);
+    return Math.max(0.04, towerHeight * 0.2);
+  }
+
+  function segmentIntersectsLaserSniperCaps(origin, targetPosition, tower, halfSizeX, halfSizeZ, baseY) {
+    const towerHeight = Math.max(0.1, Number(tower?.height) || gridCellSize);
+    const capHeight = getLaserSniperCapHeight(tower);
+    const centerX = tower.mesh.position.x;
+    const centerZ = tower.mesh.position.z;
+    const minX = centerX - halfSizeX;
+    const maxX = centerX + halfSizeX;
+    const minZ = centerZ - halfSizeZ;
+    const maxZ = centerZ + halfSizeZ;
+    const lowerTopY = baseY + capHeight;
+    const upperBaseY = baseY + Math.max(capHeight, towerHeight - capHeight);
+
+    return segmentIntersectsAabb(origin, targetPosition, minX, baseY, minZ, maxX, lowerTopY, maxZ)
+      || segmentIntersectsAabb(origin, targetPosition, minX, upperBaseY, minZ, maxX, baseY + towerHeight, maxZ);
+  }
+
+  function pointInsideLaserSniperCaps(position, tower, padding = 0) {
+    const obstaclePos = tower?.mesh?.position ?? tower?.position;
+    const halfSizeX = Number.isFinite(Number(tower?.halfSizeX))
+      ? Number(tower.halfSizeX)
+      : Number(tower?.halfSize);
+    const halfSizeZ = Number.isFinite(Number(tower?.halfSizeZ))
+      ? Number(tower.halfSizeZ)
+      : Number(tower?.halfSize);
+    const towerHeight = Math.max(0.1, Number(tower?.height) || gridCellSize);
+    const baseY = Number(tower?.baseY ?? grid.tileTopY);
+    if (
+      !obstaclePos
+      || !Number.isFinite(halfSizeX)
+      || !Number.isFinite(halfSizeZ)
+    ) {
+      return false;
+    }
+
+    const inX = position.x >= obstaclePos.x - halfSizeX - padding
+      && position.x <= obstaclePos.x + halfSizeX + padding;
+    const inZ = position.z >= obstaclePos.z - halfSizeZ - padding
+      && position.z <= obstaclePos.z + halfSizeZ + padding;
+    if (!inX || !inZ) {
+      return false;
+    }
+
+    const capHeight = getLaserSniperCapHeight(tower);
+    const lowerTopY = baseY + capHeight;
+    const upperBaseY = baseY + Math.max(capHeight, towerHeight - capHeight);
+    const inLower = position.y >= baseY - padding && position.y <= lowerTopY + padding;
+    const inUpper = position.y >= upperBaseY - padding && position.y <= (baseY + towerHeight + padding);
+    return inLower || inUpper;
+  }
+
   function lineOfSightBlockedByOtherTower(origin, targetPosition, sourceTower) {
     for (const otherTower of towers) {
       if (otherTower === sourceTower) {
@@ -4437,8 +4492,9 @@ export function createTowerSystem({
       const minZ = otherTower.mesh.position.z - halfSizeZ;
       const maxZ = otherTower.mesh.position.z + halfSizeZ;
 
-      if (
-        segmentIntersectsAabb(
+      const blocked = otherTower.towerType === "laserSniper"
+        ? segmentIntersectsLaserSniperCaps(origin, targetPosition, otherTower, halfSizeX, halfSizeZ, baseY)
+        : segmentIntersectsAabb(
           origin,
           targetPosition,
           minX,
@@ -4447,8 +4503,8 @@ export function createTowerSystem({
           maxX,
           topY,
           maxZ
-        )
-      ) {
+        );
+      if (blocked) {
         return true;
       }
     }
@@ -5814,6 +5870,9 @@ export function createTowerSystem({
         return false;
       }
       return position.y <= (rampSurfaceY + padding) && position.y >= (obstacle.baseY - padding);
+    }
+    if (obstacle?.towerType === "laserSniper") {
+      return pointInsideLaserSniperCaps(position, obstacle, padding);
     }
 
     const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
