@@ -574,9 +574,9 @@ export function createTowerSystem({
 
   const laserBeamGeometry = new THREE.CylinderGeometry(1, 1, 1, 8, 1, true);
   const laserBeamMaterial = new THREE.MeshBasicMaterial({
-    color: LASER_SNIPER_TOWER_CONFIG.beamColor,
+    color: 0xff3a3a,
     transparent: true,
-    opacity: LASER_SNIPER_TOWER_CONFIG.beamOpacity,
+    opacity: Math.max(0.2, LASER_SNIPER_TOWER_CONFIG.beamOpacity),
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
@@ -2239,10 +2239,12 @@ export function createTowerSystem({
   }) {
     const root = new THREE.Group();
     const tileWidth = Math.max(0.2, gridCellSize);
-    const baseHeight = Math.max(0.16, gridCellSize * 0.14);
-    const towerTopY = Math.max(gridCellSize * 1.18, 2.2);
-    const beamHeight = Math.max(0.1, towerTopY - baseHeight);
-    const beamRadius = Math.max(0.05, gridCellSize * 0.06);
+    const towerHeight = Math.max(0.2, gridCellSize);
+    const baseHeight = Math.max(0.08, towerHeight * 0.2);
+    const lowerBaseCenterY = baseHeight * 0.5;
+    const upperBaseCenterY = towerHeight - (baseHeight * 0.5);
+    const beamHeight = Math.max(0.08, upperBaseCenterY - lowerBaseCenterY - baseHeight);
+    const beamRadius = Math.max(0.035, gridCellSize * 0.055);
     const coreBeamMaterial = new THREE.ShaderMaterial({
       uniforms: {
         uColor: { value: new THREE.Color(0xff1f1f) },
@@ -2268,14 +2270,13 @@ export function createTowerSystem({
 
         void main() {
           float x = abs((vUv.x * 2.0) - 1.0);
-          float tubeMask = smoothstep(1.0, 0.05, x);
           float movingBandA = 0.5 + (0.5 * sin((vUv.y * 36.0) - (uTime * 11.0)));
           float movingBandB = 0.5 + (0.5 * sin((vUv.y * 19.0) + (uTime * 7.5)));
-          float pattern = 0.55 + (movingBandA * 0.28) + (movingBandB * 0.17);
+          float pattern = 0.6 + (movingBandA * 0.25) + (movingBandB * 0.15);
           float pulseGlow = 1.0 + (uPulse * 2.25);
-          float coreHot = smoothstep(0.36, 0.0, x);
-          vec3 beamColor = mix(uColor, uHotColor, coreHot * (0.68 + (uPulse * 0.22)));
-          float alpha = clamp(uOpacity * tubeMask * pattern * pulseGlow, 0.0, 1.0);
+          float coreHot = smoothstep(0.58, 0.0, x);
+          vec3 beamColor = mix(uColor, uHotColor, coreHot * (0.7 + (uPulse * 0.2)));
+          float alpha = clamp(uOpacity * pattern * pulseGlow * (0.78 + (coreHot * 0.22)), 0.0, 1.0);
           if (alpha <= 0.001) {
             discard;
           }
@@ -2311,21 +2312,21 @@ export function createTowerSystem({
       new THREE.BoxGeometry(tileWidth, baseHeight, tileWidth),
       baseMaterial
     );
-    lowerBase.position.y = baseHeight * 0.5;
+    lowerBase.position.y = lowerBaseCenterY;
     root.add(lowerBase);
 
     const upperBase = new THREE.Mesh(
       new THREE.BoxGeometry(tileWidth, baseHeight, tileWidth),
       baseMaterial
     );
-    upperBase.position.y = towerTopY;
+    upperBase.position.y = upperBaseCenterY;
     root.add(upperBase);
 
     const centerBeam = new THREE.Mesh(
       new THREE.CylinderGeometry(beamRadius, beamRadius, beamHeight, 16, 1, true),
       coreBeamMaterial
     );
-    centerBeam.position.y = (lowerBase.position.y + upperBase.position.y) * 0.5;
+    centerBeam.position.y = towerHeight * 0.5;
     root.add(centerBeam);
 
     const dishYawNode = new THREE.Object3D();
@@ -5574,8 +5575,8 @@ export function createTowerSystem({
     }
     laserBeamEffects.push({
       mesh: beamMesh,
-      life: Math.max(0.01, LASER_SNIPER_BEAM_DURATION),
-      maxLife: Math.max(0.01, LASER_SNIPER_BEAM_DURATION),
+      life: Math.max(0.01, LASER_SNIPER_BEAM_DURATION * 1.7),
+      maxLife: Math.max(0.01, LASER_SNIPER_BEAM_DURATION * 1.7),
     });
   }
 
