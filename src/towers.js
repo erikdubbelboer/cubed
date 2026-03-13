@@ -708,9 +708,11 @@ export function createTowerSystem({
     laserSniper: {
       type: "laserSniper",
       range: LASER_SNIPER_RANGE,
-      radius: Math.max(0.1, Number(LASER_SNIPER_TOWER_CONFIG.halfSize) || 0.95),
-      halfSize: Math.max(0.1, Number(LASER_SNIPER_TOWER_CONFIG.halfSize) || 0.95),
-      height: Math.max(0.1, Number(LASER_SNIPER_TOWER_CONFIG.height) || 2.4),
+      radius: gridCubeHalfSize,
+      halfSize: gridCubeHalfSize,
+      halfSizeX: gridCubeHalfSize,
+      halfSizeZ: gridCubeHalfSize,
+      height: gridCellSize,
       usesLineOfSight: true,
     },
     mortar: {
@@ -3988,7 +3990,7 @@ export function createTowerSystem({
       buildFxState: null,
       ownerId,
       rotationY: typeof placement?.rotationY === "number" ? placement.rotationY : 0,
-      topInsetFromRadius: towerType === "block" ? 0 : undefined,
+      topInsetFromRadius: (towerType === "block" || towerType === "laserSniper") ? 0 : undefined,
       blockOpacity: towerType === "block"
         ? (
           options?.blockOpacity != null && Number.isFinite(Number(options.blockOpacity))
