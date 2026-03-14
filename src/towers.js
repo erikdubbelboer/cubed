@@ -2633,6 +2633,57 @@ export function createTowerSystem({
       return;
     }
 
+    const previewConfigByTypeModern = {
+      gun: {
+        previewColor: GUN_TOWER_CONFIG.previewTurretColor,
+        previewGlow: GUN_TOWER_CONFIG.previewGlow,
+        previewInvalidColor: GUN_TOWER_CONFIG.previewInvalidTurretColor,
+        previewInvalidGlow: GUN_TOWER_CONFIG.previewInvalidGlow,
+      },
+      aoe: AOE_TOWER_CONFIG,
+      slow: SLOW_TOWER_CONFIG,
+      laserSniper: LASER_SNIPER_TOWER_CONFIG,
+      mortar: MORTAR_TOWER_CONFIG,
+      tesla: TESLA_TOWER_CONFIG,
+      spikes: SPIKES_TOWER_CONFIG,
+      plasma: PLASMA_TOWER_CONFIG,
+      buff: BUFF_TOWER_CONFIG,
+    };
+    const modernConfig = previewConfigByTypeModern[selectedTowerType];
+    if (modernConfig && Array.isArray(preview.userData?.materials)) {
+      const colorHex = isValid
+        ? modernConfig.previewColor
+        : modernConfig.previewInvalidColor;
+      const glowHex = isValid
+        ? modernConfig.previewGlow
+        : modernConfig.previewInvalidGlow;
+      for (const material of preview.userData.materials) {
+        if (!material) {
+          continue;
+        }
+        if (material.color?.setHex) {
+          material.color.setHex(colorHex);
+        }
+        if (material.emissive?.setHex) {
+          material.emissive.setHex(glowHex);
+        }
+      }
+      const outlineMaterial = preview.userData?.footprintOutlineMaterial;
+      if (outlineMaterial?.color?.setHex) {
+        outlineMaterial.color.setHex(glowHex);
+      }
+      if (selectedTowerType === "plasma") {
+        const flameUniforms = preview.userData?.plasmaFlameUniforms;
+        if (flameUniforms?.uColorCore?.value) {
+          flameUniforms.uColorCore.value.setHex(glowHex);
+        }
+        if (flameUniforms?.uColorEdge?.value) {
+          flameUniforms.uColorEdge.value.setHex(colorHex);
+        }
+      }
+      return;
+    }
+
     if (
       selectedTowerType === "laserSniper"
       || selectedTowerType === "mortar"
@@ -2868,13 +2919,125 @@ export function createTowerSystem({
     return grid.tileTopY + (Math.max(0, Number(cellY) || 0) * gridCellSize);
   }
 
-  function resolvePlasmaPlacementFromRay(ray) {
-    if (typeof grid.raycastWallAnchor !== "function") {
+  function resolvePlasmaPlacementFromBlockWall(ray) {
+    if (!ray || !ray.origin || !ray.direction) {
       return null;
     }
-    const hit = grid.raycastWallAnchor(ray);
-    if (!hit || !hit.point || !hit.normal) {
+
+    const hitPoint = new THREE.Vector3();
+    const hitBox = new THREE.Box3();
+    let bestHit = null;
+    let bestDistanceSq = Infinity;
+
+    for (const tower of towers) {
+      if (tower?.towerType !== "block" || !tower?.mesh?.position) {
+        continue;
+      }
+
+      const halfSizeX = Number.isFinite(Number(tower?.halfSizeX))
+        ? Number(tower.halfSizeX)
+        : Number(tower?.halfSize);
+      const halfSizeZ = Number.isFinite(Number(tower?.halfSizeZ))
+        ? Number(tower.halfSizeZ)
+        : Number(tower?.halfSize);
+      const height = Math.max(0.01, Number(tower?.height) || BLOCK_TOWER_HEIGHT);
+      const baseY = Number(tower?.baseY);
+      if (!Number.isFinite(halfSizeX) || !Number.isFinite(halfSizeZ) || !Number.isFinite(baseY)) {
+        continue;
+      }
+
+      const center = tower.mesh.position;
+      hitBox.min.set(center.x - halfSizeX, baseY, center.z - halfSizeZ);
+      hitBox.max.set(center.x + halfSizeX, baseY + height, center.z + halfSizeZ);
+      const hit = ray.intersectBox(hitBox, hitPoint);
+      if (!hit) {
+        continue;
+      }
+
+      const localX = hit.x - center.x;
+      const localY = hit.y - (baseY + (height * 0.5));
+      const localZ = hit.z - center.z;
+      const dx = Math.abs(Math.abs(localX) - halfSizeX);
+      const dy = Math.abs(Math.abs(localY) - (height * 0.5));
+      const dz = Math.abs(Math.abs(localZ) - halfSizeZ);
+
+      // Side faces only (no top/bottom mounts).
+      if (dy <= dx && dy <= dz) {
+        continue;
+      }
+
+      let normalX = 0;
+      let normalZ = 0;
+      if (dx <= dz) {
+        normalX = localX >= 0 ? 1 : -1;
+      } else {
+        normalZ = localZ >= 0 ? 1 : -1;
+      }
+
+      const distanceSq = hit.distanceToSquared(ray.origin);
+      if (distanceSq >= bestDistanceSq) {
+        continue;
+      }
+
+      bestDistanceSq = distanceSq;
+      bestHit = {
+        tower,
+        normalX,
+        normalZ,
+        halfSizeX,
+        halfSizeZ,
+        height,
+      };
+    }
+
+    if (!bestHit) {
       return null;
+    }
+
+    const blockTower = bestHit.tower;
+    const center = blockTower.mesh.position;
+    const normalX = bestHit.normalX;
+    const normalZ = bestHit.normalZ;
+    const halfAlongNormal = normalX !== 0 ? bestHit.halfSizeX : bestHit.halfSizeZ;
+    const mountOffset = halfAlongNormal + (PLASMA_TOWER_CONFIG.bodyDepth * 0.5) + 0.01;
+    const mountPosition = new THREE.Vector3(
+      center.x + (normalX * mountOffset),
+      Number(blockTower.baseY) + (bestHit.height * 0.5) - (PLASMA_TOWER_CONFIG.bodyHeight * 0.5),
+      center.z + (normalZ * mountOffset)
+    );
+
+    const blockCellY = Math.max(
+      0,
+      Math.round((Number(blockTower.baseY) - Number(grid.tileTopY || 0)) / Math.max(0.01, gridCellSize))
+    );
+    const wallCellX = Number.isInteger(blockTower?.cellX)
+      ? blockTower.cellX
+      : Math.round(center.x / Math.max(0.01, gridCellSize));
+    const wallCellZ = Number.isInteger(blockTower?.cellZ)
+      ? blockTower.cellZ
+      : Math.round(center.z / Math.max(0.01, gridCellSize));
+
+    const anchorKey = `plasma:block:${blockTower.footprintKey || blockTower.mesh.uuid}|${normalX},${normalZ}`;
+    return {
+      towerType: "plasma",
+      occupiedCells: [],
+      position: mountPosition,
+      sameSurfaceHeight: true,
+      footprintKey: anchorKey,
+      anchorKey,
+      rotationY: Math.atan2(normalX, normalZ),
+      plasmaDirection: { x: normalX, z: normalZ },
+      plasmaWallCell: { x: wallCellX, y: blockCellY, z: wallCellZ },
+      plasmaTargetCell: { x: wallCellX + normalX, z: wallCellZ + normalZ },
+    };
+  }
+
+  function resolvePlasmaPlacementFromRay(ray) {
+    const hit = typeof grid.raycastWallAnchor === "function"
+      ? grid.raycastWallAnchor(ray)
+      : null;
+    if (!hit || !hit.point || !hit.normal) {
+      return resolvePlasmaPlacementFromBlockWall(ray);
     }
 
     const rawNormalX = Number(hit.normal.x) || 0;
