@@ -7,12 +7,15 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Stack: npm + Vite + native ES modules.
 - Entry flow: `index.html` -> `src/main.js`.
 - `src/main.js` is the orchestrator and state owner for wave/menu/economy and system wiring (`grid`, `player`, `enemies`, `towers`, `uiOverlay`, `multiplayer`).
+- Boot flow enters a DOM main menu (`sessionScreen` / `overlayScreen` in `main.js`); the canvas overlay is reserved for HUD, touch controls, and the tech tree.
+- Menu settings persist in `localStorage` via `webgame.masterVolume` and `webgame.difficulty`.
 
 ## Multiplayer Contracts (Co-op)
 - Transport: `@poki/netlib` via `src/multiplayer.js`.
 - Fixed game ID: `ed698dfc-1c2f-482e-a733-22339afeeb55`.
 - Lobby size: 2 players max. Host is authoritative.
 - Host authority includes wave progression, pause/speed, enemy spawn/damage/death outcomes.
+- Reliable host state sync must include `sessionScreen`, `runId`, and `difficultyId` so guests and join-in-progress peers mirror menu/run staging.
 - Channel split:
   - Reliable: `state_sync`, `wave_cmd`, `speed_pause_cmd`, `tower_place_commit`, `tower_sell_commit`, `tech_choice_commit`, `weapon_choice_commit`, `enemy_spawn`, batched guest-to-host `enemy_damage` requests, `enemy_death`, `host_ended`
   - Unreliable: `player_transform`, `tower_preview`, `enemy_state`
@@ -25,9 +28,11 @@ Capture project decisions that are easy to regress but not always obvious from l
   - Guest leaves: host continues solo and scaling returns to `1x`.
   - Host leaves: guest session terminates (`host_ended`/disconnect).
 - Share UI contract:
-  - Share controls are host-only while in a lobby.
+  - Share controls live in the DOM main menu and are host-only while in a lobby.
   - Host share controls are hidden while any peer is connected (`peerCount > 0`) and reappear when solo.
   - Host receives subtle, non-blocking join/leave toasts (`Player joined` / `Player left`).
+- If the host is waiting in the main menu and a peer joins, the host immediately starts a fresh run and both players open local weapon select.
+- Returning to the main menu in co-op is a synchronized lobby-state change; it must not tear down the active lobby/share code.
 - Ownership model:
   - Money, weapon choice, and tech progression are per-player.
   - Tower placements carry `ownerId`; owner-scoped tech applies only to that owner's towers.
@@ -37,6 +42,8 @@ Capture project decisions that are easy to regress but not always obvious from l
   - Guest local player weapon hits are still trusted, but damage proposals are coalesced into short reliable batches before being sent to the host.
 - Remote player is visual-only and must not be included in movement collision obstacles.
 - Co-op tech selection is non-pausing (local modal while simulation continues).
+- Co-op weapon selection is also local, non-pausing, and non-blocking; either player may finish first and re-enter gameplay while the other is still choosing.
+- Co-op pause/menu overlays are local-only; they block only local input and must not pause or broadcast shared simulation state.
 - Co-op hidden-tab resilience:
   - Main loop runs with `requestAnimationFrame` while visible and a `setInterval(1000/60)` fallback while hidden and connected to a peer.
   - Hidden fallback is simulation/network only (no overlay or renderer passes).
@@ -44,6 +51,7 @@ Capture project decisions that are easy to regress but not always obvious from l
 
 ## Economy + Upgrade Rules
 - Money state lives in `main.js` (`playerMoney`) and starts from `GAME_CONFIG.economy.startingCash`.
+- Difficulty presets scale only starting cash and base enemy health for now: `Easy 1.5x / 0.85x`, `Normal 1x / 1x`, `Hard 0.8x / 1.25x`. In co-op, the host-selected difficulty is authoritative.
 - Tower spending/refunds are delegated through `createTowerSystem({ getCurrentMoney, spendMoney, refundMoney })` callbacks.
 - Enemy rewards are emitted only on real death via `onEnemyDefeated(...)`; reaching path end gives no money.
 - Rewards are paid through pickup drops, not immediate cash grant:
@@ -119,12 +127,16 @@ Capture project decisions that are easy to regress but not always obvious from l
 
 ## Input, Collision, and Viewport Invariants
 - Desktop mouse input path is gated off on touch devices; touch gameplay uses pointer events.
+- Desktop pointer lock must only come from explicit UI actions. Do not auto-lock from canvas clicks.
+- Weapon selection click is the desktop pointer-lock gesture for entering a run; pause/menu screens must remain usable without pointer lock.
 - In build mode on touch, primary action confirms placement only; firing must stay suppressed until release.
 - Tower sell input is hold-based on both platforms:
   - Desktop: hold `E` while close and aiming at a valid tower.
   - Mobile: hold floating on-tower sell button.
   - Hold must remain uninterrupted on the same target (`0.90s`) and resets on release/target invalidation/state transitions.
 - `resetMobileInputState()` must clear active pointer/button/jump-hold state on pause/blur/focus transitions.
+- During active runs, `Escape`, mobile pause, blur/visibility loss, and unexpected desktop pointer-lock loss should open the pause menu. Only single-player pause menus actually pause simulation.
+- Pause-menu Resume should request pointer lock only when desktop gameplay needs it and lock is currently missing.
 - Viewport sync is centralized in `main.js` and coalesced per animation frame.
 - Touch resize resets should be orientation-bucket based to avoid minor viewport jitter resets.
 - Top-support and horizontal side-collision are separate concerns; do not conflate fixes.

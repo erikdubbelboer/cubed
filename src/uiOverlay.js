@@ -1475,6 +1475,7 @@ export function createUiOverlay({
   let pixelRatio = 1;
 
   const state = {
+    hudVisible: true,
     menuOpen: false,
     menuMode: "tech_tree",
     menuOptions: [],
@@ -1569,6 +1570,9 @@ export function createUiOverlay({
       return;
     }
 
+    if (typeof partialState.hudVisible === "boolean") {
+      state.hudVisible = partialState.hudVisible;
+    }
     if (typeof partialState.menuOpen === "boolean") {
       state.menuOpen = partialState.menuOpen;
     }
@@ -3347,18 +3351,20 @@ export function createUiOverlay({
     drawCtx.clearRect(0, 0, viewportWidth, viewportHeight);
     touchBlockedRects = [];
 
-    drawJetpackHud();
-    drawMoneyHud();
-    drawWaveHud();
-    drawExperienceHud();
-    drawBuildPhaseTimer();
-    drawFpsHud();
-    drawHudUtilityButtons();
-    drawTowerTray();
-    drawBuildModeHint();
-    drawCrosshair();
-    drawTouchControls();
-    drawSellPrompt();
+    if (state.hudVisible) {
+      drawJetpackHud();
+      drawMoneyHud();
+      drawWaveHud();
+      drawExperienceHud();
+      drawBuildPhaseTimer();
+      drawFpsHud();
+      drawHudUtilityButtons();
+      drawTowerTray();
+      drawBuildModeHint();
+      drawCrosshair();
+      drawTouchControls();
+      drawSellPrompt();
+    }
     drawMenuOverlay();
     touchControlLayout.blockedRects = touchBlockedRects.slice();
   }

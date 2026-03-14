@@ -5,6 +5,7 @@ import { createEnemySystem } from "./enemies.js";
 import { createTowerSystem } from "./towers.js";
 import { createLevelEditor } from "./levelEditor.js";
 import { createUiOverlay } from "./uiOverlay.js";
+import { createMenuUi } from "./menuUi.js";
 import { createMultiplayerController } from "./multiplayer.js";
 import { GAME_CONFIG } from "./config.js";
 import { createSoundSystem } from "./soundSystem.js";
@@ -53,6 +54,35 @@ const MENU_MODE_WEAPON_SELECT = "weapon_select";
 const TECH_TREE_MENU_TITLE = "Research Tree";
 const WEAPON_MENU_TITLE = "Choose Your Weapon";
 const WEAPON_MENU_SUBTITLE = "Pick one for this run";
+const SESSION_SCREEN_MAIN_MENU = "main_menu";
+const SESSION_SCREEN_IN_RUN = "in_run";
+const OVERLAY_SCREEN_NONE = "none";
+const OVERLAY_SCREEN_PAUSE_MENU = "pause_menu";
+const OVERLAY_SCREEN_WEAPON_SELECT = "weapon_select";
+const STORAGE_KEY_MASTER_VOLUME = "webgame.masterVolume";
+const STORAGE_KEY_DIFFICULTY = "webgame.difficulty";
+const DEFAULT_MASTER_VOLUME = 0.18;
+const DIFFICULTY_PRESETS = [
+  {
+    id: "easy",
+    label: "Easy",
+    startingCashMultiplier: 1.5,
+    enemyHealthMultiplier: 0.85,
+  },
+  {
+    id: "normal",
+    label: "Normal",
+    startingCashMultiplier: 1,
+    enemyHealthMultiplier: 1,
+  },
+  {
+    id: "hard",
+    label: "Hard",
+    startingCashMultiplier: 0.8,
+    enemyHealthMultiplier: 1.25,
+  },
+];
+const DIFFICULTY_PRESET_BY_ID = new Map(DIFFICULTY_PRESETS.map((preset) => [preset.id, preset]));
 const TECH_TREE_DRAG_THRESHOLD_PX = 8;
 const TECH_TREE_TOUCH_LONG_PRESS_MS = 420;
 const MOBILE_LOOK_SENSITIVITY_SCALE = Number.isFinite(Number(MOBILE_UI_CONFIG.lookSensitivityScale))
@@ -175,6 +205,35 @@ function mpWarn(message, details) {
   console.warn(`[Multiplayer] ${message}`, details);
 }
 
+function readStoredString(key) {
+  try {
+    const value = window.localStorage.getItem(key);
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredString(key, value) {
+  try {
+    if (value == null) {
+      window.localStorage.removeItem(key);
+      return;
+    }
+    window.localStorage.setItem(key, String(value));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function clampUnitInterval(value, fallback = 0) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return Math.max(0, Math.min(1, Number(fallback) || 0));
+  }
+  return Math.max(0, Math.min(1, numeric));
+}
+
 function roundMultiplayerLogNumber(value, digits = 2) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
@@ -242,6 +301,9 @@ function summarizeMultiplayerPayloadForLog(type, payload = {}) {
       ? payload.snapshot
       : null;
     return {
+      sessionScreen: typeof payload.sessionScreen === "string" ? payload.sessionScreen : null,
+      runId: Number.isInteger(payload.runId) ? payload.runId : null,
+      difficultyId: typeof payload.difficultyId === "string" ? payload.difficultyId : null,
       waveState: typeof payload.waveState === "string" ? payload.waveState : null,
       currentWave: Number.isFinite(Number(payload.currentWave)) ? Number(payload.currentWave) : null,
       waveDelay: roundMultiplayerLogNumber(payload.waveDelay, 2),
@@ -690,8 +752,22 @@ const pendingGuestDamageByEnemyId = new Map();
 let pendingAutoJoinLobbyCode = initialLobbyQueryCode;
 let localMultiplayerPeerId = DEFAULT_LOCAL_MULTIPLAYER_PEER_ID;
 let multiplayerAutoJoinInFlight = false;
-let sharePanelOpen = false;
 let shareButtonActionInFlight = false;
+let sessionScreen = SESSION_SCREEN_MAIN_MENU;
+let overlayScreen = OVERLAY_SCREEN_NONE;
+let runId = 0;
+let localWeaponChosenForRunId = -1;
+let pendingStartAfterWeaponChoiceRunId = null;
+let suppressPauseMenuOnNextUnlock = false;
+let lastAppliedPlayerMenuMode = null;
+let mainMenuNotice = "";
+let selectedDifficultyId = DIFFICULTY_PRESET_BY_ID.has(readStoredString(STORAGE_KEY_DIFFICULTY))
+  ? readStoredString(STORAGE_KEY_DIFFICULTY)
+  : "normal";
+let masterVolumeSetting = clampUnitInterval(
+  readStoredString(STORAGE_KEY_MASTER_VOLUME),
+  DEFAULT_MASTER_VOLUME
+);
 const pendingMultiplayerReadyWaiters = [];
 let multiplayerTransformTimer = 0;
 let multiplayerPreviewTimer = 0;
@@ -774,93 +850,11 @@ function getLobbyShareUrl(lobbyCode) {
   return url.toString();
 }
 
-function createShareOverlayUi() {
-  const root = document.createElement("div");
-  root.style.position = "fixed";
-  root.style.left = "12px";
-  root.style.top = "80px";
-  root.style.zIndex = "30";
-  root.style.display = "flex";
-  root.style.flexDirection = "column";
-  root.style.gap = "8px";
-  root.style.pointerEvents = "auto";
-
-  const hostToast = document.createElement("div");
-  hostToast.style.display = "none";
-  hostToast.style.alignSelf = "flex-start";
-  hostToast.style.padding = "6px 10px";
-  hostToast.style.borderRadius = "999px";
-  hostToast.style.border = "1px solid rgba(255,255,255,0.2)";
-  hostToast.style.background = "rgba(16,16,16,0.8)";
-  hostToast.style.color = "rgba(244,244,244,0.95)";
-  hostToast.style.font = "500 12px system-ui, sans-serif";
-  hostToast.style.pointerEvents = "none";
-  hostToast.style.opacity = "0";
-  hostToast.style.transition = `opacity ${HOST_LOBBY_TOAST_FADE_MS}ms ease`;
-  hostToast.style.maxWidth = "min(420px, calc(100vw - 24px))";
-  root.appendChild(hostToast);
-
-  const shareButton = document.createElement("button");
-  shareButton.type = "button";
-  shareButton.textContent = "Share";
-  shareButton.style.padding = "8px 12px";
-  shareButton.style.font = "600 14px system-ui, sans-serif";
-  shareButton.style.borderRadius = "8px";
-  shareButton.style.border = "1px solid rgba(0,0,0,0.25)";
-  shareButton.style.background = "rgba(255,255,255,0.92)";
-  shareButton.style.color = "#111";
-  shareButton.style.cursor = "pointer";
-  root.appendChild(shareButton);
-
-  const panel = document.createElement("div");
-  panel.style.display = "none";
-  panel.style.alignItems = "center";
-  panel.style.gap = "6px";
-  panel.style.padding = "8px";
-  panel.style.borderRadius = "8px";
-  panel.style.background = "rgba(255,255,255,0.95)";
-  panel.style.border = "1px solid rgba(0,0,0,0.25)";
-  panel.style.maxWidth = "min(640px, calc(100vw - 24px))";
-
-  const linkInput = document.createElement("input");
-  linkInput.type = "text";
-  linkInput.readOnly = true;
-  linkInput.style.flex = "1 1 auto";
-  linkInput.style.minWidth = "220px";
-  linkInput.style.padding = "6px 8px";
-  linkInput.style.borderRadius = "6px";
-  linkInput.style.border = "1px solid rgba(0,0,0,0.25)";
-  linkInput.style.font = "12px ui-monospace, SFMono-Regular, Menlo, monospace";
-  linkInput.addEventListener("focus", () => {
-    linkInput.select();
-  });
-  panel.appendChild(linkInput);
-
-  const nativeShareButton = document.createElement("button");
-  nativeShareButton.type = "button";
-  nativeShareButton.textContent = "Native Share";
-  nativeShareButton.style.padding = "6px 10px";
-  nativeShareButton.style.borderRadius = "6px";
-  nativeShareButton.style.border = "1px solid rgba(0,0,0,0.25)";
-  nativeShareButton.style.background = "rgba(0,0,0,0.06)";
-  nativeShareButton.style.color = "#111";
-  nativeShareButton.style.cursor = "pointer";
-  nativeShareButton.style.display = typeof navigator.share === "function" ? "inline-flex" : "none";
-  panel.appendChild(nativeShareButton);
-  root.appendChild(panel);
-  app.appendChild(root);
-
-  return {
-    root,
-    hostToast,
-    shareButton,
-    panel,
-    linkInput,
-    nativeShareButton,
-  };
-}
-
-const shareOverlayUi = createShareOverlayUi();
+const menuUi = createMenuUi({
+  mount: app,
+  weaponOptions: RUN_WEAPON_OPTIONS,
+  difficultyOptions: DIFFICULTY_PRESETS,
+});
 let hostLobbyToastHideTimeoutId = null;
 let hostLobbyToastFadeTimeoutId = null;
 
@@ -878,20 +872,8 @@ function rejectPendingMultiplayerReadyWaiters(error) {
   }
 }
 
-function setSharePanelOpen(isOpen, { focusInput = false } = {}) {
-  sharePanelOpen = isOpen === true;
-  shareOverlayUi.shareButton.textContent = sharePanelOpen ? "Close" : "Share";
-  const hasShareUrl = typeof shareOverlayUi.linkInput.value === "string" && shareOverlayUi.linkInput.value.length > 0;
-  shareOverlayUi.panel.style.display = sharePanelOpen && hasShareUrl ? "flex" : "none";
-  if (sharePanelOpen && hasShareUrl && focusInput) {
-    shareOverlayUi.linkInput.focus();
-    shareOverlayUi.linkInput.select();
-  }
-}
-
 function resetShareOverlayUi() {
-  shareOverlayUi.linkInput.value = "";
-  setSharePanelOpen(false);
+  menuUi.linkInput.value = "";
 }
 
 function clearHostLobbyToastTimers() {
@@ -907,7 +889,7 @@ function clearHostLobbyToastTimers() {
 
 function hideHostLobbyToast({ immediate = false } = {}) {
   clearHostLobbyToastTimers();
-  const toast = shareOverlayUi.hostToast;
+  const toast = menuUi.hostToast;
   toast.style.opacity = "0";
   if (immediate) {
     toast.style.display = "none";
@@ -925,7 +907,7 @@ function showHostLobbyToast(message) {
     return;
   }
   clearHostLobbyToastTimers();
-  const toast = shareOverlayUi.hostToast;
+  const toast = menuUi.hostToast;
   toast.textContent = text;
   toast.style.display = "inline-flex";
   toast.style.opacity = "0";
@@ -1124,6 +1106,45 @@ let lastEditorToolRotateAtMs = -Infinity;
 let multiplayerController;
 let soundSystem = null;
 
+function getDifficultyPreset(difficultyId = selectedDifficultyId) {
+  return DIFFICULTY_PRESET_BY_ID.get(difficultyId) ?? DIFFICULTY_PRESET_BY_ID.get("normal");
+}
+
+function getSelectedDifficultyPreset() {
+  return getDifficultyPreset(selectedDifficultyId);
+}
+
+function getStartingCashForSelectedDifficulty() {
+  const preset = getSelectedDifficultyPreset();
+  return Math.max(0, Math.floor(startingCashBase * preset.startingCashMultiplier));
+}
+
+function setSelectedDifficulty(nextDifficultyId, { persist = true, broadcast = true } = {}) {
+  const normalizedDifficultyId = DIFFICULTY_PRESET_BY_ID.has(nextDifficultyId)
+    ? nextDifficultyId
+    : "normal";
+  if (selectedDifficultyId === normalizedDifficultyId) {
+    return selectedDifficultyId;
+  }
+  selectedDifficultyId = normalizedDifficultyId;
+  if (persist) {
+    writeStoredString(STORAGE_KEY_DIFFICULTY, selectedDifficultyId);
+  }
+  if (broadcast && isMultiplayerHost() && isMultiplayerLobbyActive()) {
+    broadcastHostStateSync(true);
+  }
+  return selectedDifficultyId;
+}
+
+function setMasterVolumeSetting(nextVolume, { persist = true } = {}) {
+  masterVolumeSetting = clampUnitInterval(nextVolume, masterVolumeSetting);
+  soundSystem?.setMasterVolume?.(masterVolumeSetting);
+  if (persist) {
+    writeStoredString(STORAGE_KEY_MASTER_VOLUME, masterVolumeSetting);
+  }
+  return masterVolumeSetting;
+}
+
 function getMultiplayerState() {
   if (!multiplayerController || typeof multiplayerController.getState !== "function") {
     return {
@@ -1177,7 +1198,9 @@ function getEnemyHealthMultiplierForCurrentPlayerCount() {
   const multiplayerHealthScale = getConnectedPlayerCount() >= 2
     ? MULTIPLAYER_HEALTH_SCALE_COOP
     : MULTIPLAYER_HEALTH_SCALE_SOLO;
-  return CONFIGURED_GLOBAL_ENEMY_HEALTH_MULTIPLIER * multiplayerHealthScale;
+  return CONFIGURED_GLOBAL_ENEMY_HEALTH_MULTIPLIER
+    * multiplayerHealthScale
+    * getSelectedDifficultyPreset().enemyHealthMultiplier;
 }
 
 function shouldHostControlSimulation() {
@@ -1707,7 +1730,6 @@ function updateShareOverlayFromLobbyState() {
   const state = getMultiplayerState();
   const autoJoinPending = pendingAutoJoinLobbyCode != null || multiplayerAutoJoinInFlight;
   const showShareControls = !autoJoinPending && (!state.inLobby || (state.isHost && Number(state.peerCount) <= 0));
-  shareOverlayUi.shareButton.style.display = showShareControls ? "inline-flex" : "none";
   if (!state.inLobby || !state.isHost) {
     hideHostLobbyToast({ immediate: true });
   }
@@ -1722,8 +1744,7 @@ function updateShareOverlayFromLobbyState() {
     return;
   }
   const shareUrl = getLobbyShareUrl(state.lobbyCode);
-  shareOverlayUi.linkInput.value = shareUrl;
-  setSharePanelOpen(sharePanelOpen);
+  menuUi.linkInput.value = shareUrl;
   mpLog("Share overlay updated", { lobbyCode: state.lobbyCode, shareUrl });
 }
 
@@ -1764,15 +1785,16 @@ async function ensureLobbyForSharing() {
   }
 }
 
-shareOverlayUi.shareButton.addEventListener("click", async () => {
+menuUi.shareButton.addEventListener("click", async () => {
   if (shareButtonActionInFlight) {
     return;
   }
   shareButtonActionInFlight = true;
-  shareOverlayUi.shareButton.disabled = true;
+  menuUi.shareButton.disabled = true;
   try {
-    if (sharePanelOpen) {
-      mpLog("Closing share panel and shutting down multiplayer");
+    const state = getMultiplayerState();
+    if (state.inLobby && state.isHost && Number(state.peerCount) <= 0) {
+      mpLog("Stopping share lobby from main menu");
       await shutdownMultiplayerController();
       return;
     }
@@ -1783,24 +1805,24 @@ shareOverlayUi.shareButton.addEventListener("click", async () => {
       return;
     }
     updateShareOverlayFromLobbyState();
-    if (shareOverlayUi.linkInput.value) {
-      setSharePanelOpen(true, { focusInput: true });
-      mpLog("Share panel shown", { url: shareOverlayUi.linkInput.value });
+    if (menuUi.linkInput.value) {
+      menuUi.focusShareLink();
+      mpLog("Share panel shown", { url: menuUi.linkInput.value });
     }
   } finally {
     shareButtonActionInFlight = false;
-    shareOverlayUi.shareButton.disabled = false;
+    menuUi.shareButton.disabled = false;
   }
 });
 
-shareOverlayUi.nativeShareButton.addEventListener("click", async () => {
+menuUi.nativeShareButton.addEventListener("click", async () => {
   mpLog("Native share button clicked");
   const didEnsureLobby = await ensureLobbyForSharing();
   if (!didEnsureLobby || typeof navigator.share !== "function") {
     mpWarn("Native share unavailable or lobby missing");
     return;
   }
-  const url = shareOverlayUi.linkInput.value;
+  const url = menuUi.linkInput.value;
   if (!url) {
     mpWarn("Native share skipped (empty URL)");
     return;
@@ -1813,6 +1835,120 @@ shareOverlayUi.nativeShareButton.addEventListener("click", async () => {
     mpLog("Native share canceled");
   }
 });
+
+for (const [difficultyId, button] of menuUi.difficultyButtonsById.entries()) {
+  button.addEventListener("click", () => {
+    if (getMultiplayerState().inLobby && !isMultiplayerHost()) {
+      return;
+    }
+    setSelectedDifficulty(difficultyId);
+  });
+}
+
+for (const slider of [menuUi.mainVolumeSlider, menuUi.pauseVolumeSlider]) {
+  slider.addEventListener("input", (event) => {
+    const rawValue = Number(event?.target?.value);
+    setMasterVolumeSetting((Number.isFinite(rawValue) ? rawValue : 0) / 100);
+  });
+}
+
+menuUi.startButton.addEventListener("click", () => {
+  startSessionFromMainMenu();
+});
+
+menuUi.pauseResumeButton.addEventListener("click", () => {
+  closePauseMenu({ requestPointerLock: true });
+});
+
+menuUi.pauseBackButton.addEventListener("click", () => {
+  requestReturnToMainMenuFromLocalPlayer();
+});
+
+for (const [weaponType, button] of menuUi.weaponButtonsByType.entries()) {
+  button.addEventListener("click", () => {
+    applyLocalWeaponChoiceByType(weaponType);
+  });
+}
+
+function refreshMenuUi() {
+  const multiplayerState = getMultiplayerState();
+  const autoJoinPending = pendingAutoJoinLobbyCode != null || multiplayerAutoJoinInFlight;
+  const waitingForPeer = multiplayerState.inLobby
+    && multiplayerState.isHost
+    && Number(multiplayerState.peerCount) <= 0;
+  const peerConnected = multiplayerState.inLobby
+    && Number(multiplayerState.peerCount) > 0;
+  const guestInLobby = multiplayerState.inLobby && !multiplayerState.isHost;
+  let mainStatus = mainMenuNotice;
+  if (!mainStatus) {
+    if (autoJoinPending) {
+      mainStatus = "Joining co-op lobby...";
+    } else if (waitingForPeer) {
+      mainStatus = "Waiting for another player to join.";
+    } else if (guestInLobby) {
+      mainStatus = "Connected to the host.";
+    } else if (peerConnected && multiplayerState.isHost) {
+      mainStatus = "Co-op lobby ready.";
+    } else {
+      mainStatus = "Start solo or stage a co-op lobby.";
+    }
+  }
+  const startDisabled = autoJoinPending
+    || (multiplayerState.inLobby && !multiplayerState.isHost)
+    || waitingForPeer;
+  const startLabel = guestInLobby
+    ? "Waiting for Host"
+    : (peerConnected && multiplayerState.isHost ? "Start Match" : (waitingForPeer ? "Waiting for Player..." : "Start"));
+  const shareVisible = !autoJoinPending
+    && (!multiplayerState.inLobby || (multiplayerState.isHost && Number(multiplayerState.peerCount) <= 0));
+  const shareUrl = waitingForPeer && multiplayerState.lobbyCode
+    ? getLobbyShareUrl(multiplayerState.lobbyCode)
+    : "";
+  const pauseTitle = isMultiplayerWithPeer() ? "Menu" : "Paused";
+  const pauseSubtitle = isMultiplayerWithPeer()
+    ? "The match keeps running while this menu is open."
+    : "Resume when you are ready.";
+  const difficultyHint = guestInLobby
+    ? "Host controls difficulty."
+    : "Difficulty changes starting cash and enemy health.";
+
+  menuUi.setState({
+    sessionScreen,
+    overlayScreen,
+    masterVolume: masterVolumeSetting,
+    mainMenu: {
+      title: "Cube Command",
+      subtitle: "Start a run, stage co-op, or tune your settings.",
+      status: mainStatus,
+      startLabel,
+      startDisabled,
+      selectedDifficultyId,
+      difficultyDisabled: guestInLobby,
+      difficultyHint,
+      shareVisible,
+      shareLabel: waitingForPeer ? "Stop Sharing" : "Share Co-op",
+      shareDisabled: shareButtonActionInFlight,
+      shareStatus: waitingForPeer
+        ? "Share this link and wait here for your co-op partner."
+        : "Create a co-op lobby from the main menu.",
+      shareUrl,
+      nativeShareVisible: shareUrl.length > 0 && typeof navigator.share === "function",
+      nativeShareDisabled: false,
+    },
+    pauseMenu: {
+      title: pauseTitle,
+      subtitle: pauseSubtitle,
+      resumeLabel: "Resume",
+      resumeDisabled: false,
+    },
+    weaponMenu: {
+      title: WEAPON_MENU_TITLE,
+      subtitle: isTouchDevice
+        ? WEAPON_MENU_SUBTITLE
+        : "Pick one for this run. This click also locks the cursor.",
+    },
+  });
+}
 
 const clock = new THREE.Clock();
 let isPaused = false;
@@ -1890,8 +2026,20 @@ function isGameplayWaveState(state) {
   return state === "PLAYING" || state === "DELAY" || state === "BUILD";
 }
 
+function isInRunSession() {
+  return sessionScreen === SESSION_SCREEN_IN_RUN;
+}
+
+function isDomOverlayOpen() {
+  return overlayScreen !== OVERLAY_SCREEN_NONE;
+}
+
+function isLocalGameplayInputBlocked() {
+  return !isInRunSession() || isDomOverlayOpen() || waveState === "MENU" || isPaused;
+}
+
 function getIsGameplayActiveForPoki() {
-  return !isPaused && isGameplayWaveState(waveState);
+  return !isPaused && isInRunSession() && isGameplayWaveState(waveState);
 }
 
 function markPokiUserInteraction() {
@@ -2352,17 +2500,6 @@ window.addEventListener("pointerdown", handleGlobalUserInteraction, { capture: t
 window.addEventListener("click", handleGlobalUserInteraction, { capture: true, passive: true });
 initPokiSdkEarly();
 
-function getAutoPauseRequested() {
-  if (isMultiplayerWithPeer()) {
-    return false;
-  }
-  if (waveState === "MENU") {
-    return document.hidden || !document.hasFocus();
-  }
-  const isLocked = !!document.pointerLockElement;
-  return document.hidden || !document.hasFocus() || (!isTouchDevice && !isLocked);
-}
-
 function applyPausedState(nextPaused) {
   if (nextPaused === isPaused) {
     return;
@@ -2385,16 +2522,91 @@ function applyPausedState(nextPaused) {
 }
 
 function refreshPauseState() {
-  if (isMultiplayerGuest()) {
-    return;
-  }
-  applyPausedState(manualPauseRequested || getAutoPauseRequested());
+  applyPausedState(!isMultiplayerWithPeer() && manualPauseRequested);
 }
 
 function updatePauseState() {
-  // Use a small timeout to ensure Three.js has updated the internal isLocked state
-  // and browser has updated pointerLockElement.
-  setTimeout(refreshPauseState, 0);
+  refreshPauseState();
+}
+
+function isPlayerMenuModeActive() {
+  return sessionScreen === SESSION_SCREEN_MAIN_MENU
+    || overlayScreen !== OVERLAY_SCREEN_NONE
+    || waveState === "MENU";
+}
+
+function syncPlayerMenuMode() {
+  if (!player || typeof player.setMenuMode !== "function") {
+    lastAppliedPlayerMenuMode = null;
+    return;
+  }
+  const nextMenuMode = isPlayerMenuModeActive();
+  if (lastAppliedPlayerMenuMode === nextMenuMode) {
+    return;
+  }
+  player.setMenuMode(nextMenuMode);
+  lastAppliedPlayerMenuMode = nextMenuMode;
+}
+
+function clearPointerLockForMenu() {
+  if (document.pointerLockElement !== renderer.domElement) {
+    return;
+  }
+  suppressPauseMenuOnNextUnlock = true;
+  document.exitPointerLock?.();
+}
+
+function setOverlayScreen(nextOverlayScreen, { pauseSimulation = null, unlockPointer = false } = {}) {
+  overlayScreen = nextOverlayScreen;
+  if (unlockPointer) {
+    clearPointerLockForMenu();
+  }
+  if (pauseSimulation != null) {
+    manualPauseRequested = pauseSimulation === true;
+    refreshPauseState();
+  } else if (!isMultiplayerWithPeer()) {
+    manualPauseRequested = overlayScreen === OVERLAY_SCREEN_PAUSE_MENU;
+    refreshPauseState();
+  }
+  syncPlayerMenuMode();
+}
+
+function openPauseMenu() {
+  if (!isInRunSession() || waveState === "EDITOR" || waveState === "MENU") {
+    return false;
+  }
+  if (overlayScreen === OVERLAY_SCREEN_PAUSE_MENU) {
+    return true;
+  }
+  if (player) {
+    player.resetMovement();
+  }
+  resetMobileInputState();
+  resetSellHoldState({
+    clearDesktopHeld: true,
+    clearAwaitRelease: true,
+  });
+  setOverlayScreen(OVERLAY_SCREEN_PAUSE_MENU, {
+    pauseSimulation: !isMultiplayerWithPeer(),
+  });
+  return true;
+}
+
+function closePauseMenu({ requestPointerLock = false } = {}) {
+  if (overlayScreen !== OVERLAY_SCREEN_PAUSE_MENU) {
+    return false;
+  }
+  setOverlayScreen(OVERLAY_SCREEN_NONE, {
+    pauseSimulation: false,
+  });
+  if (
+    requestPointerLock
+    && !isTouchDevice
+    && document.pointerLockElement !== renderer.domElement
+  ) {
+    player?.requestPointerLock?.();
+  }
+  return true;
 }
 
 function toggleManualPause() {
@@ -2412,10 +2624,10 @@ function toggleGameSpeed() {
 // Listeners for player lock moved into initGame after player is created
 
 const DEFAULT_STARTING_CASH = 650;
-const startingCash = Number.isFinite(Number(ECONOMY_CONFIG.startingCash))
+const startingCashBase = Number.isFinite(Number(ECONOMY_CONFIG.startingCash))
   ? Math.max(0, Math.floor(Number(ECONOMY_CONFIG.startingCash)))
   : DEFAULT_STARTING_CASH;
-let playerMoney = startingCash;
+let playerMoney = getStartingCashForSelectedDifficulty();
 
 function addMoney(amount) {
   const value = Math.max(0, Math.floor(Number(amount) || 0));
@@ -2932,7 +3144,9 @@ function handleHudButtonAction(buttonId) {
 }
 
 function handleVisibilityOrFocusChange() {
-  updatePauseState();
+  if ((document.hidden || !document.hasFocus()) && isInRunSession()) {
+    openPauseMenu();
+  }
   refreshBackgroundKeepAlive();
   refreshMainLoopMode();
 }
@@ -2988,6 +3202,21 @@ const techTreeDesktopHover = {
 };
 let techTreePinnedTooltip = null;
 let forceTouchControls = false;
+
+function isEditableDomTarget(target) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  const tagName = typeof target.tagName === "string"
+    ? target.tagName.toUpperCase()
+    : "";
+  return target.isContentEditable
+    || tagName === "INPUT"
+    || tagName === "TEXTAREA"
+    || tagName === "SELECT"
+    || tagName === "BUTTON";
+}
+
 const mobileInput = {
   movePointerId: null,
   lookPointerId: null,
@@ -3127,17 +3356,11 @@ function buildSellPromptViewState(showTouchControls) {
 }
 
 function getActiveMenuOptions() {
-  return currentMenuMode === MENU_MODE_WEAPON_SELECT
-    ? currentWeaponOptions
-    : [];
+  return [];
 }
 
 function updateMenuHoverFromVirtualCursor() {
-  if (waveState !== "MENU" || currentMenuMode !== MENU_MODE_WEAPON_SELECT) {
-    hoveredUpgradeIndex = -1;
-    return;
-  }
-  hoveredUpgradeIndex = uiOverlay.hitTestMenuOption(vCursorX, vCursorY);
+  hoveredUpgradeIndex = -1;
 }
 
 function getTechNodeById(nodeId) {
@@ -3427,7 +3650,7 @@ function finishTechTreeMenuChoice() {
   currentMenuMode = MENU_MODE_TECH_TREE;
   currentMenuTitle = TECH_TREE_MENU_TITLE;
   currentMenuSubtitle = getTechTreeMenuSubtitle();
-  player.setMenuMode(false);
+  syncPlayerMenuMode();
   setPrimaryDownState(false);
   resetMobileInputState();
   clearTechTreeDragState();
@@ -3541,36 +3764,7 @@ function addExperience(amount) {
 }
 
 function showWeaponSelectionMenu() {
-  if (!player) {
-    return false;
-  }
-
-  const menuOptions = (RUN_WEAPON_OPTIONS.length > 0 ? RUN_WEAPON_OPTIONS : DEFAULT_RUN_WEAPON_OPTIONS)
-    .slice(0, 3)
-    .map((option) => ({
-      ...option,
-      apply: () => {
-        player.setWeaponType(option.type);
-      },
-    }));
-
-  if (menuOptions.length === 0) {
-    return false;
-  }
-
-  currentWeaponOptions = menuOptions;
-  currentMenuMode = MENU_MODE_WEAPON_SELECT;
-  currentMenuTitle = WEAPON_MENU_TITLE;
-  currentMenuSubtitle = WEAPON_MENU_SUBTITLE;
-  hoveredUpgradeIndex = -1;
-  clearTechTreeTooltipState();
-  setPrimaryDownState(false);
-  waveState = "MENU";
-  player.setMenuMode(true);
-  resetMobileInputState();
-  vCursorX = viewportWidth * 0.5;
-  vCursorY = viewportHeight * 0.5;
-  updateMenuHoverFromVirtualCursor();
+  openWeaponSelectionOverlay();
   return true;
 }
 
@@ -3581,11 +3775,13 @@ function finishWeaponSelectionChoice() {
   currentMenuMode = MENU_MODE_TECH_TREE;
   currentMenuTitle = TECH_TREE_MENU_TITLE;
   currentMenuSubtitle = getTechTreeMenuSubtitle();
-  player.setMenuMode(false);
   setPrimaryDownState(false);
   resetMobileInputState();
   clearTechTreeDragState();
-  startBuildPhase(WAVE_CONFIG.initialWave);
+  setOverlayScreen(OVERLAY_SCREEN_NONE, {
+    pauseSimulation: false,
+  });
+  syncPlayerMenuMode();
 }
 
 function applyWeaponChoice(index) {
@@ -3596,31 +3792,10 @@ function applyWeaponChoice(index) {
   if (!selectedOption || typeof selectedOption.apply !== "function") {
     return false;
   }
-  selectedOption.apply();
-  playSoundEffect("weaponConfirm");
-  mpLog("Applied local weapon choice", {
-    ownerId: localMultiplayerPeerId,
-    weaponType: selectedOption.type,
-    optionIndex: index,
-  });
-  if (isMultiplayerWithPeer() && multiplayerController) {
-    multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.weaponChoiceCommit, {
-      ownerId: localMultiplayerPeerId,
-      weaponType: selectedOption.type,
-    });
-    mpLog("Broadcast weapon choice commit", {
-      ownerId: localMultiplayerPeerId,
-      weaponType: selectedOption.type,
-    });
-  }
-  finishWeaponSelectionChoice();
-  return true;
+  return applyLocalWeaponChoiceByType(selectedOption.type);
 }
 
 function applyMenuChoice(index) {
-  if (currentMenuMode === MENU_MODE_WEAPON_SELECT) {
-    return applyWeaponChoice(index);
-  }
   return false;
 }
 
@@ -3638,7 +3813,7 @@ function showTechTreeMenu(options = {}) {
   hoveredUpgradeIndex = -1;
   clearTechTreeTooltipState();
   setPrimaryDownState(false);
-  player.setMenuMode(true);
+  syncPlayerMenuMode();
   playSoundEffect("techMenuOpen");
   resetMobileInputState();
   clearTechTreeDragState();
@@ -3942,8 +4117,9 @@ function updateBuildPhasePreviewTrail(trail, deltaSeconds) {
 }
 
 function syncBuildPhasePathPreviewVisibility() {
-  buildPhasePathPreviewGroup.visible = (waveState === "BUILD" || waveState === "EDITOR")
-    && buildPhasePathPreviewTrails.length > 0;
+  const showPreview = waveState === "EDITOR"
+    || (sessionScreen === SESSION_SCREEN_IN_RUN && waveState === "BUILD");
+  buildPhasePathPreviewGroup.visible = showPreview && buildPhasePathPreviewTrails.length > 0;
 }
 
 function rebuildPathPreviewFromRoutes(previewRoutes) {
@@ -4175,8 +4351,8 @@ function applyMobileGameplayInput() {
     return;
   }
 
-  const inGameplayState = isGameplayWaveState(waveState);
-  if (!inGameplayState || isPaused) {
+  const inGameplayState = isInRunSession() && isGameplayWaveState(waveState);
+  if (!inGameplayState || isPaused || overlayScreen !== OVERLAY_SCREEN_NONE) {
     player.setVirtualMove(0, 0);
     if (typeof player.setJumpHeld === "function") {
       player.setJumpHeld(false);
@@ -4217,6 +4393,8 @@ function updateSellHoldFromAim(deltaSeconds) {
     !towerSystem
     || typeof towerSystem.getSellCandidateFromAim !== "function"
     || !player
+    || !isInRunSession()
+    || overlayScreen !== OVERLAY_SCREEN_NONE
     || !isGameplayWaveState(waveState)
     || isPaused
   ) {
@@ -4656,6 +4834,10 @@ if (isTouchDevice) {
 window.addEventListener("keydown", (event) => {
   if (!player) return;
 
+  if (isEditableDomTarget(event.target)) {
+    return;
+  }
+
   if (event.code === DESKTOP_EDITOR_TOGGLE_KEY && !event.repeat && !isTouchDevice) {
     if (waveState === "EDITOR") {
       exitEditorMode();
@@ -4679,6 +4861,16 @@ window.addEventListener("keydown", (event) => {
         rebuildEditorGridFromCurrentModel();
       }
     }
+    return;
+  }
+
+  if (!isInRunSession() || overlayScreen !== OVERLAY_SCREEN_NONE) {
+    return;
+  }
+
+  if (event.code === "Escape" && !event.repeat && waveState !== "MENU") {
+    requestPauseToggleFromLocalPlayer();
+    event.preventDefault();
     return;
   }
 
@@ -4724,24 +4916,12 @@ window.addEventListener("keydown", (event) => {
   }
 
   if (waveState === "MENU") {
-    if (
-      currentMenuMode === MENU_MODE_WEAPON_SELECT
-      && (event.code === "Digit1" || event.code === "Digit2" || event.code === "Digit3")
-    ) {
-      const optionIndex = Number(event.code.slice(-1)) - 1;
-      applyMenuChoice(optionIndex);
-    }
     return;
   }
 
   if (event.code === DESKTOP_SELL_HOLD_KEY) {
     sellHoldState.desktopHeld = true;
     event.preventDefault();
-    return;
-  }
-
-  if (event.code === "Escape" && towerSystem?.isBuildMode()) {
-    towerSystem.cancelPlacement();
     return;
   }
 
@@ -4943,6 +5123,9 @@ function applyMultiplayerAuthorityForCurrentSystems() {
 
 function buildHostStatePayload({ includeSnapshot = false } = {}) {
   const payload = {
+    sessionScreen,
+    runId,
+    difficultyId: selectedDifficultyId,
     waveState,
     currentWave,
     waveDelay,
@@ -4968,6 +5151,9 @@ function buildHostStatePayload({ includeSnapshot = false } = {}) {
 
 function getHostStateSignature(payload) {
   return JSON.stringify({
+    sessionScreen: payload.sessionScreen,
+    runId: payload.runId,
+    difficultyId: payload.difficultyId,
     waveState: payload.waveState,
     currentWave: payload.currentWave,
     waveDelay: payload.waveDelay,
@@ -5019,7 +5205,34 @@ function applyHostStateSyncPayload(payload = {}) {
     return;
   }
   mpLog("Applying host state sync payload", summarizeMultiplayerPayloadForLog(MULTIPLAYER_MESSAGE_TYPE.stateSync, payload));
+  const previousSessionScreen = sessionScreen;
   const previousWaveState = waveState;
+  const previousRunId = runId;
+  const nextSessionScreen = payload.sessionScreen === SESSION_SCREEN_MAIN_MENU
+    ? SESSION_SCREEN_MAIN_MENU
+    : SESSION_SCREEN_IN_RUN;
+  const nextRunId = Number.isInteger(payload.runId) && payload.runId > 0
+    ? payload.runId
+    : runId;
+  if (typeof payload.difficultyId === "string") {
+    setSelectedDifficulty(payload.difficultyId, {
+      persist: false,
+      broadcast: false,
+    });
+  }
+  if (nextSessionScreen === SESSION_SCREEN_MAIN_MENU) {
+    runId = nextRunId;
+    enterMainMenuState();
+    return;
+  }
+  if (previousSessionScreen !== SESSION_SCREEN_IN_RUN || nextRunId !== previousRunId) {
+    beginFreshRun({
+      nextRunId,
+      startBuildImmediately: false,
+    });
+  }
+  sessionScreen = SESSION_SCREEN_IN_RUN;
+  runId = nextRunId;
   const normalizedSpeed = Number(payload.speedMultiplier);
   if (Number.isFinite(normalizedSpeed) && normalizedSpeed > 0) {
     gameSpeedMultiplier = normalizedSpeed >= GAME_SPEED_FAST ? GAME_SPEED_FAST : GAME_SPEED_NORMAL;
@@ -5029,9 +5242,6 @@ function applyHostStateSyncPayload(payload = {}) {
 
   if (typeof payload.waveState === "string") {
     waveState = payload.waveState;
-  }
-  if (player && typeof player.setMenuMode === "function") {
-    player.setMenuMode(waveState === "MENU");
   }
   if (Number.isInteger(payload.currentWave) && payload.currentWave > 0) {
     currentWave = payload.currentWave;
@@ -5085,42 +5295,21 @@ function applyHostStateSyncPayload(payload = {}) {
   }
 
   syncBuildPhasePathPreviewVisibility();
+  if (localWeaponChosenForRunId !== runId) {
+    openWeaponSelectionOverlay();
+  }
+  syncPlayerMenuMode();
   if (!payload.snapshot && previousWaveState !== "BUILD" && waveState === "BUILD") {
     playSoundEffect("buildPhaseStart");
   }
 }
 
 function requestPauseToggleFromLocalPlayer() {
-  if (!isMultiplayerLobbyActive()) {
-    mpLog("Local pause toggle (single-player)");
-    const previousPaused = isPaused;
-    toggleManualPause();
-    if (previousPaused !== isPaused) {
-      playSoundEffect("pause");
-    }
-    return true;
+  const didOpen = openPauseMenu();
+  if (didOpen) {
+    playSoundEffect("pause");
   }
-  if (isMultiplayerHost()) {
-    mpLog("Host pause toggle requested locally");
-    const previousPaused = isPaused;
-    toggleManualPause();
-    if (previousPaused !== isPaused) {
-      playSoundEffect("pause");
-    }
-    multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.speedPauseCmd, {
-      request: false,
-      action: "set_pause",
-      paused: isPaused,
-    });
-    broadcastHostStateSync(true);
-    return true;
-  }
-  const sent = sendReliableToHost(MULTIPLAYER_MESSAGE_TYPE.speedPauseCmd, {
-    request: true,
-    action: "toggle_pause",
-  });
-  mpLog("Guest pause toggle request sent", { sent });
-  return sent;
+  return didOpen;
 }
 
 function requestSpeedToggleFromLocalPlayer() {
@@ -5174,6 +5363,26 @@ function requestStartWaveFromLocalPlayer() {
     action: "start_wave",
   });
   mpLog("Guest start wave request sent", { sent });
+  return sent;
+}
+
+function requestReturnToMainMenuFromLocalPlayer() {
+  if (!isInRunSession()) {
+    return false;
+  }
+  if (!isMultiplayerLobbyActive()) {
+    enterMainMenuState();
+    return true;
+  }
+  if (isMultiplayerHost()) {
+    enterMainMenuState({ syncHostState: true });
+    return true;
+  }
+  const sent = sendReliableToHost(MULTIPLAYER_MESSAGE_TYPE.waveCmd, {
+    request: true,
+    action: "return_to_menu",
+  });
+  mpLog("Guest return-to-menu request sent", { sent });
   return sent;
 }
 
@@ -5454,12 +5663,8 @@ function handleHostEndedSession() {
   if (multiplayerController && getMultiplayerState().inLobby) {
     void multiplayerController.leaveLobby();
   }
-  applyPausedState(true);
-  waveState = "MENU";
-  currentMenuMode = MENU_MODE_WEAPON_SELECT;
-  currentMenuTitle = "Session Ended";
-  currentMenuSubtitle = "Host left the match";
-  currentWeaponOptions = [];
+  mainMenuNotice = "Host left the match";
+  enterMainMenuState();
   stopBackgroundKeepAliveOscillators();
   refreshBackgroundKeepAlive();
   refreshMainLoopMode();
@@ -5790,6 +5995,9 @@ function handleMultiplayerPeerConnected(peer) {
     applyPausedState(false);
     mpLog("Host auto-unpaused due peer join", { peerId: peer?.id || null });
   }
+  if (hostNow && sessionScreen === SESSION_SCREEN_MAIN_MENU && isMultiplayerWithPeer()) {
+    startSessionFromMainMenu();
+  }
   if (hostNow && peer?.id) {
     sendHostSnapshotToPeer(peer.id);
     broadcastHostStateSync(true);
@@ -5850,6 +6058,9 @@ function handleMultiplayerReliableMessage(peer, type, payload) {
       if (payload.action === "start_wave") {
         mpLog("Host executing requested start_wave from peer", { fromPeerId: peer?.id || null });
         startQueuedWaveNow();
+      } else if (payload.action === "return_to_menu") {
+        mpLog("Host executing requested return_to_menu from peer", { fromPeerId: peer?.id || null });
+        enterMainMenuState({ syncHostState: true });
       }
       return;
     }
@@ -6113,7 +6324,7 @@ function resetTechTreeResearchState() {
 
 function resetRunStateForNewLevel() {
   player?.resetRunState?.();
-  playerMoney = startingCash;
+  playerMoney = getStartingCashForSelectedDifficulty();
   moneyPickupRangeBonus = 0;
   currentWave = WAVE_CONFIG.initialWave;
   waveDelay = 0;
@@ -6133,8 +6344,140 @@ function resetRunStateForNewLevel() {
   clearTechTreeTooltipState();
   clearTechTreeDragState();
   setPrimaryDownState(false);
+  manualPauseRequested = false;
   gameSpeedMultiplier = GAME_SPEED_NORMAL;
   clearMoneyDrops();
+  refreshPauseState();
+}
+
+function resetGameplayWorldState() {
+  recreateGameplaySystems();
+  clearBuildPhasePathPreview();
+  syncBuildPhasePathPreviewVisibility();
+}
+
+function openWeaponSelectionOverlay() {
+  currentWeaponOptions = (RUN_WEAPON_OPTIONS.length > 0 ? RUN_WEAPON_OPTIONS : DEFAULT_RUN_WEAPON_OPTIONS)
+    .slice(0, 3)
+    .map((option) => ({
+      ...option,
+      apply: () => {
+        player?.setWeaponType?.(option.type);
+      },
+    }));
+  setOverlayScreen(OVERLAY_SCREEN_WEAPON_SELECT, {
+    pauseSimulation: false,
+    unlockPointer: !isTouchDevice,
+  });
+}
+
+function beginFreshRun({
+  nextRunId = runId + 1,
+  startBuildImmediately = false,
+} = {}) {
+  mainMenuNotice = "";
+  resetGameplayWorldState();
+  resetRunStateForNewLevel();
+  resetMobileInputState();
+  resetSellHoldState({
+    clearDesktopHeld: true,
+    clearAwaitRelease: true,
+  });
+  placeCameraAtPlayerSpawn(grid);
+  sessionScreen = SESSION_SCREEN_IN_RUN;
+  runId = Math.max(1, Math.floor(Number(nextRunId) || 1));
+  localWeaponChosenForRunId = -1;
+  pendingStartAfterWeaponChoiceRunId = (!startBuildImmediately && !isMultiplayerWithPeer())
+    ? runId
+    : null;
+  waveState = "PLAYING";
+  openWeaponSelectionOverlay();
+  syncPlayerMenuMode();
+  if (startBuildImmediately) {
+    startBuildPhase(WAVE_CONFIG.initialWave);
+  }
+}
+
+function enterMainMenuState({ syncHostState = false } = {}) {
+  resetGameplayWorldState();
+  resetRunStateForNewLevel();
+  resetMobileInputState();
+  resetSellHoldState({
+    clearDesktopHeld: true,
+    clearAwaitRelease: true,
+  });
+  placeCameraAtPlayerSpawn(grid);
+  sessionScreen = SESSION_SCREEN_MAIN_MENU;
+  pendingStartAfterWeaponChoiceRunId = null;
+  localWeaponChosenForRunId = -1;
+  waveState = "PLAYING";
+  setOverlayScreen(OVERLAY_SCREEN_NONE, {
+    pauseSimulation: false,
+    unlockPointer: !isTouchDevice,
+  });
+  syncPlayerMenuMode();
+  if (syncHostState && isMultiplayerHost() && isMultiplayerLobbyActive()) {
+    broadcastHostStateSync(true);
+  }
+}
+
+function startSessionFromMainMenu() {
+  if (sessionScreen !== SESSION_SCREEN_MAIN_MENU) {
+    return false;
+  }
+  if (pendingAutoJoinLobbyCode != null || multiplayerAutoJoinInFlight) {
+    return false;
+  }
+  if (getMultiplayerState().inLobby && !isMultiplayerHost()) {
+    return false;
+  }
+  if (isMultiplayerHost() && isMultiplayerWithPeer()) {
+    beginFreshRun({
+      startBuildImmediately: true,
+    });
+    return true;
+  }
+  if (isMultiplayerHost() && isMultiplayerLobbyActive() && !isMultiplayerWithPeer()) {
+    return false;
+  }
+  beginFreshRun({
+    startBuildImmediately: false,
+  });
+  return true;
+}
+
+function applyLocalWeaponChoiceByType(weaponType) {
+  if (
+    !player
+    || !RUN_WEAPON_TYPE_SET.has(weaponType)
+    || !isInRunSession()
+    || overlayScreen !== OVERLAY_SCREEN_WEAPON_SELECT
+  ) {
+    return false;
+  }
+  if (localWeaponChosenForRunId === runId) {
+    return false;
+  }
+  player.setWeaponType(weaponType);
+  localWeaponChosenForRunId = runId;
+  playSoundEffect("weaponConfirm");
+  if (isMultiplayerWithPeer() && multiplayerController) {
+    multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.weaponChoiceCommit, {
+      ownerId: localMultiplayerPeerId,
+      weaponType,
+    });
+  }
+  setOverlayScreen(OVERLAY_SCREEN_NONE, {
+    pauseSimulation: false,
+  });
+  if (pendingStartAfterWeaponChoiceRunId === runId) {
+    pendingStartAfterWeaponChoiceRunId = null;
+    startBuildPhase(WAVE_CONFIG.initialWave);
+  }
+  if (!isTouchDevice) {
+    player.requestPointerLock?.();
+  }
+  return true;
 }
 
 function disposeCombatSystems() {
@@ -6314,13 +6657,13 @@ function enterEditorMode() {
   }
 
   if (waveState === "MENU") {
-    player.setMenuMode(false);
     currentWeaponOptions = [];
     currentMenuMode = MENU_MODE_TECH_TREE;
     currentMenuTitle = TECH_TREE_MENU_TITLE;
     currentMenuSubtitle = getTechTreeMenuSubtitle();
     hoveredUpgradeIndex = -1;
     clearTechTreeDragState();
+    syncPlayerMenuMode();
   }
   if (towerSystem?.isBuildMode()) {
     towerSystem.cancelPlacement();
@@ -6393,7 +6736,7 @@ function exitEditorMode() {
 
   resetRunStateForNewLevel();
   placeCameraAtPlayerSpawn(grid);
-  showWeaponSelectionMenu();
+  enterMainMenuState();
   return true;
 }
 
@@ -6513,6 +6856,7 @@ function startWave(wave) {
 function runGameFrame({ renderFrame = true } = {}) {
   const rawDeltaSeconds = clock.getDelta();
   const simulationDeltaSeconds = rawDeltaSeconds * gameSpeedMultiplier;
+  syncPlayerMenuMode();
   if (rawDeltaSeconds > 0 && Number.isFinite(rawDeltaSeconds)) {
     fpsSampleTime += rawDeltaSeconds;
     fpsSampleFrames += 1;
@@ -6525,7 +6869,7 @@ function runGameFrame({ renderFrame = true } = {}) {
 
   if (!isPaused) {
     const hostControlsSimulation = shouldHostControlSimulation();
-    if (hostControlsSimulation) {
+    if (isInRunSession() && hostControlsSimulation) {
       if (waveState === "PLAYING") {
         if (enemySystem && enemySystem.isWaveClear()) {
           waveState = "DELAY";
@@ -6546,12 +6890,15 @@ function runGameFrame({ renderFrame = true } = {}) {
         levelEditor?.update?.();
         updateBuildPhasePathPreview(rawDeltaSeconds);
       }
-    } else if (waveState === "BUILD") {
+    } else if (isInRunSession() && waveState === "BUILD") {
+      updateBuildPhasePathPreview(rawDeltaSeconds);
+    } else if (!isInRunSession() && waveState === "EDITOR") {
+      levelEditor?.update?.();
       updateBuildPhasePathPreview(rawDeltaSeconds);
     }
 
     const runMenuSimulation = isCoopNonPausingTechMenuActive();
-    if (isGameplayWaveState(waveState) || runMenuSimulation) {
+    if ((isInRunSession() && isGameplayWaveState(waveState)) || runMenuSimulation) {
       applyMobileGameplayInput();
       player.update(simulationDeltaSeconds, enemySystem);
       enemySystem?.update?.(simulationDeltaSeconds, camera);
@@ -6561,7 +6908,7 @@ function runGameFrame({ renderFrame = true } = {}) {
       player.update(simulationDeltaSeconds, enemySystem);
     }
 
-    if (isGameplayWaveState(waveState) || runMenuSimulation || waveState === "EDITOR") {
+    if ((isInRunSession() && isGameplayWaveState(waveState)) || runMenuSimulation || waveState === "EDITOR") {
       updateRemoteWeaponEffects(simulationDeltaSeconds);
     }
   }
@@ -6575,7 +6922,7 @@ function runGameFrame({ renderFrame = true } = {}) {
   processPendingTowerRequestTimeouts();
   processPendingTowerSellRequestTimeouts();
 
-  if (isMultiplayerWithPeer()) {
+  if (isInRunSession() && isMultiplayerWithPeer()) {
     multiplayerTransformTimer += rawDeltaSeconds;
     if (multiplayerTransformTimer >= MULTIPLAYER_TRANSFORM_SEND_INTERVAL) {
       multiplayerTransformTimer = 0;
@@ -6672,7 +7019,12 @@ function runGameFrame({ renderFrame = true } = {}) {
         : (currentWave || 1)
     )
   );
-  const showTouchControls = isTouchDevice || forceTouchControls;
+  refreshMenuUi();
+  const hudVisible = sessionScreen === SESSION_SCREEN_IN_RUN || waveState === "EDITOR";
+  const showTouchControls = (isTouchDevice || forceTouchControls)
+    && sessionScreen === SESSION_SCREEN_IN_RUN
+    && overlayScreen === OVERLAY_SCREEN_NONE
+    && waveState !== "MENU";
   const touchPortrait = viewportIsPortrait;
   const sellPrompt = buildSellPromptViewState(showTouchControls);
   const activeMenuOptions = getActiveMenuOptions();
@@ -6687,7 +7039,10 @@ function runGameFrame({ renderFrame = true } = {}) {
     : null;
 
   uiOverlay.setState({
-    showCrosshair: waveState !== "MENU",
+    hudVisible,
+    showCrosshair: sessionScreen === SESSION_SCREEN_IN_RUN
+      && overlayScreen === OVERLAY_SCREEN_NONE
+      && waveState !== "MENU",
     menuOpen: waveState === "MENU",
     menuMode: currentMenuMode,
     menuOptions: activeMenuOptions.map((option) => ({
@@ -6713,12 +7068,12 @@ function runGameFrame({ renderFrame = true } = {}) {
     buildMode: waveState === "EDITOR" ? false : (towerSystem ? towerSystem.isBuildMode() : false),
     showKeyboardHints: !showTouchControls,
     showTouchControls,
-    showPauseButton: showTouchControls && waveState !== "BUILD" && waveState !== "EDITOR",
-    showSpeedButton: waveState !== "BUILD" && waveState !== "EDITOR",
-    buildPhaseActive: waveState === "BUILD",
+    showPauseButton: showTouchControls && sessionScreen === SESSION_SCREEN_IN_RUN && waveState !== "EDITOR",
+    showSpeedButton: sessionScreen === SESSION_SCREEN_IN_RUN && waveState !== "EDITOR" && overlayScreen === OVERLAY_SCREEN_NONE,
+    buildPhaseActive: sessionScreen === SESSION_SCREEN_IN_RUN && waveState === "BUILD",
     buildPhaseRemainingSeconds,
-    showNextWaveButton: waveState === "BUILD",
-    paused: isPaused,
+    showNextWaveButton: sessionScreen === SESSION_SCREEN_IN_RUN && waveState === "BUILD" && overlayScreen === OVERLAY_SCREEN_NONE,
+    paused: isPaused || overlayScreen === OVERLAY_SCREEN_PAUSE_MENU,
     speedMultiplier: gameSpeedMultiplier,
     fps: fpsDisplay,
     touchPortrait,
@@ -6837,8 +7192,10 @@ function initGame() {
     soundSystem = createSoundSystem({
       getAudioContext: ensureBackgroundAudioContext,
       camera,
+      masterGain: masterVolumeSetting,
     });
   }
+  setMasterVolumeSetting(masterVolumeSetting, { persist: false });
   player = createPlayer({
     scene,
     camera,
@@ -6880,15 +7237,20 @@ function initGame() {
     },
   });
   recreateGameplaySystems();
+  syncPlayerMenuMode();
 
   player.controls.addEventListener("unlock", () => {
-    updatePauseState();
-    resetMobileInputState();
-    if (towerSystem && towerSystem.isBuildMode()) {
-      towerSystem.cancelPlacement();
+    if (suppressPauseMenuOnNextUnlock) {
+      suppressPauseMenuOnNextUnlock = false;
+    } else if (isInRunSession() && overlayScreen === OVERLAY_SCREEN_NONE && waveState !== "EDITOR" && waveState !== "MENU") {
+      openPauseMenu();
     }
+    resetMobileInputState();
+    syncPlayerMenuMode();
   });
-  player.controls.addEventListener("lock", updatePauseState);
+  player.controls.addEventListener("lock", () => {
+    syncPlayerMenuMode();
+  });
   bindGameFullscreenInteraction();
 
   // Debug API to let browser scripts skip UI
@@ -6931,9 +7293,7 @@ function initGame() {
     researchNode: (nodeId) => applyTechTreeNodeChoice(nodeId),
     getResearchedNodeIds: () => Array.from(researchedNodeIds.values()),
     lockControls: () => {
-      if (player && player.controls) {
-        player.controls.lock();
-      }
+      player?.requestPointerLock?.();
     },
     setForceTouchControls: (value = true) => {
       forceTouchControls = !!value;
@@ -6951,7 +7311,7 @@ function initGame() {
   };
 
   resetRunStateForNewLevel();
-  showWeaponSelectionMenu();
+  enterMainMenuState();
   reportPokiGameLoadingFinished();
   refreshBackgroundKeepAlive();
   startMainLoop();

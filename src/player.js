@@ -785,19 +785,6 @@ export function createPlayer({
     true
   );
 
-  domElement.addEventListener("click", () => {
-    if (isTouchDevice || controls.isLocked || lockRequestPending) {
-      return;
-    }
-    if (document.pointerLockElement === controls.domElement) {
-      return;
-    }
-
-    lockRequestPending = true;
-    lockRetryPending = false;
-    requestPointerLock(0);
-  });
-
   let isMenuMode = false;
   function setMenuMode(mode) {
     isMenuMode = mode;
@@ -2306,6 +2293,18 @@ export function createPlayer({
     controls,
     update,
     jump,
+    requestPointerLock() {
+      if (isTouchDevice || controls.isLocked || lockRequestPending) {
+        return false;
+      }
+      if (document.pointerLockElement === controls.domElement) {
+        return true;
+      }
+      lockRequestPending = true;
+      lockRetryPending = false;
+      requestPointerLock(0);
+      return true;
+    },
     setPrimaryHeld,
     setWeaponType,
     getWeaponType,
