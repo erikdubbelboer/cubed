@@ -682,11 +682,11 @@ export const GAME_CONFIG = {
         // Final placed tower palette.
         placedBaseColor: 0x445d79,
         placedTurretColor: 0x81b4e3,
-        placedGlow: 0x3aa8ff,
+        placedGlow: 0xff7a38,
 
         // Projectile visual defaults.
-        projectileColor: 0x8fd4ff,
-        projectileEmissive: 0x2f94de,
+        projectileColor: 0xff8a4f,
+        projectileEmissive: 0xff5a1f,
         projectileEmissiveIntensity: 0.72,
         projectileRoughness: 0.25,
         projectileMetalness: 0.18,
@@ -766,10 +766,10 @@ export const GAME_CONFIG = {
         previewInvalidColor: 0xb67373,
         previewInvalidGlow: 0xa04343,
         placedColor: 0x5386ad,
-        placedGlow: 0x3fd8cb,
+        placedGlow: 0x58ccff,
 
         // AOE pulse visual.
-        pulseColor: 0x8cf9ff,
+        pulseColor: 0x67d8ff,
         pulseOpacity: 0.74,
         pulseSegments: 20,
       },
@@ -819,7 +819,7 @@ export const GAME_CONFIG = {
         previewInvalidColor: 0xb67373,
         previewInvalidGlow: 0xa04343,
         placedColor: 0x7ab8f0,
-        placedGlow: 0x4da5ec,
+        placedGlow: 0x9d6bff,
       },
 
       laserSniper: {
@@ -840,8 +840,8 @@ export const GAME_CONFIG = {
         previewInvalidColor: 0xb67373,
         previewInvalidGlow: 0xa04343,
         placedColor: 0x6f93d8,
-        placedGlow: 0x64b0ff,
-        beamColor: 0xaed8ff,
+        placedGlow: 0x87ff5d,
+        beamColor: 0x9cff66,
         beamOpacity: 0.88,
       },
 
@@ -867,10 +867,10 @@ export const GAME_CONFIG = {
         previewInvalidColor: 0xb67373,
         previewInvalidGlow: 0xa04343,
         placedColor: 0x8ea2bb,
-        placedGlow: 0x95c9ff,
-        projectileColor: 0xb8d2e8,
-        projectileEmissive: 0x2b4e70,
-        explosionColor: 0xffd69c,
+        placedGlow: 0x5bf5df,
+        projectileColor: 0x83f4e6,
+        projectileEmissive: 0x1f8f84,
+        explosionColor: 0x89fff5,
         explosionOpacity: 0.72,
         explosionDuration: 0.22,
       },
@@ -893,8 +893,8 @@ export const GAME_CONFIG = {
         previewInvalidColor: 0xb67373,
         previewInvalidGlow: 0xa04343,
         placedColor: 0x8c9fda,
-        placedGlow: 0x7aa8ff,
-        boltColor: 0xa8c8ff,
+        placedGlow: 0xff61c5,
+        boltColor: 0xff79d0,
         boltOpacity: 0.9,
       },
 
@@ -962,7 +962,7 @@ export const GAME_CONFIG = {
         previewInvalidColor: 0xb67373,
         previewInvalidGlow: 0xa04343,
         placedColor: 0xd7b772,
-        placedGlow: 0xffc868,
+        placedGlow: 0xffd978,
         auraColor: 0xffd17a,
       },
     },
