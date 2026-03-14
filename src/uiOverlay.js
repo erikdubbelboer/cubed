@@ -141,131 +141,103 @@ function drawTowerBaseIcon(ctx, x, y, size) {
   ctx.stroke();
 }
 
-function drawIconTowerLaser(ctx, x, y, size) {
-  drawTowerBaseIcon(ctx, x, y, size);
-}
 
-function drawIconTowerAoe(ctx, x, y, size) {
+function drawElementalCubeIcon(ctx, x, y, size, palette = {}) {
+  const frame = palette.frame || "rgba(82, 92, 106, 0.96)";
+  const frameHi = palette.frameHi || "rgba(196, 214, 236, 0.92)";
+  const glow = palette.glow || "rgba(255, 176, 80, 0.95)";
+  const core = palette.core || "rgba(255, 226, 168, 0.95)";
+
+  const left = x + size * 0.2;
+  const top = y + size * 0.2;
+  const width = size * 0.6;
+  const height = size * 0.6;
+  drawPanel(ctx, left, top, width, height, size * 0.08, frame, frameHi, Math.max(1.2, size * 0.04));
+
   const cx = x + size * 0.5;
   const cy = y + size * 0.5;
-  const r = size * 0.25;
-
-  const gradient = ctx.createRadialGradient(
-    cx - r * 0.35, cy - r * 0.35, r * 0.2,
-    cx, cy, r * 1.3
-  );
-  gradient.addColorStop(0, "rgba(186, 249, 255, 0.98)");
-  gradient.addColorStop(1, "rgba(80, 150, 201, 0.92)");
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fill();
-
-  const spikeCount = 10;
-  const spikeOuter = r * 1.78;
-  const spikeInner = r * 1.2;
-  ctx.strokeStyle = "rgba(125, 238, 255, 0.92)";
-  ctx.lineWidth = Math.max(1.2, size * 0.046);
-  for (let i = 0; i < spikeCount; i += 1) {
-    const angle = (Math.PI * 2 * i) / spikeCount;
-    const x0 = cx + Math.cos(angle) * spikeInner;
-    const y0 = cy + Math.sin(angle) * spikeInner;
-    const x1 = cx + Math.cos(angle) * spikeOuter;
-    const y1 = cy + Math.sin(angle) * spikeOuter;
+  const rays = [
+    [cx, y + size * 0.2],
+    [x + size * 0.8, cy],
+    [cx, y + size * 0.8],
+    [x + size * 0.2, cy],
+  ];
+  ctx.strokeStyle = glow;
+  ctx.lineWidth = Math.max(1.2, size * 0.042);
+  for (const [rx, ry] of rays) {
     ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x1, y1);
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(rx, ry);
     ctx.stroke();
   }
-}
 
-function drawIconTowerSlow(ctx, x, y, size) {
-  const cx = x + size * 0.5;
-  const cy = y + size * 0.5;
-  const rx = size * 0.2;
-  const ry = size * 0.29;
-
-  const gradient = ctx.createLinearGradient(cx, cy - ry, cx, cy + ry);
-  gradient.addColorStop(0, "rgba(205, 235, 255, 0.98)");
-  gradient.addColorStop(1, "rgba(106, 180, 239, 0.95)");
+  const gradient = ctx.createRadialGradient(cx, cy, size * 0.05, cx, cy, size * 0.2);
+  gradient.addColorStop(0, core);
+  gradient.addColorStop(1, glow);
   ctx.fillStyle = gradient;
   ctx.beginPath();
-  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.arc(cx, cy, size * 0.14, 0, Math.PI * 2);
   ctx.fill();
-
-  ctx.strokeStyle = "rgba(161, 235, 255, 0.95)";
-  ctx.lineWidth = Math.max(1.2, size * 0.043);
-  ctx.beginPath();
-  ctx.ellipse(cx, cy + size * 0.02, rx * 1.15, ry * 0.5, 0, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.fillStyle = "rgba(120, 210, 255, 0.35)";
-  ctx.fillRect(
-    cx - size * 0.22,
-    cy + size * 0.2,
-    size * 0.44,
-    size * 0.24
-  );
-  ctx.strokeStyle = "rgba(143, 225, 255, 0.82)";
-  ctx.lineWidth = Math.max(1, size * 0.03);
-  ctx.strokeRect(
-    cx - size * 0.22,
-    cy + size * 0.2,
-    size * 0.44,
-    size * 0.24
-  );
 }
+
+
+function drawIconTowerLaser(ctx, x, y, size) {
+  drawElementalCubeIcon(ctx, x, y, size, {
+    frame: "rgba(88, 72, 64, 0.96)",
+    frameHi: "rgba(236, 187, 123, 0.94)",
+    glow: "rgba(255, 115, 54, 0.98)",
+    core: "rgba(255, 227, 133, 0.96)",
+  });
+}
+
+
+function drawIconTowerAoe(ctx, x, y, size) {
+  drawElementalCubeIcon(ctx, x, y, size, {
+    frame: "rgba(62, 84, 106, 0.96)",
+    frameHi: "rgba(132, 207, 245, 0.94)",
+    glow: "rgba(80, 196, 255, 0.98)",
+    core: "rgba(184, 247, 255, 0.97)",
+  });
+}
+
+
+function drawIconTowerSlow(ctx, x, y, size) {
+  drawElementalCubeIcon(ctx, x, y, size, {
+    frame: "rgba(72, 61, 101, 0.96)",
+    frameHi: "rgba(191, 169, 255, 0.95)",
+    glow: "rgba(169, 120, 255, 0.98)",
+    core: "rgba(226, 214, 255, 0.97)",
+  });
+}
+
 
 function drawIconTowerLaserSniper(ctx, x, y, size) {
-  drawIconTowerLaser(ctx, x, y, size);
-  ctx.strokeStyle = "rgba(210, 236, 255, 0.95)";
-  ctx.lineWidth = Math.max(1.2, size * 0.04);
-  ctx.beginPath();
-  ctx.moveTo(x + size * 0.15, y + size * 0.2);
-  ctx.lineTo(x + size * 0.85, y + size * 0.8);
-  ctx.stroke();
-
-  ctx.fillStyle = "rgba(175, 226, 255, 0.95)";
-  ctx.beginPath();
-  ctx.arc(x + size * 0.72, y + size * 0.35, size * 0.08, 0, Math.PI * 2);
-  ctx.fill();
+  drawElementalCubeIcon(ctx, x, y, size, {
+    frame: "rgba(64, 88, 52, 0.96)",
+    frameHi: "rgba(177, 230, 136, 0.94)",
+    glow: "rgba(126, 255, 96, 0.98)",
+    core: "rgba(220, 255, 181, 0.97)",
+  });
 }
+
 
 function drawIconTowerMortar(ctx, x, y, size) {
-  drawPanel(
-    ctx,
-    x + size * 0.2,
-    y + size * 0.62,
-    size * 0.6,
-    size * 0.18,
-    size * 0.06,
-    "rgba(136, 154, 180, 0.95)",
-    "rgba(192, 209, 230, 0.95)",
-    Math.max(1.2, size * 0.04)
-  );
-  ctx.strokeStyle = "rgba(198, 224, 255, 0.95)";
-  ctx.lineWidth = Math.max(1.3, size * 0.045);
-  ctx.beginPath();
-  ctx.moveTo(x + size * 0.4, y + size * 0.64);
-  ctx.lineTo(x + size * 0.72, y + size * 0.38);
-  ctx.stroke();
-
-  ctx.fillStyle = "rgba(224, 236, 248, 0.95)";
-  ctx.beginPath();
-  ctx.arc(x + size * 0.72, y + size * 0.36, size * 0.07, 0, Math.PI * 2);
-  ctx.fill();
+  drawElementalCubeIcon(ctx, x, y, size, {
+    frame: "rgba(50, 94, 100, 0.96)",
+    frameHi: "rgba(133, 230, 220, 0.94)",
+    glow: "rgba(66, 245, 224, 0.98)",
+    core: "rgba(196, 255, 248, 0.97)",
+  });
 }
 
+
 function drawIconTowerTesla(ctx, x, y, size) {
-  drawTowerBaseIcon(ctx, x, y, size);
-  ctx.strokeStyle = "rgba(174, 200, 255, 0.98)";
-  ctx.lineWidth = Math.max(1.3, size * 0.05);
-  ctx.beginPath();
-  ctx.moveTo(x + size * 0.28, y + size * 0.2);
-  ctx.lineTo(x + size * 0.5, y + size * 0.45);
-  ctx.lineTo(x + size * 0.42, y + size * 0.45);
-  ctx.lineTo(x + size * 0.7, y + size * 0.8);
-  ctx.stroke();
+  drawElementalCubeIcon(ctx, x, y, size, {
+    frame: "rgba(88, 59, 90, 0.96)",
+    frameHi: "rgba(245, 151, 220, 0.95)",
+    glow: "rgba(255, 83, 192, 0.98)",
+    core: "rgba(255, 209, 246, 0.97)",
+  });
 }
 
 function drawIconTowerSpikes(ctx, x, y, size) {
@@ -361,16 +333,14 @@ function drawIconTowerPlasma(ctx, x, y, size) {
   );
 }
 
+
 function drawIconTowerBuff(ctx, x, y, size) {
-  drawTowerBaseIcon(ctx, x, y, size);
-  ctx.strokeStyle = "rgba(255, 214, 128, 0.98)";
-  ctx.lineWidth = Math.max(1.3, size * 0.045);
-  ctx.beginPath();
-  ctx.arc(x + size * 0.5, y + size * 0.5, size * 0.28, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(x + size * 0.5, y + size * 0.5, size * 0.16, 0, Math.PI * 2);
-  ctx.stroke();
+  drawElementalCubeIcon(ctx, x, y, size, {
+    frame: "rgba(90, 76, 54, 0.96)",
+    frameHi: "rgba(247, 212, 132, 0.95)",
+    glow: "rgba(255, 199, 87, 0.98)",
+    core: "rgba(255, 244, 194, 0.97)",
+  });
 }
 
 function drawIconTowerDamage(ctx, x, y, size) {

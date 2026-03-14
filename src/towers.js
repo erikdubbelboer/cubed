@@ -478,6 +478,8 @@ export function createTowerSystem({
   const endCell = grid.endCell ?? null;
   const gridCellSize = Math.max(0.01, Number(grid.cellSize) || 0);
   const gridCubeHalfSize = gridCellSize * 0.5;
+  const ELEMENTAL_TOWER_SIZE = gridCellSize * 0.9;
+  const ELEMENTAL_TOWER_HALF_SIZE = ELEMENTAL_TOWER_SIZE * 0.5;
   const spawnTargetBlockVolumes = spawnCells
     .map((cell) => {
       if (!Number.isInteger(cell?.x) || !Number.isInteger(cell?.z)) {
@@ -653,31 +655,18 @@ export function createTowerSystem({
   const mortarExplosions = [];
   const teslaBoltEffects = [];
   const activeBuildEffects = [];
-  const gunFootprintCellsX = Math.max(1, Math.floor(Number(GUN_TOWER_CONFIG.footprintCellsX) || 1));
-  const gunFootprintCellsZ = Math.max(1, Math.floor(Number(GUN_TOWER_CONFIG.footprintCellsZ) || 2));
-  const gunFootprintInsetWorld = THREE.MathUtils.clamp(Number(GUN_TOWER_CONFIG.footprintInset) || 0, 0, 0.45) * gridCellSize;
-  const defaultGunHalfSizeX = Math.max(0.1, (gridCellSize * gunFootprintCellsX * 0.5) - gunFootprintInsetWorld);
-  const defaultGunHalfSizeZ = Math.max(0.1, (gridCellSize * gunFootprintCellsZ * 0.5) - gunFootprintInsetWorld);
+  const gunFootprintCellsX = 1;
+  const gunFootprintCellsZ = 1;
 
   const towerSpecs = {
     gun: {
       type: "gun",
       range: GUN_RANGE,
-      radius: Math.max(
-        Number.isFinite(Number(GUN_TOWER_CONFIG.halfSizeX)) ? Number(GUN_TOWER_CONFIG.halfSizeX) : defaultGunHalfSizeX,
-        Number.isFinite(Number(GUN_TOWER_CONFIG.halfSizeZ)) ? Number(GUN_TOWER_CONFIG.halfSizeZ) : defaultGunHalfSizeZ
-      ),
-      halfSize: Math.max(
-        Number.isFinite(Number(GUN_TOWER_CONFIG.halfSizeX)) ? Number(GUN_TOWER_CONFIG.halfSizeX) : defaultGunHalfSizeX,
-        Number.isFinite(Number(GUN_TOWER_CONFIG.halfSizeZ)) ? Number(GUN_TOWER_CONFIG.halfSizeZ) : defaultGunHalfSizeZ
-      ),
-      halfSizeX: Number.isFinite(Number(GUN_TOWER_CONFIG.halfSizeX))
-        ? Number(GUN_TOWER_CONFIG.halfSizeX)
-        : defaultGunHalfSizeX,
-      halfSizeZ: Number.isFinite(Number(GUN_TOWER_CONFIG.halfSizeZ))
-        ? Number(GUN_TOWER_CONFIG.halfSizeZ)
-        : defaultGunHalfSizeZ,
-      height: GUN_TOWER_HEIGHT,
+      radius: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSize: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
       footprintCellsX: gunFootprintCellsX,
       footprintCellsZ: gunFootprintCellsZ,
       usesLineOfSight: true,
@@ -693,43 +682,51 @@ export function createTowerSystem({
     aoe: {
       type: "aoe",
       range: AOE_RANGE,
-      radius: AOE_TOWER_RADIUS,
-      halfSize: AOE_TOWER_HALF_SIZE,
-      height: AOE_TOWER_HEIGHT,
+      radius: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSize: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
       usesLineOfSight: false,
     },
     slow: {
       type: "slow",
       range: SLOW_RANGE,
-      radius: SLOW_TOWER_RADIUS,
-      halfSize: SLOW_TOWER_HALF_SIZE,
-      height: SLOW_TOWER_HEIGHT,
+      radius: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSize: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
       usesLineOfSight: true,
     },
     laserSniper: {
       type: "laserSniper",
       range: LASER_SNIPER_RANGE,
-      radius: gridCubeHalfSize,
-      halfSize: gridCubeHalfSize,
-      halfSizeX: gridCubeHalfSize,
-      halfSizeZ: gridCubeHalfSize,
-      height: gridCellSize,
+      radius: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSize: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
       usesLineOfSight: true,
     },
     mortar: {
       type: "mortar",
       range: MORTAR_RANGE,
-      radius: Math.max(0.1, Number(MORTAR_TOWER_CONFIG.halfSize) || 1.05),
-      halfSize: Math.max(0.1, Number(MORTAR_TOWER_CONFIG.halfSize) || 1.05),
-      height: Math.max(0.1, Number(MORTAR_TOWER_CONFIG.height) || 2.15),
+      radius: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSize: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
       usesLineOfSight: false,
     },
     tesla: {
       type: "tesla",
       range: TESLA_RANGE,
-      radius: Math.max(0.1, Number(TESLA_TOWER_CONFIG.halfSize) || 0.92),
-      halfSize: Math.max(0.1, Number(TESLA_TOWER_CONFIG.halfSize) || 0.92),
-      height: Math.max(0.1, Number(TESLA_TOWER_CONFIG.height) || 2.25),
+      radius: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSize: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
       usesLineOfSight: true,
     },
     spikes: {
@@ -758,9 +755,11 @@ export function createTowerSystem({
     buff: {
       type: "buff",
       range: BUFF_RANGE,
-      radius: Math.max(0.1, Number(BUFF_TOWER_CONFIG.halfSize) || 0.9),
-      halfSize: Math.max(0.1, Number(BUFF_TOWER_CONFIG.halfSize) || 0.9),
-      height: Math.max(0.1, Number(BUFF_TOWER_CONFIG.height) || 2.1),
+      radius: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSize: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
       usesLineOfSight: false,
     },
   };
@@ -1737,173 +1736,248 @@ export function createTowerSystem({
     return { material, uniforms };
   }
 
+  const ELEMENTAL_PORTAL_VERTEX_SHADER = `
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    void main() {
+      vUv = uv;
+      vNormal = normalize(normalMatrix * normal);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+
+  const ELEMENTAL_PORTAL_FRAGMENT_BASE = `
+    uniform float uTime;
+    uniform float uOpacity;
+    varying vec2 vUv;
+    varying vec3 vNormal;
+
+    #define PI 3.14159265359
+    vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+    vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+    vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+    float snoise(vec2 v) {
+      const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+      vec2 i=floor(v+dot(v,C.yy)); vec2 x0=v-i+dot(i,C.xx); vec2 i1=(x0.x>x0.y)?vec2(1.0,0.0):vec2(0.0,1.0);
+      vec4 x12=x0.xyxy+C.xxzz; x12.xy-=i1; i=mod289(i); vec3 p=permute(permute(i.y+vec3(0.0,i1.y,1.0))+i.x+vec3(0.0,i1.x,1.0));
+      vec3 m=max(0.5-vec3(dot(x0,x0),dot(x12.xy,x12.xy),dot(x12.zw,x12.zw)),0.0); m=m*m; m=m*m;
+      vec3 x=2.0*fract(p*C.www)-1.0; vec3 h=abs(x)-0.5; vec3 ox=floor(x+0.5); vec3 a0=x-ox;
+      m*=1.79284291400159-0.85373472095314*(a0*a0+h*h); vec3 g; g.x=a0.x*x0.x+h.x*x0.y; g.yz=a0.yz*x12.xz+h.yz*x12.yw; return 130.0*dot(m,g);
+    }
+    float fbm(vec2 st) { float value=0.0; float amplitude=0.5; for (int i=0;i<5;i++) { value += amplitude * snoise(st); st*=2.0; amplitude*=0.5; } return value; }
+
+    void main() {
+      float border = 0.08;
+      if (vUv.x < border || vUv.x > 1.0 - border || vUv.y < border || vUv.y > 1.0 - border) {
+        vec3 lightDir = normalize(vec3(1.0,1.5,2.0));
+        float diff = max(dot(normalize(vNormal), lightDir), 0.0);
+        vec3 frameColor = vec3(0.35,0.38,0.42);
+        gl_FragColor = vec4(frameColor * (diff * 0.7 + 0.3), uOpacity);
+        return;
+      }
+      vec2 innerUv=(vUv-border)/(1.0-2.0*border);
+      vec2 centerUv=innerUv*2.0-1.0;
+      vec3 portalColor=vec3(0.0);
+      float r=length(centerUv);
+      float a=atan(centerUv.y,centerUv.x);
+      // <<PORTAL_LOGIC_INSERT>>
+      portalColor*=smoothstep(1.3,0.7,r);
+      gl_FragColor=vec4(portalColor,uOpacity);
+    }
+  `;
+
+  const ELEMENTAL_PORTAL_LOGIC = {
+    fire: `
+      float depth = 1.0 / (r + 0.1);
+      vec2 uvo = vec2(a * 1.5, depth - uTime * 2.0);
+      float n = fbm(uvo * 1.5);
+      float flame = abs(snoise(uvo * 2.5 - vec2(0.0, uTime)));
+      float val = n - flame * 0.5;
+      portalColor = mix(vec3(0.1, 0.0, 0.0), vec3(1.0, 0.2, 0.0), smoothstep(0.0, 0.5, val));
+      portalColor = mix(portalColor, vec3(1.0, 0.9, 0.1), smoothstep(0.5, 0.9, val));
+      portalColor *= smoothstep(0.0, 0.5, r);
+    `,
+    water: `
+      float twistA = a + r * 5.0 - uTime * 1.5;
+      vec2 uvo = vec2(cos(twistA), sin(twistA)) * r;
+      float caustics = sin(uvo.x * 20.0 + uTime * 2.0) * cos(uvo.y * 20.0 - uTime * 1.5);
+      caustics = smoothstep(0.5, 1.0, caustics * 0.5 + 0.5);
+      float deepN = fbm(centerUv * 3.0 + uTime * 0.5);
+      portalColor = mix(vec3(0.0, 0.1, 0.4), vec3(0.0, 0.6, 0.9), deepN);
+      portalColor += vec3(0.6, 1.0, 1.0) * caustics * 1.2;
+      portalColor *= smoothstep(0.0, 0.6, r);
+    `,
+    space: `
+      float warpA = a - uTime * 1.5 - 0.5/r;
+      vec2 diskUv = vec2(cos(warpA), sin(warpA)) * r;
+      float diskMask = smoothstep(0.15, 0.2, r) - smoothstep(0.4, 0.9, r);
+      float diskNoise = snoise(diskUv * 15.0);
+      vec3 diskColor = vec3(0.7, 0.2, 1.0) * diskMask * (diskNoise * 0.5 + 0.5);
+      float horizonGlow = smoothstep(0.25, 0.15, r) * smoothstep(0.0, 0.15, r);
+      diskColor += vec3(1.0, 0.8, 0.4) * horizonGlow * 2.0;
+      portalColor = diskColor;
+      portalColor *= smoothstep(0.12, 0.15, r);
+    `,
+    acid: `
+      float depth = 1.0 / (r + 0.1);
+      vec2 uvo = vec2(a * 2.0, depth - uTime);
+      float n1 = snoise(uvo * 3.0);
+      float n2 = snoise(uvo * 5.0 + uTime * 0.5);
+      float cellEdges = smoothstep(0.3, 0.4, abs(n1 * n2));
+      float sludge = fbm(centerUv * 4.0 - uTime);
+      portalColor = mix(vec3(0.1, 0.3, 0.0), vec3(0.4, 0.9, 0.1), sludge);
+      portalColor = mix(portalColor, vec3(0.8, 1.0, 0.3), cellEdges);
+      portalColor *= smoothstep(0.0, 0.5, r);
+    `,
+    magic: `
+      float segments = 6.0;
+      float qa = floor(a * segments / (2.0 * PI) + 0.5) * (2.0 * PI) / segments;
+      float hexR = r * cos(a - qa);
+      float depth = 1.0 / (hexR + 0.05);
+      vec2 uvo = vec2(qa, depth + uTime * 2.0);
+      float glassNoise = fbm(uvo * 4.0);
+      float edgeDist = abs(a - qa);
+      float lines = smoothstep(0.15, 0.0, edgeDist) * smoothstep(0.9, 1.0, sin(depth * 15.0));
+      portalColor = mix(vec3(0.0, 0.1, 0.2), vec3(0.0, 0.8, 0.7), glassNoise);
+      portalColor += vec3(0.5, 1.0, 1.0) * lines;
+      portalColor *= smoothstep(0.0, 0.4, hexR);
+    `,
+    cyber: `
+      float maxXY = max(abs(centerUv.x), abs(centerUv.y));
+      float sqDepth = 1.0 / (maxXY + 0.01);
+      vec2 uvo = vec2(a * 4.0, sqDepth - uTime * 3.0);
+      float gridX = step(0.9, fract(uvo.x * 2.0));
+      float gridY = step(0.9, fract(uvo.y * 2.0));
+      float grid = clamp(gridX + gridY, 0.0, 1.0);
+      vec3 neonPink = vec3(1.0, 0.0, 0.6);
+      vec3 neonCyan = vec3(0.0, 1.0, 1.0);
+      float data = step(0.8, snoise(vec2(floor(uvo.x * 2.0), uTime * 0.5)));
+      portalColor = neonPink * grid * 0.5;
+      portalColor = mix(portalColor, neonCyan, data * grid);
+      portalColor *= smoothstep(0.0, 0.7, maxXY);
+    `,
+  };
+
+  const TOWER_ELEMENT_THEME_BY_TYPE = {
+    gun: "fire",
+    aoe: "water",
+    slow: "space",
+    laserSniper: "acid",
+    mortar: "magic",
+    tesla: "cyber",
+    buff: "water",
+  };
+
+  function createElementalPortalMaterial(effectKey, opacity = 1) {
+    const logic = ELEMENTAL_PORTAL_LOGIC[effectKey] || ELEMENTAL_PORTAL_LOGIC.fire;
+    const uniforms = {
+      uTime: { value: 0 },
+      uOpacity: { value: Math.max(0.05, Math.min(1, opacity)) },
+    };
+    const material = new THREE.ShaderMaterial({
+      vertexShader: ELEMENTAL_PORTAL_VERTEX_SHADER,
+      fragmentShader: ELEMENTAL_PORTAL_FRAGMENT_BASE.replace('// <<PORTAL_LOGIC_INSERT>>', logic),
+      uniforms,
+      transparent: true,
+    });
+    material.toneMapped = false;
+    material.userData = {
+      ...(material.userData || {}),
+      portalUniforms: uniforms,
+    };
+    return material;
+  }
+
+  function createElementalCubeTowerMesh({
+    color,
+    glow,
+    opacity = 1,
+    transparent = false,
+    towerType = "gun",
+  }) {
+    const root = new THREE.Group();
+    const baseMaterial = new THREE.MeshStandardMaterial({
+      color,
+      emissive: glow,
+      emissiveIntensity: 0.28,
+      roughness: 0.5,
+      metalness: 0.25,
+      opacity,
+      transparent,
+    });
+
+    const theme = TOWER_ELEMENT_THEME_BY_TYPE[towerType] || "fire";
+    const sideMaterials = [
+      createElementalPortalMaterial(theme, opacity),
+      createElementalPortalMaterial(theme, opacity),
+      createElementalPortalMaterial(theme, opacity),
+      baseMaterial,
+      createElementalPortalMaterial(theme, opacity),
+      createElementalPortalMaterial(theme, opacity),
+    ];
+    const cube = new THREE.Mesh(new THREE.BoxGeometry(ELEMENTAL_TOWER_SIZE, ELEMENTAL_TOWER_SIZE, ELEMENTAL_TOWER_SIZE), sideMaterials);
+    cube.position.y = ELEMENTAL_TOWER_HALF_SIZE;
+    root.add(cube);
+
+    const outline = createFootprintOutlineMesh({
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
+      inset: 0.05,
+      color: glow,
+      opacity: 0.42,
+    });
+    root.add(outline);
+
+    const sideEmitters = {
+      posX: new THREE.Object3D(),
+      negX: new THREE.Object3D(),
+      posY: new THREE.Object3D(),
+      posZ: new THREE.Object3D(),
+      negZ: new THREE.Object3D(),
+    };
+    sideEmitters.posX.position.set(ELEMENTAL_TOWER_HALF_SIZE, ELEMENTAL_TOWER_HALF_SIZE, 0);
+    sideEmitters.negX.position.set(-ELEMENTAL_TOWER_HALF_SIZE, ELEMENTAL_TOWER_HALF_SIZE, 0);
+    sideEmitters.posY.position.set(0, ELEMENTAL_TOWER_SIZE, 0);
+    sideEmitters.posZ.position.set(0, ELEMENTAL_TOWER_HALF_SIZE, ELEMENTAL_TOWER_HALF_SIZE);
+    sideEmitters.negZ.position.set(0, ELEMENTAL_TOWER_HALF_SIZE, -ELEMENTAL_TOWER_HALF_SIZE);
+    Object.values(sideEmitters).forEach((node) => root.add(node));
+
+    const animatedPortalUniforms = [];
+    for (const mat of sideMaterials) {
+      const uniforms = mat?.userData?.portalUniforms;
+      if (uniforms) {
+        animatedPortalUniforms.push(uniforms);
+      }
+    }
+
+    root.userData.materials = [baseMaterial, ...sideMaterials.filter((mat) => mat !== baseMaterial)];
+    root.userData.footprintOutlineMaterial = outline.userData.footprintOutlineMaterial;
+    root.userData.sideEmitters = sideEmitters;
+    root.userData.elementalPortalUniforms = animatedPortalUniforms;
+    root.userData.gunTurretYawNode = new THREE.Object3D();
+    root.userData.gunTurretPitchNode = new THREE.Object3D();
+    root.userData.laserSniperYawNode = new THREE.Object3D();
+    root.userData.mortarYawNode = new THREE.Object3D();
+    root.userData.mortarBarrelPivot = new THREE.Object3D();
+    applyShadowSettings(root);
+    return root;
+  }
+
   function createGunTowerMesh({
     baseColor,
     turretColor,
     glowColor,
     opacity = 1,
     transparent = false,
-    footprintOutlineColor = glowColor,
   }) {
-    const root = new THREE.Group();
-    const footprintCellsX = Math.max(1, Math.floor(Number(GUN_TOWER_CONFIG.footprintCellsX) || 1));
-    const footprintCellsZ = Math.max(1, Math.floor(Number(GUN_TOWER_CONFIG.footprintCellsZ) || 2));
-    const footprintInset = THREE.MathUtils.clamp(Number(GUN_TOWER_CONFIG.footprintInset) || 0, 0, 0.45) * gridCellSize;
-    const baseHalfSizeX = Math.max(0.1, (gridCellSize * footprintCellsX * 0.5) - footprintInset);
-    const baseHalfSizeZ = Math.max(0.1, (gridCellSize * footprintCellsZ * 0.5) - footprintInset);
-
-    const baseMaterial = new THREE.MeshStandardMaterial({
-      color: baseColor,
-      roughness: GUN_TOWER_CONFIG.baseRoughness,
-      metalness: GUN_TOWER_CONFIG.baseMetalness,
+    return createElementalCubeTowerMesh({
+      color: turretColor ?? baseColor,
+      glow: glowColor,
       opacity,
       transparent,
-      emissive: GUN_TOWER_CONFIG.baseEmissive,
-      emissiveIntensity: GUN_TOWER_CONFIG.baseEmissiveIntensity,
+      towerType: "gun",
     });
-    const turretMaterial = new THREE.MeshStandardMaterial({
-      color: turretColor,
-      roughness: GUN_TOWER_CONFIG.turretRoughness,
-      metalness: GUN_TOWER_CONFIG.turretMetalness,
-      opacity,
-      transparent,
-      emissive: GUN_TOWER_CONFIG.turretEmissive,
-      emissiveIntensity: GUN_TOWER_CONFIG.turretEmissiveIntensity,
-    });
-
-    const base = new THREE.Mesh(
-      new THREE.BoxGeometry(
-        baseHalfSizeX * 2,
-        GUN_TOWER_CONFIG.baseHeight,
-        baseHalfSizeZ * 2
-      ),
-      baseMaterial
-    );
-    base.position.y = GUN_TOWER_CONFIG.baseHeight * 0.5;
-    root.add(base);
-
-    const turretYawNode = new THREE.Object3D();
-    turretYawNode.position.y = GUN_TOWER_CONFIG.baseHeight;
-    root.add(turretYawNode);
-
-    const cubeSize = Math.max(0.45, Math.min(
-      GUN_TOWER_CONFIG.turretWidth * 0.98,
-      GUN_TOWER_CONFIG.turretHeight + (GUN_TOWER_CONFIG.turretWidth * 0.38)
-    ));
-    const portalRadius = Math.max(0.14, Math.min(
-      cubeSize * 0.33,
-      Math.max(0.14, (Number(GUN_TOWER_CONFIG.barrelLength) || cubeSize) * 0.3)
-    ));
-    const portalFrameTube = Math.max(0.06, portalRadius * 0.22);
-    const portalDiscRadius = portalRadius * 1.02;
-    const portalFrameCenterZ = (cubeSize * 0.5) + 0.01;
-    const portalDiscCenterZ = portalFrameCenterZ + 0.004;
-    const portalParticleCenterZ = portalDiscCenterZ + Math.max(0.016, portalRadius * 0.06);
-    const portalLensCenterZ = portalDiscCenterZ + Math.max(0.03, portalRadius * 0.12);
-
-    const pitchNode = new THREE.Object3D();
-    pitchNode.position.y = cubeSize * 0.5;
-    turretYawNode.add(pitchNode);
-
-    const cube = new THREE.Mesh(
-      new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize),
-      turretMaterial
-    );
-    pitchNode.add(cube);
-
-    const portalFrame = new THREE.Mesh(
-      new THREE.TorusGeometry(portalRadius, portalFrameTube, 20, 48),
-      turretMaterial
-    );
-    portalFrame.position.z = portalFrameCenterZ;
-    pitchNode.add(portalFrame);
-
-    const { material: portalMaterial, uniforms: portalUniforms } = createGunBlackHoleMaterial({
-      accentColor: 0xff4c10,
-      glowColor: 0xffc978,
-      opacity,
-    });
-    const portalVolume = new THREE.Mesh(
-      new THREE.CircleGeometry(portalDiscRadius, 64),
-      portalMaterial
-    );
-    portalVolume.position.z = portalDiscCenterZ;
-    portalVolume.renderOrder = 2;
-    pitchNode.add(portalVolume);
-
-    const { mesh: portalParticles, state: portalParticleState } = createGunBlackHoleParticleSystem({
-      radius: portalRadius,
-      opacity,
-    });
-    portalParticles.position.z = portalParticleCenterZ;
-    portalParticles.renderOrder = 3;
-    pitchNode.add(portalParticles);
-
-    const portalLensMaterial = new THREE.MeshStandardMaterial({
-      color: 0xa4c5ff,
-      emissive: 0x4d7fe8,
-      emissiveIntensity: 0.15,
-      roughness: 0.08,
-      metalness: 0.04,
-      transparent: true,
-      opacity: Math.max(0.06, Math.min(0.22, opacity * 0.2)),
-      depthWrite: false,
-    });
-    portalLensMaterial.toneMapped = false;
-    portalLensMaterial.userData = {
-      ...(portalLensMaterial.userData || {}),
-      baseEmissiveIntensity: 0.15,
-    };
-    const portalLensGeometry = new THREE.SphereGeometry(portalRadius * 1.34, 24, 18);
-    portalLensGeometry.scale(1, 1, 0.22);
-    const portalLens = new THREE.Mesh(portalLensGeometry, portalLensMaterial);
-    portalLens.position.z = portalLensCenterZ;
-    portalLens.renderOrder = 4;
-    portalLens.userData.baseScalar = 1;
-    pitchNode.add(portalLens);
-
-    const muzzleNode = new THREE.Object3D();
-    muzzleNode.position.z = portalLensCenterZ + Math.max(0.03, GUN_PROJECTILE_SIZE * 0.1);
-    pitchNode.add(muzzleNode);
-
-    const footprintOutline = createFootprintOutlineMesh({
-      halfSizeX: baseHalfSizeX,
-      halfSizeZ: baseHalfSizeZ,
-      height: gridCellSize,
-      inset: Math.min(baseHalfSizeX, baseHalfSizeZ) * 0.02,
-      color: footprintOutlineColor,
-      opacity: 0.4,
-    });
-    root.add(footprintOutline);
-
-    root.userData.materials = [baseMaterial, turretMaterial, portalMaterial, portalLensMaterial, portalParticles.material];
-    root.userData.gunBaseMaterial = baseMaterial;
-    root.userData.gunTurretMaterial = turretMaterial;
-    root.userData.gunBlackHoleMaterial = portalMaterial;
-    root.userData.gunBlackHoleUniforms = portalUniforms;
-    root.userData.gunPortalFrame = portalFrame;
-    root.userData.gunPortalLensMesh = portalLens;
-    root.userData.gunPortalLensMaterial = portalLensMaterial;
-    root.userData.gunPortalParticleMaterial = portalParticles.material;
-    root.userData.gunBlackHoleParticleState = portalParticleState;
-    root.userData.gunBaseHalfSizeX = baseHalfSizeX;
-    root.userData.gunBaseHalfSizeZ = baseHalfSizeZ;
-    root.userData.gunCubeSize = cubeSize;
-    root.userData.gunUpperCollisionRadius = cubeSize * 0.72;
-    root.userData.footprintOutlineMaterial = footprintOutline.userData.footprintOutlineMaterial;
-    root.userData.gunTurretYawNode = turretYawNode;
-    root.userData.gunTurretPitchNode = pitchNode;
-    root.userData.gunMuzzleNode = muzzleNode;
-    root.userData.gunGlowColor = new THREE.Color(glowColor);
-
-    applyShadowSettings(root);
-    portalVolume.castShadow = false;
-    portalVolume.receiveShadow = false;
-    portalParticles.castShadow = false;
-    portalParticles.receiveShadow = false;
-    portalLens.castShadow = false;
-    portalLens.receiveShadow = false;
-    return root;
   }
 
   function createBlockTowerMesh({
@@ -1992,246 +2066,21 @@ export function createTowerSystem({
   }
 
   function createAoeTowerMesh({
-    coreColor,
-    emissiveColor,
-    auraColor = emissiveColor,
+    color,
+    glow,
     opacity = 1,
     transparent = false,
-    footprintOutlineColor = emissiveColor,
-    footprintOutlineInset = AOE_TOWER_CONFIG.footprintOutlineInset,
-    footprintOutlineOpacity = AOE_TOWER_CONFIG.footprintOutlineOpacity,
   }) {
-    const root = new THREE.Group();
-    const hoverNode = new THREE.Object3D();
-    hoverNode.position.y = AOE_HOVER_BASE_Y * AOE_VISUAL_SCALE;
-    hoverNode.scale.setScalar(AOE_VISUAL_SCALE);
-    root.add(hoverNode);
-
-    const coreMaterial = new THREE.MeshStandardMaterial({
-      color: coreColor,
-      emissive: emissiveColor,
-      emissiveIntensity: 1.0,
-      roughness: 0.34,
-      metalness: 0.18,
-      transparent,
-      opacity,
-    });
-    const coreMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(AOE_TOWER_CONFIG.coreRadius, 20, 16),
-      coreMaterial
-    );
-    hoverNode.add(coreMesh);
-
-    const spikeHeight = AOE_TOWER_CONFIG.coreRadius * 0.72;
-    const spikeRadius = AOE_TOWER_CONFIG.coreRadius * 0.18;
-    const spikeGeometry = new THREE.ConeGeometry(spikeRadius, spikeHeight, 8);
-    const spikeMaterial = new THREE.MeshStandardMaterial({
-      color: coreColor,
-      emissive: emissiveColor,
-      emissiveIntensity: 0.9,
-      roughness: 0.36,
-      metalness: 0.22,
-      transparent,
-      opacity,
-    });
-    for (const dir of aoeSpikeDirections) {
-      const spike = new THREE.Mesh(spikeGeometry, spikeMaterial);
-      spike.position.copy(dir).multiplyScalar(AOE_TOWER_CONFIG.coreRadius + (spikeHeight * 0.15));
-      spike.quaternion.setFromUnitVectors(upVector, dir);
-      hoverNode.add(spike);
-    }
-
-    const auraMaterial = new THREE.MeshBasicMaterial({
-      color: auraColor,
-      transparent: true,
-      opacity: Math.max(0, Math.min(1, AOE_TOWER_CONFIG.auraOpacity * opacity)),
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    auraMaterial.toneMapped = false;
-    const auraMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(AOE_TOWER_CONFIG.auraRadius, 20, 16),
-      auraMaterial
-    );
-    hoverNode.add(auraMesh);
-
-    const glowLight = new THREE.PointLight(
-      emissiveColor,
-      0.35,
-      AOE_TOWER_CONFIG.lightDistance * AOE_VISUAL_SCALE
-    );
-    hoverNode.add(glowLight);
-
-    const footprintOutline = createFootprintOutlineMesh({
-      halfSizeX: gridCubeHalfSize,
-      halfSizeZ: gridCubeHalfSize,
-      height: gridCellSize,
-      inset: footprintOutlineInset,
-      color: footprintOutlineColor,
-      opacity: footprintOutlineOpacity,
-    });
-    root.add(footprintOutline);
-
-    root.userData.materials = [coreMaterial, spikeMaterial, auraMaterial];
-    root.userData.aoeCoreMaterial = coreMaterial;
-    root.userData.aoeSpikeMaterial = spikeMaterial;
-    root.userData.aoeAuraMaterial = auraMaterial;
-    root.userData.aoeLight = glowLight;
-    root.userData.footprintOutlineMaterial = footprintOutline.userData.footprintOutlineMaterial;
-    root.userData.hoverNode = hoverNode;
-
-    applyShadowSettings(root);
-    auraMesh.castShadow = false;
-    auraMesh.receiveShadow = false;
-    return root;
+    return createElementalCubeTowerMesh({ color, glow, opacity, transparent, towerType: "aoe" });
   }
 
   function createSlowTowerMesh({
-    bodyColor = SLOW_TOWER_CONFIG.bodyColor,
-    emissiveColor = SLOW_TOWER_CONFIG.bodyEmissive,
+    color,
+    glow,
     opacity = 1,
     transparent = false,
-    footprintOutlineColor = emissiveColor,
-    footprintOutlineInset = SLOW_TOWER_CONFIG.footprintOutlineInset,
-    footprintOutlineOpacity = SLOW_TOWER_CONFIG.footprintOutlineOpacity,
   }) {
-    const root = new THREE.Group();
-    const hoverNode = new THREE.Object3D();
-    hoverNode.position.y = 0;
-    hoverNode.scale.setScalar(SLOW_VISUAL_SCALE);
-    root.add(hoverNode);
-
-    const pedestalRadiusTop = SLOW_PEDESTAL_RADIUS_TOP;
-    const pedestalRadiusBottom = SLOW_PEDESTAL_RADIUS_BOTTOM;
-    const pedestalHeight = Math.max(0.16, SLOW_TOWER_CONFIG.bodyHeight * 0.36);
-    const crystalRadius = Math.max(0.2, SLOW_BODY_RADIUS * 0.86);
-    const crystalHeight = Math.max(0.5, SLOW_TOWER_CONFIG.bodyHeight * 1.35);
-    const crystalCenterY = (pedestalHeight * 0.5) + (crystalHeight * 0.52);
-    const ringRadius = Math.max(0.16, crystalRadius * 1.18);
-    const ringTube = Math.max(0.02, crystalRadius * 0.11);
-    const ringOffsetY = crystalHeight * 0.22;
-
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: bodyColor,
-      emissive: emissiveColor,
-      emissiveIntensity: SLOW_TOWER_CONFIG.emissiveIntensity,
-      roughness: 0.45,
-      metalness: 0.2,
-      transparent,
-      opacity,
-    });
-    const accentMaterial = new THREE.MeshStandardMaterial({
-      color: SLOW_TOWER_CONFIG.bandColor,
-      emissive: emissiveColor,
-      emissiveIntensity: SLOW_TOWER_CONFIG.emissiveIntensity * 0.72,
-      roughness: 0.34,
-      metalness: 0.26,
-      transparent,
-      opacity,
-    });
-
-    const pedestal = new THREE.Mesh(
-      new THREE.CylinderGeometry(
-        pedestalRadiusTop,
-        pedestalRadiusBottom,
-        pedestalHeight,
-        14
-      ),
-      accentMaterial
-    );
-    pedestal.position.y = pedestalHeight * 0.5;
-    hoverNode.add(pedestal);
-
-    const crystalMesh = new THREE.Mesh(
-      new THREE.OctahedronGeometry(crystalRadius, 0),
-      bodyMaterial
-    );
-    const crystalBaseDiameter = Math.max(0.01, crystalRadius * 2);
-    crystalMesh.scale.y = crystalHeight / crystalBaseDiameter;
-    crystalMesh.userData.baseScaleY = crystalMesh.scale.y;
-    crystalMesh.position.y = crystalCenterY;
-    hoverNode.add(crystalMesh);
-
-    const crystalCore = new THREE.Mesh(
-      new THREE.OctahedronGeometry(crystalRadius * 0.46, 0),
-      accentMaterial
-    );
-    crystalCore.scale.y = 1.2;
-    crystalCore.position.y = crystalCenterY;
-    hoverNode.add(crystalCore);
-
-    const bandMaterial = new THREE.MeshBasicMaterial({
-      color: SLOW_TOWER_CONFIG.bandColor,
-      transparent: true,
-      opacity: Math.max(0, Math.min(1, SLOW_TOWER_CONFIG.bandOpacity * opacity)),
-      depthWrite: false,
-    });
-    bandMaterial.toneMapped = false;
-    const upperRing = new THREE.Mesh(
-      new THREE.TorusGeometry(
-        ringRadius,
-        ringTube,
-        12,
-        32
-      ),
-      bandMaterial
-    );
-    upperRing.position.y = crystalCenterY + ringOffsetY;
-    upperRing.rotation.x = THREE.MathUtils.degToRad(26);
-    upperRing.rotation.z = THREE.MathUtils.degToRad(14);
-    hoverNode.add(upperRing);
-
-    const lowerRing = new THREE.Mesh(
-      new THREE.TorusGeometry(
-        ringRadius * 0.92,
-        ringTube * 0.95,
-        12,
-        32
-      ),
-      bandMaterial
-    );
-    lowerRing.position.y = crystalCenterY - (ringOffsetY * 0.84);
-    lowerRing.rotation.x = THREE.MathUtils.degToRad(-24);
-    lowerRing.rotation.z = THREE.MathUtils.degToRad(-18);
-    hoverNode.add(lowerRing);
-
-    const glowLight = new THREE.PointLight(
-      emissiveColor,
-      0.34,
-      SLOW_TOWER_CONFIG.lightDistance * SLOW_VISUAL_SCALE
-    );
-    glowLight.position.y = crystalCenterY;
-    hoverNode.add(glowLight);
-
-    const footprintOutline = createFootprintOutlineMesh({
-      halfSizeX: gridCubeHalfSize,
-      halfSizeZ: gridCubeHalfSize,
-      height: gridCellSize,
-      inset: footprintOutlineInset,
-      color: footprintOutlineColor,
-      opacity: footprintOutlineOpacity,
-    });
-    root.add(footprintOutline);
-
-    root.userData.materials = [bodyMaterial, accentMaterial, bandMaterial];
-    root.userData.slowBodyMaterial = bodyMaterial;
-    root.userData.slowBandMaterial = bandMaterial;
-    root.userData.slowAccentMaterial = accentMaterial;
-    root.userData.slowCrystalMesh = crystalMesh;
-    root.userData.slowRingUpperMesh = upperRing;
-    root.userData.slowRingLowerMesh = lowerRing;
-    root.userData.slowLight = glowLight;
-    root.userData.footprintOutlineMaterial = footprintOutline.userData.footprintOutlineMaterial;
-    root.userData.hoverNode = hoverNode;
-
-    applyShadowSettings(root);
-    crystalCore.castShadow = false;
-    crystalCore.receiveShadow = false;
-    upperRing.castShadow = false;
-    upperRing.receiveShadow = false;
-    lowerRing.castShadow = false;
-    lowerRing.receiveShadow = false;
-    return root;
+    return createElementalCubeTowerMesh({ color, glow, opacity, transparent, towerType: "slow" });
   }
 
   function createLaserSniperTowerMesh({
@@ -2240,125 +2089,7 @@ export function createTowerSystem({
     opacity = 1,
     transparent = false,
   }) {
-    const root = new THREE.Group();
-    const tileWidth = Math.max(0.2, gridCellSize);
-    const towerHeight = Math.max(0.2, gridCellSize);
-    const baseHeight = Math.max(0.08, towerHeight * 0.2);
-    const lowerBaseCenterY = baseHeight * 0.5;
-    const upperBaseCenterY = towerHeight - (baseHeight * 0.5);
-    const beamHeight = Math.max(0.08, upperBaseCenterY - lowerBaseCenterY - baseHeight);
-    const beamRadius = Math.max(0.035, gridCellSize * 0.055);
-    const coreBeamMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        uColor: { value: new THREE.Color(0xff1f1f) },
-        uHotColor: { value: new THREE.Color(0xffebe0) },
-        uOpacity: { value: Math.max(0.05, LASER_SNIPER_TOWER_CONFIG.beamOpacity * 0.82) * opacity },
-        uTime: { value: 0 },
-        uPulse: { value: 0 },
-      },
-      vertexShader: `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        varying vec2 vUv;
-        uniform vec3 uColor;
-        uniform vec3 uHotColor;
-        uniform float uOpacity;
-        uniform float uTime;
-        uniform float uPulse;
-
-        void main() {
-          float x = abs((vUv.x * 2.0) - 1.0);
-          float movingBandA = 0.5 + (0.5 * sin((vUv.y * 36.0) - (uTime * 11.0)));
-          float movingBandB = 0.5 + (0.5 * sin((vUv.y * 19.0) + (uTime * 7.5)));
-          float pattern = 0.6 + (movingBandA * 0.25) + (movingBandB * 0.15);
-          float pulseGlow = 1.0 + (uPulse * 2.25);
-          float coreHot = smoothstep(0.58, 0.0, x);
-          vec3 beamColor = mix(uColor, uHotColor, coreHot * (0.7 + (uPulse * 0.2)));
-          float alpha = clamp(uOpacity * pattern * pulseGlow * (0.78 + (coreHot * 0.22)), 0.0, 1.0);
-          if (alpha <= 0.001) {
-            discard;
-          }
-          gl_FragColor = vec4(beamColor, alpha);
-        }
-      `,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    coreBeamMaterial.toneMapped = false;
-
-    const baseMaterial = new THREE.MeshStandardMaterial({
-      color,
-      emissive: glow,
-      emissiveIntensity: 0.55,
-      roughness: 0.42,
-      metalness: 0.26,
-      transparent,
-      opacity,
-    });
-    const accentMaterial = new THREE.MeshStandardMaterial({
-      color: tempColorA.setHex(color).offsetHSL(0, 0, 0.08),
-      emissive: glow,
-      emissiveIntensity: 0.8,
-      roughness: 0.36,
-      metalness: 0.34,
-      transparent,
-      opacity,
-    });
-
-    const lowerBase = new THREE.Mesh(
-      new THREE.BoxGeometry(tileWidth, baseHeight, tileWidth),
-      baseMaterial
-    );
-    lowerBase.position.y = lowerBaseCenterY;
-    root.add(lowerBase);
-
-    const upperBase = new THREE.Mesh(
-      new THREE.BoxGeometry(tileWidth, baseHeight, tileWidth),
-      baseMaterial
-    );
-    upperBase.position.y = upperBaseCenterY;
-    root.add(upperBase);
-
-    const centerBeam = new THREE.Mesh(
-      new THREE.CylinderGeometry(beamRadius, beamRadius, beamHeight, 16, 1, true),
-      coreBeamMaterial
-    );
-    centerBeam.position.y = towerHeight * 0.5;
-    root.add(centerBeam);
-
-    const dishYawNode = new THREE.Object3D();
-    dishYawNode.position.y = upperBase.position.y;
-    root.add(dishYawNode);
-
-    const emitterNode = new THREE.Object3D();
-    emitterNode.position.set(0, centerBeam.position.y, 0);
-    root.add(emitterNode);
-
-    const outline = createFootprintOutlineMesh({
-      halfSizeX: gridCubeHalfSize,
-      halfSizeZ: gridCubeHalfSize,
-      height: gridCellSize,
-      inset: 0.06,
-      color: glow,
-      opacity: 0.42,
-    });
-    root.add(outline);
-
-    root.userData.materials = [baseMaterial, accentMaterial, coreBeamMaterial];
-    root.userData.footprintOutlineMaterial = outline.userData.footprintOutlineMaterial;
-    root.userData.laserSniperYawNode = dishYawNode;
-    root.userData.laserSniperEmitterNode = emitterNode;
-    root.userData.laserSniperCoreBeamMaterial = coreBeamMaterial;
-    applyShadowSettings(root);
-    centerBeam.castShadow = false;
-    centerBeam.receiveShadow = false;
-    return root;
+    return createElementalCubeTowerMesh({ color, glow, opacity, transparent, towerType: "laserSniper" });
   }
 
   function createMortarTowerMesh({
@@ -2367,80 +2098,7 @@ export function createTowerSystem({
     opacity = 1,
     transparent = false,
   }) {
-    const root = new THREE.Group();
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color,
-      emissive: glow,
-      emissiveIntensity: 0.45,
-      roughness: 0.5,
-      metalness: 0.24,
-      transparent,
-      opacity,
-    });
-    const barrelMaterial = new THREE.MeshStandardMaterial({
-      color: tempColorA.setHex(color).offsetHSL(0, 0, 0.12),
-      emissive: glow,
-      emissiveIntensity: 0.32,
-      roughness: 0.4,
-      metalness: 0.3,
-      transparent,
-      opacity,
-    });
-
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(
-        MORTAR_TOWER_CONFIG.baseRadius,
-        MORTAR_TOWER_CONFIG.baseRadius * 1.08,
-        0.72,
-        14
-      ),
-      bodyMaterial
-    );
-    base.position.y = 0.36;
-    root.add(base);
-
-    const yawNode = new THREE.Object3D();
-    yawNode.position.y = 0.7;
-    root.add(yawNode);
-
-    const barrelPivot = new THREE.Object3D();
-    barrelPivot.rotation.x = -THREE.MathUtils.degToRad(80);
-    yawNode.add(barrelPivot);
-
-    const barrel = new THREE.Mesh(
-      new THREE.CylinderGeometry(
-        MORTAR_TOWER_CONFIG.barrelRadius,
-        MORTAR_TOWER_CONFIG.barrelRadius * 0.94,
-        MORTAR_TOWER_CONFIG.barrelLength,
-        12
-      ),
-      barrelMaterial
-    );
-    barrel.rotation.x = Math.PI * 0.5;
-    barrel.position.z = MORTAR_TOWER_CONFIG.barrelLength * 0.3;
-    barrelPivot.add(barrel);
-
-    const muzzleNode = new THREE.Object3D();
-    muzzleNode.position.set(0, 0, MORTAR_TOWER_CONFIG.barrelLength * 0.85);
-    barrelPivot.add(muzzleNode);
-
-    const outline = createFootprintOutlineMesh({
-      halfSizeX: gridCubeHalfSize,
-      halfSizeZ: gridCubeHalfSize,
-      height: gridCellSize,
-      inset: 0.06,
-      color: glow,
-      opacity: 0.42,
-    });
-    root.add(outline);
-
-    root.userData.materials = [bodyMaterial, barrelMaterial];
-    root.userData.footprintOutlineMaterial = outline.userData.footprintOutlineMaterial;
-    root.userData.mortarYawNode = yawNode;
-    root.userData.mortarBarrelPivot = barrelPivot;
-    root.userData.mortarMuzzleNode = muzzleNode;
-    applyShadowSettings(root);
-    return root;
+    return createElementalCubeTowerMesh({ color, glow, opacity, transparent, towerType: "mortar" });
   }
 
   function createTeslaTowerMesh({
@@ -2449,68 +2107,7 @@ export function createTowerSystem({
     opacity = 1,
     transparent = false,
   }) {
-    const root = new THREE.Group();
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color,
-      emissive: glow,
-      emissiveIntensity: 0.72,
-      roughness: 0.4,
-      metalness: 0.32,
-      transparent,
-      opacity,
-    });
-    const ringMaterial = new THREE.MeshBasicMaterial({
-      color: glow,
-      transparent: true,
-      opacity: Math.min(1, 0.7 * opacity),
-      depthWrite: false,
-    });
-    ringMaterial.toneMapped = false;
-
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.5, 0.66, 0.72, 14),
-      bodyMaterial
-    );
-    base.position.y = 0.36;
-    root.add(base);
-
-    const core = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.16, 0.22, TESLA_TOWER_CONFIG.coreHeight, 10),
-      bodyMaterial
-    );
-    core.position.y = 0.72 + (TESLA_TOWER_CONFIG.coreHeight * 0.5);
-    root.add(core);
-
-    const ringTop = new THREE.Mesh(
-      new THREE.TorusGeometry(TESLA_TOWER_CONFIG.ringRadius, 0.05, 12, 26),
-      ringMaterial
-    );
-    ringTop.position.y = core.position.y + (TESLA_TOWER_CONFIG.coreHeight * 0.34);
-    ringTop.rotation.x = THREE.MathUtils.degToRad(90);
-    root.add(ringTop);
-
-    const emitterNode = new THREE.Object3D();
-    emitterNode.position.set(0, core.position.y + (TESLA_TOWER_CONFIG.coreHeight * 0.42), 0);
-    root.add(emitterNode);
-
-    const outline = createFootprintOutlineMesh({
-      halfSizeX: gridCubeHalfSize,
-      halfSizeZ: gridCubeHalfSize,
-      height: gridCellSize,
-      inset: 0.06,
-      color: glow,
-      opacity: 0.42,
-    });
-    root.add(outline);
-
-    root.userData.materials = [bodyMaterial, ringMaterial];
-    root.userData.footprintOutlineMaterial = outline.userData.footprintOutlineMaterial;
-    root.userData.teslaEmitterNode = emitterNode;
-    root.userData.teslaRingTop = ringTop;
-    applyShadowSettings(root);
-    ringTop.castShadow = false;
-    ringTop.receiveShadow = false;
-    return root;
+    return createElementalCubeTowerMesh({ color, glow, opacity, transparent, towerType: "tesla" });
   }
 
   function createSpikesTowerMesh({
@@ -2717,72 +2314,7 @@ export function createTowerSystem({
     opacity = 1,
     transparent = false,
   }) {
-    const root = new THREE.Group();
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color,
-      emissive: glow,
-      emissiveIntensity: 0.7,
-      roughness: 0.34,
-      metalness: 0.18,
-      transparent,
-      opacity,
-    });
-    const auraMaterial = new THREE.MeshBasicMaterial({
-      color: BUFF_TOWER_CONFIG.auraColor,
-      transparent: true,
-      opacity: BUFF_TOWER_CONFIG.auraOpacity * opacity,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    auraMaterial.toneMapped = false;
-
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.52, 0.66, 0.66, 14),
-      bodyMaterial
-    );
-    base.position.y = 0.33;
-    root.add(base);
-
-    const core = new THREE.Mesh(
-      new THREE.SphereGeometry(BUFF_TOWER_CONFIG.coreRadius, 14, 10),
-      bodyMaterial
-    );
-    core.position.y = 1.12;
-    root.add(core);
-
-    const halo = new THREE.Mesh(
-      new THREE.TorusGeometry(BUFF_TOWER_CONFIG.haloRadius, 0.08, 12, 28),
-      auraMaterial
-    );
-    halo.position.y = 1.08;
-    halo.rotation.x = THREE.MathUtils.degToRad(90);
-    root.add(halo);
-
-    const aura = new THREE.Mesh(
-      new THREE.SphereGeometry(BUFF_TOWER_CONFIG.range, 20, 14),
-      auraMaterial.clone()
-    );
-    aura.material.opacity = BUFF_TOWER_CONFIG.auraOpacity * opacity;
-    aura.castShadow = false;
-    aura.receiveShadow = false;
-    root.add(aura);
-
-    const outline = createFootprintOutlineMesh({
-      halfSizeX: gridCubeHalfSize,
-      halfSizeZ: gridCubeHalfSize,
-      height: gridCellSize,
-      inset: 0.06,
-      color: glow,
-      opacity: 0.42,
-    });
-    root.add(outline);
-
-    root.userData.materials = [bodyMaterial, auraMaterial, aura.material];
-    root.userData.footprintOutlineMaterial = outline.userData.footprintOutlineMaterial;
-    root.userData.buffAuraMesh = aura;
-    root.userData.buffHaloMesh = halo;
-    applyShadowSettings(root);
-    return root;
+    return createElementalCubeTowerMesh({ color, glow, opacity, transparent, towerType: "buff" });
   }
 
   function createTowerPreviewMesh(type) {
@@ -3101,6 +2633,57 @@ export function createTowerSystem({
       return;
     }
 
+    const previewConfigByTypeModern = {
+      gun: {
+        previewColor: GUN_TOWER_CONFIG.previewTurretColor,
+        previewGlow: GUN_TOWER_CONFIG.previewGlow,
+        previewInvalidColor: GUN_TOWER_CONFIG.previewInvalidTurretColor,
+        previewInvalidGlow: GUN_TOWER_CONFIG.previewInvalidGlow,
+      },
+      aoe: AOE_TOWER_CONFIG,
+      slow: SLOW_TOWER_CONFIG,
+      laserSniper: LASER_SNIPER_TOWER_CONFIG,
+      mortar: MORTAR_TOWER_CONFIG,
+      tesla: TESLA_TOWER_CONFIG,
+      spikes: SPIKES_TOWER_CONFIG,
+      plasma: PLASMA_TOWER_CONFIG,
+      buff: BUFF_TOWER_CONFIG,
+    };
+    const modernConfig = previewConfigByTypeModern[selectedTowerType];
+    if (modernConfig && Array.isArray(preview.userData?.materials)) {
+      const colorHex = isValid
+        ? modernConfig.previewColor
+        : modernConfig.previewInvalidColor;
+      const glowHex = isValid
+        ? modernConfig.previewGlow
+        : modernConfig.previewInvalidGlow;
+      for (const material of preview.userData.materials) {
+        if (!material) {
+          continue;
+        }
+        if (material.color?.setHex) {
+          material.color.setHex(colorHex);
+        }
+        if (material.emissive?.setHex) {
+          material.emissive.setHex(glowHex);
+        }
+      }
+      const outlineMaterial = preview.userData?.footprintOutlineMaterial;
+      if (outlineMaterial?.color?.setHex) {
+        outlineMaterial.color.setHex(glowHex);
+      }
+      if (selectedTowerType === "plasma") {
+        const flameUniforms = preview.userData?.plasmaFlameUniforms;
+        if (flameUniforms?.uColorCore?.value) {
+          flameUniforms.uColorCore.value.setHex(glowHex);
+        }
+        if (flameUniforms?.uColorEdge?.value) {
+          flameUniforms.uColorEdge.value.setHex(colorHex);
+        }
+      }
+      return;
+    }
+
     if (
       selectedTowerType === "laserSniper"
       || selectedTowerType === "mortar"
@@ -3336,13 +2919,125 @@ export function createTowerSystem({
     return grid.tileTopY + (Math.max(0, Number(cellY) || 0) * gridCellSize);
   }
 
-  function resolvePlasmaPlacementFromRay(ray) {
-    if (typeof grid.raycastWallAnchor !== "function") {
+  function resolvePlasmaPlacementFromBlockWall(ray) {
+    if (!ray || !ray.origin || !ray.direction) {
       return null;
     }
-    const hit = grid.raycastWallAnchor(ray);
-    if (!hit || !hit.point || !hit.normal) {
+
+    const hitPoint = new THREE.Vector3();
+    const hitBox = new THREE.Box3();
+    let bestHit = null;
+    let bestDistanceSq = Infinity;
+
+    for (const tower of towers) {
+      if (tower?.towerType !== "block" || !tower?.mesh?.position) {
+        continue;
+      }
+
+      const halfSizeX = Number.isFinite(Number(tower?.halfSizeX))
+        ? Number(tower.halfSizeX)
+        : Number(tower?.halfSize);
+      const halfSizeZ = Number.isFinite(Number(tower?.halfSizeZ))
+        ? Number(tower.halfSizeZ)
+        : Number(tower?.halfSize);
+      const height = Math.max(0.01, Number(tower?.height) || BLOCK_TOWER_HEIGHT);
+      const baseY = Number(tower?.baseY);
+      if (!Number.isFinite(halfSizeX) || !Number.isFinite(halfSizeZ) || !Number.isFinite(baseY)) {
+        continue;
+      }
+
+      const center = tower.mesh.position;
+      hitBox.min.set(center.x - halfSizeX, baseY, center.z - halfSizeZ);
+      hitBox.max.set(center.x + halfSizeX, baseY + height, center.z + halfSizeZ);
+      const hit = ray.intersectBox(hitBox, hitPoint);
+      if (!hit) {
+        continue;
+      }
+
+      const localX = hit.x - center.x;
+      const localY = hit.y - (baseY + (height * 0.5));
+      const localZ = hit.z - center.z;
+      const dx = Math.abs(Math.abs(localX) - halfSizeX);
+      const dy = Math.abs(Math.abs(localY) - (height * 0.5));
+      const dz = Math.abs(Math.abs(localZ) - halfSizeZ);
+
+      // Side faces only (no top/bottom mounts).
+      if (dy <= dx && dy <= dz) {
+        continue;
+      }
+
+      let normalX = 0;
+      let normalZ = 0;
+      if (dx <= dz) {
+        normalX = localX >= 0 ? 1 : -1;
+      } else {
+        normalZ = localZ >= 0 ? 1 : -1;
+      }
+
+      const distanceSq = hit.distanceToSquared(ray.origin);
+      if (distanceSq >= bestDistanceSq) {
+        continue;
+      }
+
+      bestDistanceSq = distanceSq;
+      bestHit = {
+        tower,
+        normalX,
+        normalZ,
+        halfSizeX,
+        halfSizeZ,
+        height,
+      };
+    }
+
+    if (!bestHit) {
       return null;
+    }
+
+    const blockTower = bestHit.tower;
+    const center = blockTower.mesh.position;
+    const normalX = bestHit.normalX;
+    const normalZ = bestHit.normalZ;
+    const halfAlongNormal = normalX !== 0 ? bestHit.halfSizeX : bestHit.halfSizeZ;
+    const mountOffset = halfAlongNormal + (PLASMA_TOWER_CONFIG.bodyDepth * 0.5) + 0.01;
+    const mountPosition = new THREE.Vector3(
+      center.x + (normalX * mountOffset),
+      Number(blockTower.baseY) + (bestHit.height * 0.5) - (PLASMA_TOWER_CONFIG.bodyHeight * 0.5),
+      center.z + (normalZ * mountOffset)
+    );
+
+    const blockCellY = Math.max(
+      0,
+      Math.round((Number(blockTower.baseY) - Number(grid.tileTopY || 0)) / Math.max(0.01, gridCellSize))
+    );
+    const wallCellX = Number.isInteger(blockTower?.cellX)
+      ? blockTower.cellX
+      : Math.round(center.x / Math.max(0.01, gridCellSize));
+    const wallCellZ = Number.isInteger(blockTower?.cellZ)
+      ? blockTower.cellZ
+      : Math.round(center.z / Math.max(0.01, gridCellSize));
+
+    const anchorKey = `plasma:block:${blockTower.footprintKey || blockTower.mesh.uuid}|${normalX},${normalZ}`;
+    return {
+      towerType: "plasma",
+      occupiedCells: [],
+      position: mountPosition,
+      sameSurfaceHeight: true,
+      footprintKey: anchorKey,
+      anchorKey,
+      rotationY: Math.atan2(normalX, normalZ),
+      plasmaDirection: { x: normalX, z: normalZ },
+      plasmaWallCell: { x: wallCellX, y: blockCellY, z: wallCellZ },
+      plasmaTargetCell: { x: wallCellX + normalX, z: wallCellZ + normalZ },
+    };
+  }
+
+  function resolvePlasmaPlacementFromRay(ray) {
+    const hit = typeof grid.raycastWallAnchor === "function"
+      ? grid.raycastWallAnchor(ray)
+      : null;
+    if (!hit || !hit.point || !hit.normal) {
+      return resolvePlasmaPlacementFromBlockWall(ray);
     }
 
     const rawNormalX = Number(hit.normal.x) || 0;
@@ -3408,24 +3103,7 @@ export function createTowerSystem({
       return null;
     }
 
-    let occupiedCells = [{ x: targetCell.x, z: targetCell.z }];
-    if (
-      towerType === "gun"
-      && towerSpec.footprintCellsX === 1
-      && towerSpec.footprintCellsZ === 2
-    ) {
-      const targetCenter = getCellCenter(targetCell.x, targetCell.z);
-      const placeForward = !hitPoint || hitPoint.z >= targetCenter.z;
-      occupiedCells = placeForward
-        ? [
-          { x: targetCell.x, z: targetCell.z },
-          { x: targetCell.x, z: targetCell.z + 1 },
-        ]
-        : [
-          { x: targetCell.x, z: targetCell.z - 1 },
-          { x: targetCell.x, z: targetCell.z },
-        ];
-    }
+    const occupiedCells = [{ x: targetCell.x, z: targetCell.z }];
 
     const centers = [];
     const surfaceYs = [];
@@ -3991,7 +3669,7 @@ export function createTowerSystem({
       buildFxState: null,
       ownerId,
       rotationY: typeof placement?.rotationY === "number" ? placement.rotationY : 0,
-      topInsetFromRadius: (towerType === "block" || towerType === "laserSniper") ? 0 : undefined,
+      topInsetFromRadius: (towerType === "plasma" || towerType === "spikes") ? undefined : 0,
       blockOpacity: towerType === "block"
         ? (
           options?.blockOpacity != null && Number.isFinite(Number(options.blockOpacity))
@@ -4408,15 +4086,44 @@ export function createTowerSystem({
     return true;
   }
 
-  function getGunMuzzleWorldPosition(tower, out) {
+
+  function getDirectionalEmitterWorldPosition(tower, targetPoint, out, fallbackHeight = ELEMENTAL_TOWER_HALF_SIZE) {
+    const sideEmitters = tower?.mesh?.userData?.sideEmitters;
+    if (sideEmitters && targetPoint) {
+      tempVecH.copy(targetPoint).sub(tower.mesh.position);
+      const absX = Math.abs(tempVecH.x);
+      const absY = Math.abs(tempVecH.y);
+      const absZ = Math.abs(tempVecH.z);
+      let emitter = sideEmitters.posZ;
+      if (absX >= absY && absX >= absZ) {
+        emitter = tempVecH.x >= 0 ? sideEmitters.posX : sideEmitters.negX;
+      } else if (absY >= absX && absY >= absZ) {
+        emitter = sideEmitters.posY;
+      } else {
+        emitter = tempVecH.z >= 0 ? sideEmitters.posZ : sideEmitters.negZ;
+      }
+      if (emitter && typeof emitter.getWorldPosition === "function") {
+        emitter.getWorldPosition(out);
+        return out;
+      }
+    }
+    out.copy(tower.mesh.position);
+    out.y += fallbackHeight;
+    return out;
+  }
+
+  function getGunMuzzleWorldPosition(tower, out, targetPoint = null) {
     const muzzleNode = tower?.mesh?.userData?.gunMuzzleNode;
     if (muzzleNode && typeof muzzleNode.getWorldPosition === "function") {
       muzzleNode.getWorldPosition(out);
       return out;
     }
-    out.copy(tower.mesh.position);
-    out.y += GUN_TOWER_CONFIG.baseHeight + (GUN_TOWER_CONFIG.turretHeight * 0.5);
-    return out;
+    return getDirectionalEmitterWorldPosition(
+      tower,
+      targetPoint,
+      out,
+      GUN_TOWER_CONFIG.baseHeight + (GUN_TOWER_CONFIG.turretHeight * 0.5)
+    );
   }
 
   function getLaserSniperCapHeight(tower) {
@@ -4668,9 +4375,9 @@ export function createTowerSystem({
   function hasLineOfSightToPoint(tower, targetPosition) {
     let origin = tempVecC;
     if (tower.towerType === "gun") {
-      getGunMuzzleWorldPosition(tower, origin);
+      getGunMuzzleWorldPosition(tower, origin, targetPosition);
     } else if (tower.towerType === "laserSniper") {
-      getLaserEmitterWorldPosition(tower, origin);
+      getLaserEmitterWorldPosition(tower, origin, targetPosition);
     } else {
       const hoverNode = tower.mesh?.userData?.hoverNode;
       if (hoverNode && typeof hoverNode.getWorldPosition === "function") {
@@ -5074,7 +4781,7 @@ export function createTowerSystem({
   }
 
   function spawnGunProjectile(tower, targetPoint) {
-    getGunMuzzleWorldPosition(tower, tempVecA);
+    getGunMuzzleWorldPosition(tower, tempVecA, targetPoint);
     tempVecB.copy(targetPoint).sub(tempVecA);
     if (tempVecB.lengthSq() <= TOWER_CONFIG.segmentEpsilon) {
       return false;
@@ -5610,15 +5317,18 @@ export function createTowerSystem({
     }
   }
 
-  function getLaserEmitterWorldPosition(tower, out) {
+  function getLaserEmitterWorldPosition(tower, out, targetPoint = null) {
     const emitterNode = tower.mesh?.userData?.laserSniperEmitterNode;
     if (emitterNode && typeof emitterNode.getWorldPosition === "function") {
       emitterNode.getWorldPosition(out);
       return out;
     }
-    out.copy(tower.mesh.position);
-    out.y += LASER_SNIPER_TOWER_CONFIG.spineHeight * 0.8;
-    return out;
+    return getDirectionalEmitterWorldPosition(
+      tower,
+      targetPoint,
+      out,
+      LASER_SNIPER_TOWER_CONFIG.spineHeight * 0.8
+    );
   }
 
   function spawnLaserBeam(start, end) {
@@ -5669,7 +5379,7 @@ export function createTowerSystem({
     if (!target || !target.mesh || tower.cooldown > 0) {
       return;
     }
-    getLaserEmitterWorldPosition(tower, tempVecB);
+    getLaserEmitterWorldPosition(tower, tempVecB, target.aimPoint || target.position);
     const sniperModifiers = getTowerTechModifiers("laserSniper", tower?.ownerId);
     const pierceTargets = Math.max(0, Math.floor(Number(sniperModifiers?.laserPierceTargets) || 0));
     const maxHits = Math.max(1, 1 + pierceTargets);
@@ -5743,15 +5453,13 @@ export function createTowerSystem({
     return best;
   }
 
-  function getMortarMuzzleWorldPosition(tower, out) {
+  function getMortarMuzzleWorldPosition(tower, out, targetPoint = null) {
     const muzzleNode = tower.mesh?.userData?.mortarMuzzleNode;
     if (muzzleNode && typeof muzzleNode.getWorldPosition === "function") {
       muzzleNode.getWorldPosition(out);
       return out;
     }
-    out.copy(tower.mesh.position);
-    out.y += 1.2;
-    return out;
+    return getDirectionalEmitterWorldPosition(tower, targetPoint, out, 1.2);
   }
 
   function getMortarImpactPoint(targetPoint, out) {
@@ -5989,7 +5697,7 @@ export function createTowerSystem({
     if (target?.mesh) {
       getMortarImpactPoint(target.aimPoint, tempVecC);
       setMortarYawToward(tower, tempVecC);
-      getMortarMuzzleWorldPosition(tower, tempVecA);
+      getMortarMuzzleWorldPosition(tower, tempVecA, tempVecC);
       const previewLaunch = solveMortarLaunchVelocity(tempVecA, tempVecC, tempVecB);
       if (previewLaunch) {
         setMortarBarrelElevation(tower, previewLaunch.elevationRadians);
@@ -6007,15 +5715,13 @@ export function createTowerSystem({
     tower.cooldown = MORTAR_FIRE_INTERVAL * getTowerFireIntervalScale(tower);
   }
 
-  function getTeslaEmitterWorldPosition(tower, out) {
+  function getTeslaEmitterWorldPosition(tower, out, targetPoint = null) {
     const emitterNode = tower.mesh?.userData?.teslaEmitterNode;
     if (emitterNode && typeof emitterNode.getWorldPosition === "function") {
       emitterNode.getWorldPosition(out);
       return out;
     }
-    out.copy(tower.mesh.position);
-    out.y += 1.6;
-    return out;
+    return getDirectionalEmitterWorldPosition(tower, targetPoint, out, 1.6);
   }
 
   function spawnTeslaBolt(start, end) {
@@ -6084,7 +5790,7 @@ export function createTowerSystem({
     }
 
     const linkDamage = TESLA_DAMAGE * getTowerDamageScale(tower);
-    getTeslaEmitterWorldPosition(tower, tempVecA);
+    getTeslaEmitterWorldPosition(tower, tempVecA, primary.aimPoint || primary.position);
     let previousPoint = tempVecA.clone();
     for (const enemyMesh of chainTargets) {
       getEnemyCollisionCenter(enemyMesh, tempVecB);
@@ -6311,12 +6017,32 @@ export function createTowerSystem({
   function updateBlockTowerIdle() {
   }
 
+
+  function updateElementalPortalVisualState(tower, deltaSeconds) {
+    const uniformsList = Array.isArray(tower?.mesh?.userData?.elementalPortalUniforms)
+      ? tower.mesh.userData.elementalPortalUniforms
+      : null;
+    if (!uniformsList || uniformsList.length === 0) {
+      return;
+    }
+    tower.elementalPortalClock = (tower.elementalPortalClock || 0) + Math.max(0, deltaSeconds);
+    for (const uniforms of uniformsList) {
+      if (uniforms?.uTime) {
+        uniforms.uTime.value = tower.elementalPortalClock;
+      }
+      if (uniforms?.uOpacity) {
+        uniforms.uOpacity.value = THREE.MathUtils.clamp(tower.isOperational ? 1 : 0.55, 0.2, 1);
+      }
+    }
+  }
+
   function updateTowerCombat(deltaSeconds, enemySystem) {
     updateBuffTowerAurasAndBonuses(deltaSeconds);
     for (const tower of towers) {
       if (!tower.isOperational) {
         continue;
       }
+      updateElementalPortalVisualState(tower, deltaSeconds);
       const behaviorByType = {
         gun: updateGunTowerCombat,
         aoe: updateAoeTowerCombat,
@@ -6634,50 +6360,7 @@ export function createTowerSystem({
         continue;
       }
 
-      if (tower.towerType !== "gun") {
-        obstacles.push(tower);
-        continue;
-      }
-
-      const baseHalfSizeX = Number.isFinite(Number(tower.mesh.userData?.gunBaseHalfSizeX))
-        ? Number(tower.mesh.userData.gunBaseHalfSizeX)
-        : tower.halfSizeX;
-      const baseHalfSizeZ = Number.isFinite(Number(tower.mesh.userData?.gunBaseHalfSizeZ))
-        ? Number(tower.mesh.userData.gunBaseHalfSizeZ)
-        : tower.halfSizeZ;
-      const baseHeight = Number.isFinite(Number(tower.supportHeight))
-        ? Number(tower.supportHeight)
-        : GUN_TOWER_CONFIG.baseHeight;
-      obstacles.push({
-        kind: "box",
-        towerType: tower.towerType,
-        collidesWithPlayer: true,
-        mesh: tower.mesh,
-        position: tower.mesh.position,
-        baseY: tower.baseY,
-        height: baseHeight,
-        supportHeight: baseHeight,
-        halfSizeX: baseHalfSizeX,
-        halfSizeZ: baseHalfSizeZ,
-        topInsetFromRadius: 0,
-      });
-
-      const cubeSize = Number.isFinite(Number(tower.mesh.userData?.gunCubeSize))
-        ? Number(tower.mesh.userData.gunCubeSize)
-        : Math.max(0.45, GUN_TOWER_CONFIG.turretWidth);
-      const upperRadius = Number.isFinite(Number(tower.mesh.userData?.gunUpperCollisionRadius))
-        ? Number(tower.mesh.userData.gunUpperCollisionRadius)
-        : cubeSize * 0.72;
-      obstacles.push({
-        kind: "cylinder",
-        towerType: tower.towerType,
-        collidesWithPlayer: true,
-        supportsPlayer: false,
-        position: tower.mesh.position,
-        baseY: tower.baseY + baseHeight,
-        height: cubeSize,
-        radius: upperRadius,
-      });
+      obstacles.push(tower);
     }
     return obstacles;
   }
