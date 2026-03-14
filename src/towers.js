@@ -478,6 +478,8 @@ export function createTowerSystem({
   const endCell = grid.endCell ?? null;
   const gridCellSize = Math.max(0.01, Number(grid.cellSize) || 0);
   const gridCubeHalfSize = gridCellSize * 0.5;
+  const ELEMENTAL_TOWER_SIZE = 0.9;
+  const ELEMENTAL_TOWER_HALF_SIZE = ELEMENTAL_TOWER_SIZE * 0.5;
   const spawnTargetBlockVolumes = spawnCells
     .map((cell) => {
       if (!Number.isInteger(cell?.x) || !Number.isInteger(cell?.z)) {
@@ -653,31 +655,18 @@ export function createTowerSystem({
   const mortarExplosions = [];
   const teslaBoltEffects = [];
   const activeBuildEffects = [];
-  const gunFootprintCellsX = Math.max(1, Math.floor(Number(GUN_TOWER_CONFIG.footprintCellsX) || 1));
-  const gunFootprintCellsZ = Math.max(1, Math.floor(Number(GUN_TOWER_CONFIG.footprintCellsZ) || 2));
-  const gunFootprintInsetWorld = THREE.MathUtils.clamp(Number(GUN_TOWER_CONFIG.footprintInset) || 0, 0, 0.45) * gridCellSize;
-  const defaultGunHalfSizeX = Math.max(0.1, (gridCellSize * gunFootprintCellsX * 0.5) - gunFootprintInsetWorld);
-  const defaultGunHalfSizeZ = Math.max(0.1, (gridCellSize * gunFootprintCellsZ * 0.5) - gunFootprintInsetWorld);
+  const gunFootprintCellsX = 1;
+  const gunFootprintCellsZ = 1;
 
   const towerSpecs = {
     gun: {
       type: "gun",
       range: GUN_RANGE,
-      radius: Math.max(
-        Number.isFinite(Number(GUN_TOWER_CONFIG.halfSizeX)) ? Number(GUN_TOWER_CONFIG.halfSizeX) : defaultGunHalfSizeX,
-        Number.isFinite(Number(GUN_TOWER_CONFIG.halfSizeZ)) ? Number(GUN_TOWER_CONFIG.halfSizeZ) : defaultGunHalfSizeZ
-      ),
-      halfSize: Math.max(
-        Number.isFinite(Number(GUN_TOWER_CONFIG.halfSizeX)) ? Number(GUN_TOWER_CONFIG.halfSizeX) : defaultGunHalfSizeX,
-        Number.isFinite(Number(GUN_TOWER_CONFIG.halfSizeZ)) ? Number(GUN_TOWER_CONFIG.halfSizeZ) : defaultGunHalfSizeZ
-      ),
-      halfSizeX: Number.isFinite(Number(GUN_TOWER_CONFIG.halfSizeX))
-        ? Number(GUN_TOWER_CONFIG.halfSizeX)
-        : defaultGunHalfSizeX,
-      halfSizeZ: Number.isFinite(Number(GUN_TOWER_CONFIG.halfSizeZ))
-        ? Number(GUN_TOWER_CONFIG.halfSizeZ)
-        : defaultGunHalfSizeZ,
-      height: GUN_TOWER_HEIGHT,
+      radius: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSize: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
       footprintCellsX: gunFootprintCellsX,
       footprintCellsZ: gunFootprintCellsZ,
       usesLineOfSight: true,
@@ -693,43 +682,51 @@ export function createTowerSystem({
     aoe: {
       type: "aoe",
       range: AOE_RANGE,
-      radius: AOE_TOWER_RADIUS,
-      halfSize: AOE_TOWER_HALF_SIZE,
-      height: AOE_TOWER_HEIGHT,
+      radius: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSize: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
       usesLineOfSight: false,
     },
     slow: {
       type: "slow",
       range: SLOW_RANGE,
-      radius: SLOW_TOWER_RADIUS,
-      halfSize: SLOW_TOWER_HALF_SIZE,
-      height: SLOW_TOWER_HEIGHT,
+      radius: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSize: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
       usesLineOfSight: true,
     },
     laserSniper: {
       type: "laserSniper",
       range: LASER_SNIPER_RANGE,
-      radius: gridCubeHalfSize,
-      halfSize: gridCubeHalfSize,
-      halfSizeX: gridCubeHalfSize,
-      halfSizeZ: gridCubeHalfSize,
-      height: gridCellSize,
+      radius: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSize: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
       usesLineOfSight: true,
     },
     mortar: {
       type: "mortar",
       range: MORTAR_RANGE,
-      radius: Math.max(0.1, Number(MORTAR_TOWER_CONFIG.halfSize) || 1.05),
-      halfSize: Math.max(0.1, Number(MORTAR_TOWER_CONFIG.halfSize) || 1.05),
-      height: Math.max(0.1, Number(MORTAR_TOWER_CONFIG.height) || 2.15),
+      radius: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSize: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
       usesLineOfSight: false,
     },
     tesla: {
       type: "tesla",
       range: TESLA_RANGE,
-      radius: Math.max(0.1, Number(TESLA_TOWER_CONFIG.halfSize) || 0.92),
-      halfSize: Math.max(0.1, Number(TESLA_TOWER_CONFIG.halfSize) || 0.92),
-      height: Math.max(0.1, Number(TESLA_TOWER_CONFIG.height) || 2.25),
+      radius: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSize: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
       usesLineOfSight: true,
     },
     spikes: {
@@ -758,9 +755,11 @@ export function createTowerSystem({
     buff: {
       type: "buff",
       range: BUFF_RANGE,
-      radius: Math.max(0.1, Number(BUFF_TOWER_CONFIG.halfSize) || 0.9),
-      halfSize: Math.max(0.1, Number(BUFF_TOWER_CONFIG.halfSize) || 0.9),
-      height: Math.max(0.1, Number(BUFF_TOWER_CONFIG.height) || 2.1),
+      radius: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSize: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
       usesLineOfSight: false,
     },
   };
@@ -1916,14 +1915,14 @@ export function createTowerSystem({
       createElementalPortalMaterial(theme, opacity),
       createElementalPortalMaterial(theme, opacity),
     ];
-    const cube = new THREE.Mesh(new THREE.BoxGeometry(gridCellSize, gridCellSize, gridCellSize), sideMaterials);
-    cube.position.y = gridCellSize * 0.5;
+    const cube = new THREE.Mesh(new THREE.BoxGeometry(ELEMENTAL_TOWER_SIZE, ELEMENTAL_TOWER_SIZE, ELEMENTAL_TOWER_SIZE), sideMaterials);
+    cube.position.y = ELEMENTAL_TOWER_HALF_SIZE;
     root.add(cube);
 
     const outline = createFootprintOutlineMesh({
-      halfSizeX: gridCubeHalfSize,
-      halfSizeZ: gridCubeHalfSize,
-      height: gridCellSize,
+      halfSizeX: ELEMENTAL_TOWER_HALF_SIZE,
+      halfSizeZ: ELEMENTAL_TOWER_HALF_SIZE,
+      height: ELEMENTAL_TOWER_SIZE,
       inset: 0.05,
       color: glow,
       opacity: 0.42,
@@ -1937,11 +1936,11 @@ export function createTowerSystem({
       posZ: new THREE.Object3D(),
       negZ: new THREE.Object3D(),
     };
-    sideEmitters.posX.position.set(gridCubeHalfSize, gridCellSize * 0.5, 0);
-    sideEmitters.negX.position.set(-gridCubeHalfSize, gridCellSize * 0.5, 0);
-    sideEmitters.posY.position.set(0, gridCellSize, 0);
-    sideEmitters.posZ.position.set(0, gridCellSize * 0.5, gridCubeHalfSize);
-    sideEmitters.negZ.position.set(0, gridCellSize * 0.5, -gridCubeHalfSize);
+    sideEmitters.posX.position.set(ELEMENTAL_TOWER_HALF_SIZE, ELEMENTAL_TOWER_HALF_SIZE, 0);
+    sideEmitters.negX.position.set(-ELEMENTAL_TOWER_HALF_SIZE, ELEMENTAL_TOWER_HALF_SIZE, 0);
+    sideEmitters.posY.position.set(0, ELEMENTAL_TOWER_SIZE, 0);
+    sideEmitters.posZ.position.set(0, ELEMENTAL_TOWER_HALF_SIZE, ELEMENTAL_TOWER_HALF_SIZE);
+    sideEmitters.negZ.position.set(0, ELEMENTAL_TOWER_HALF_SIZE, -ELEMENTAL_TOWER_HALF_SIZE);
     Object.values(sideEmitters).forEach((node) => root.add(node));
 
     const animatedPortalUniforms = [];
@@ -2856,24 +2855,7 @@ export function createTowerSystem({
       return null;
     }
 
-    let occupiedCells = [{ x: targetCell.x, z: targetCell.z }];
-    if (
-      towerType === "gun"
-      && towerSpec.footprintCellsX === 1
-      && towerSpec.footprintCellsZ === 2
-    ) {
-      const targetCenter = getCellCenter(targetCell.x, targetCell.z);
-      const placeForward = !hitPoint || hitPoint.z >= targetCenter.z;
-      occupiedCells = placeForward
-        ? [
-          { x: targetCell.x, z: targetCell.z },
-          { x: targetCell.x, z: targetCell.z + 1 },
-        ]
-        : [
-          { x: targetCell.x, z: targetCell.z - 1 },
-          { x: targetCell.x, z: targetCell.z },
-        ];
-    }
+    const occupiedCells = [{ x: targetCell.x, z: targetCell.z }];
 
     const centers = [];
     const surfaceYs = [];
@@ -3439,7 +3421,7 @@ export function createTowerSystem({
       buildFxState: null,
       ownerId,
       rotationY: typeof placement?.rotationY === "number" ? placement.rotationY : 0,
-      topInsetFromRadius: (towerType === "block" || towerType === "laserSniper") ? 0 : undefined,
+      topInsetFromRadius: (towerType === "plasma" || towerType === "spikes") ? undefined : 0,
       blockOpacity: towerType === "block"
         ? (
           options?.blockOpacity != null && Number.isFinite(Number(options.blockOpacity))
@@ -3857,7 +3839,7 @@ export function createTowerSystem({
   }
 
 
-  function getDirectionalEmitterWorldPosition(tower, targetPoint, out, fallbackHeight = gridCellSize * 0.5) {
+  function getDirectionalEmitterWorldPosition(tower, targetPoint, out, fallbackHeight = ELEMENTAL_TOWER_HALF_SIZE) {
     const sideEmitters = tower?.mesh?.userData?.sideEmitters;
     if (sideEmitters && targetPoint) {
       tempVecH.copy(targetPoint).sub(tower.mesh.position);
@@ -6130,50 +6112,7 @@ export function createTowerSystem({
         continue;
       }
 
-      if (tower.towerType !== "gun") {
-        obstacles.push(tower);
-        continue;
-      }
-
-      const baseHalfSizeX = Number.isFinite(Number(tower.mesh.userData?.gunBaseHalfSizeX))
-        ? Number(tower.mesh.userData.gunBaseHalfSizeX)
-        : tower.halfSizeX;
-      const baseHalfSizeZ = Number.isFinite(Number(tower.mesh.userData?.gunBaseHalfSizeZ))
-        ? Number(tower.mesh.userData.gunBaseHalfSizeZ)
-        : tower.halfSizeZ;
-      const baseHeight = Number.isFinite(Number(tower.supportHeight))
-        ? Number(tower.supportHeight)
-        : GUN_TOWER_CONFIG.baseHeight;
-      obstacles.push({
-        kind: "box",
-        towerType: tower.towerType,
-        collidesWithPlayer: true,
-        mesh: tower.mesh,
-        position: tower.mesh.position,
-        baseY: tower.baseY,
-        height: baseHeight,
-        supportHeight: baseHeight,
-        halfSizeX: baseHalfSizeX,
-        halfSizeZ: baseHalfSizeZ,
-        topInsetFromRadius: 0,
-      });
-
-      const cubeSize = Number.isFinite(Number(tower.mesh.userData?.gunCubeSize))
-        ? Number(tower.mesh.userData.gunCubeSize)
-        : Math.max(0.45, GUN_TOWER_CONFIG.turretWidth);
-      const upperRadius = Number.isFinite(Number(tower.mesh.userData?.gunUpperCollisionRadius))
-        ? Number(tower.mesh.userData.gunUpperCollisionRadius)
-        : cubeSize * 0.72;
-      obstacles.push({
-        kind: "cylinder",
-        towerType: tower.towerType,
-        collidesWithPlayer: true,
-        supportsPlayer: false,
-        position: tower.mesh.position,
-        baseY: tower.baseY + baseHeight,
-        height: cubeSize,
-        radius: upperRadius,
-      });
+      obstacles.push(tower);
     }
     return obstacles;
   }
