@@ -208,7 +208,7 @@
       "id": "block_cost_t1",
       "label": "Cheap Blocks",
       "description": "Build blocks now cost $7",
-      "iconId": "tower_block",
+      "iconId": "tower_block_upgrade_cost",
       "parents": [
         "unlock_block"
       ],
@@ -230,7 +230,7 @@
       "id": "block_cost_t2",
       "label": "Bulk Blocks",
       "description": "Build blocks now cost $4",
-      "iconId": "tower_block",
+      "iconId": "tower_block_upgrade_cost",
       "parents": [
         "block_cost_t1"
       ],
@@ -252,7 +252,7 @@
       "id": "block_transparency_t1",
       "label": "Clear Blocks",
       "description": "Owned build blocks become translucent",
-      "iconId": "tower_block",
+      "iconId": "tower_block_upgrade_transparency",
       "parents": [
         "block_cost_t2"
       ],
@@ -274,7 +274,7 @@
       "id": "gun_damage_t1",
       "label": "Gun Impact",
       "description": "+35% gun tower damage",
-      "iconId": "tower_damage",
+      "iconId": "tower_gun_upgrade_damage",
       "parents": [
         "root_gun_core"
       ],
@@ -296,7 +296,7 @@
       "id": "gun_rate_t1",
       "label": "Gun Loader",
       "description": "Gun tower fires faster",
-      "iconId": "tower_fire_rate",
+      "iconId": "tower_gun_upgrade_fire_rate",
       "parents": [
         "gun_damage_t1"
       ],
@@ -318,7 +318,7 @@
       "id": "gun_range_t1",
       "label": "Gun Scope",
       "description": "+2.5 gun tower range",
-      "iconId": "tower_gun",
+      "iconId": "tower_gun_upgrade_range",
       "parents": [
         "gun_rate_t1"
       ],
@@ -340,7 +340,7 @@
       "id": "gun_shrapnel_t1",
       "label": "Shrapnel Rounds",
       "description": "Gun shots pierce +1 enemy",
-      "iconId": "tower_gun",
+      "iconId": "tower_gun_upgrade_pierce",
       "parents": [
         "gun_range_t1"
       ],
@@ -385,7 +385,7 @@
       "id": "aoe_damage_t1",
       "label": "Pulse Core",
       "description": "+30% AOE damage",
-      "iconId": "tower_damage",
+      "iconId": "tower_aoe_upgrade_damage",
       "parents": [
         "unlock_aoe"
       ],
@@ -407,7 +407,7 @@
       "id": "aoe_radius_t1",
       "label": "Pulse Radius",
       "description": "+1.4 AOE range",
-      "iconId": "tower_aoe",
+      "iconId": "tower_aoe_upgrade_range",
       "parents": [
         "aoe_damage_t1"
       ],
@@ -429,7 +429,7 @@
       "id": "aoe_rate_t1",
       "label": "Pulse Cadence",
       "description": "AOE pulses faster",
-      "iconId": "tower_fire_rate",
+      "iconId": "tower_aoe_upgrade_fire_rate",
       "parents": [
         "aoe_radius_t1"
       ],
@@ -473,7 +473,7 @@
       "id": "slow_strength_t1",
       "label": "Cryo Lock",
       "description": "Slow towers reduce speed more",
-      "iconId": "tower_slow",
+      "iconId": "tower_slow_upgrade_slow_strength",
       "parents": [
         "unlock_slow"
       ],
@@ -495,7 +495,7 @@
       "id": "slow_duration_t1",
       "label": "Cryo Hold",
       "description": "Slow effect lasts longer",
-      "iconId": "tower_slow",
+      "iconId": "tower_slow_upgrade_duration",
       "parents": [
         "slow_strength_t1"
       ],
@@ -517,7 +517,7 @@
       "id": "slow_rate_t1",
       "label": "Cryo Tempo",
       "description": "Slow tower fires faster",
-      "iconId": "tower_fire_rate",
+      "iconId": "tower_slow_upgrade_fire_rate",
       "parents": [
         "slow_duration_t1"
       ],
@@ -559,7 +559,7 @@
       "id": "sniper_pierce_t1",
       "label": "Beam Pierce",
       "description": "Sniper beam pierces +2",
-      "iconId": "tower_laser_sniper",
+      "iconId": "tower_laser_sniper_upgrade_pierce",
       "parents": [
         "unlock_laser_sniper"
       ],
@@ -581,7 +581,7 @@
       "id": "sniper_damage_t1",
       "label": "Beam Focus",
       "description": "+40% sniper damage",
-      "iconId": "tower_damage",
+      "iconId": "tower_laser_sniper_upgrade_damage",
       "parents": [
         "sniper_pierce_t1"
       ],
@@ -603,7 +603,7 @@
       "id": "sniper_rate_t1",
       "label": "Beam Charge",
       "description": "Sniper fires faster",
-      "iconId": "tower_fire_rate",
+      "iconId": "tower_laser_sniper_upgrade_fire_rate",
       "parents": [
         "sniper_damage_t1"
       ],
@@ -647,7 +647,7 @@
       "id": "mortar_radius_t1",
       "label": "Shock Radius",
       "description": "+1.2 mortar splash radius",
-      "iconId": "tower_mortar",
+      "iconId": "tower_mortar_upgrade_blast_radius",
       "parents": [
         "unlock_mortar"
       ],
@@ -669,7 +669,7 @@
       "id": "mortar_damage_t1",
       "label": "Heavy Shells",
       "description": "+35% mortar damage",
-      "iconId": "tower_damage",
+      "iconId": "tower_mortar_upgrade_damage",
       "parents": [
         "mortar_radius_t1"
       ],
@@ -691,7 +691,7 @@
       "id": "mortar_rate_t1",
       "label": "Quick Loader",
       "description": "Mortar fires faster",
-      "iconId": "tower_fire_rate",
+      "iconId": "tower_mortar_upgrade_fire_rate",
       "parents": [
         "mortar_damage_t1"
       ],
@@ -738,7 +738,7 @@
       "id": "tesla_chain_t1",
       "label": "Arc Fork",
       "description": "Tesla chains +2 targets",
-      "iconId": "tower_tesla",
+      "iconId": "tower_tesla_upgrade_chain",
       "parents": [
         "unlock_tesla"
       ],
@@ -760,7 +760,7 @@
       "id": "tesla_damage_t1",
       "label": "Arc Power",
       "description": "+30% tesla damage",
-      "iconId": "tower_damage",
+      "iconId": "tower_tesla_upgrade_damage",
       "parents": [
         "tesla_chain_t1"
       ],
@@ -782,7 +782,7 @@
       "id": "tesla_rate_t1",
       "label": "Arc Tempo",
       "description": "Tesla fires faster",
-      "iconId": "tower_fire_rate",
+      "iconId": "tower_tesla_upgrade_fire_rate",
       "parents": [
         "tesla_damage_t1"
       ],
@@ -824,7 +824,7 @@
       "id": "spikes_cycle_t1",
       "label": "Cycle Gears",
       "description": "Spikes cycle faster",
-      "iconId": "tower_spikes",
+      "iconId": "tower_spikes_upgrade_fire_rate",
       "parents": [
         "unlock_spikes"
       ],
@@ -846,7 +846,7 @@
       "id": "spikes_damage_t1",
       "label": "Razor Teeth",
       "description": "+45% spikes damage",
-      "iconId": "tower_damage",
+      "iconId": "tower_spikes_upgrade_damage",
       "parents": [
         "spikes_cycle_t1"
       ],
@@ -868,7 +868,7 @@
       "id": "spikes_active_t1",
       "label": "Long Reach",
       "description": "Spikes stay raised longer",
-      "iconId": "tower_spikes",
+      "iconId": "tower_spikes_upgrade_duration",
       "parents": [
         "spikes_damage_t1"
       ],
@@ -910,7 +910,7 @@
       "id": "plasma_damage_t1",
       "label": "Overburn",
       "description": "+45% plasma DPS",
-      "iconId": "tower_plasma",
+      "iconId": "tower_plasma_upgrade_damage",
       "parents": [
         "unlock_plasma"
       ],
@@ -932,7 +932,7 @@
       "id": "plasma_reach_t1",
       "label": "Deep Flame",
       "description": "Plasma depth +1 cell",
-      "iconId": "tower_plasma",
+      "iconId": "tower_plasma_upgrade_reach",
       "parents": [
         "plasma_damage_t1"
       ],
@@ -954,7 +954,7 @@
       "id": "plasma_width_t1",
       "label": "Wide Flame",
       "description": "Plasma side coverage +1",
-      "iconId": "tower_plasma",
+      "iconId": "tower_plasma_upgrade_width",
       "parents": [
         "plasma_reach_t1"
       ],
@@ -998,7 +998,7 @@
       "id": "buff_range_t1",
       "label": "Aura Reach",
       "description": "Buff aura range +2",
-      "iconId": "tower_buff",
+      "iconId": "tower_buff_upgrade_range",
       "parents": [
         "unlock_buff"
       ],
@@ -1020,7 +1020,7 @@
       "id": "buff_potency_t1",
       "label": "Aura Potency",
       "description": "Stronger buff bonuses",
-      "iconId": "tower_buff",
+      "iconId": "tower_buff_upgrade_potency",
       "parents": [
         "buff_range_t1"
       ],
@@ -1043,7 +1043,7 @@
       "id": "buff_network_t1",
       "label": "Buff Network",
       "description": "Buff towers buff each other",
-      "iconId": "tower_buff",
+      "iconId": "tower_buff_upgrade_network",
       "parents": [
         "buff_potency_t1"
       ],

@@ -463,6 +463,7 @@ export function createTowerSystem({
   getBlockedRevision = null,
   onBlockedCellsChanged = null,
   onTowerPlaced = null,
+  onTowerCombatEvent = null,
 } = {}) {
   const raycaster = new THREE.Raycaster();
   let activeLocalOwnerId = typeof localOwnerId === "string" && localOwnerId.length > 0
@@ -502,6 +503,29 @@ export function createTowerSystem({
       };
     })
     .filter((entry) => !!entry);
+
+  function toSoundPosition(source) {
+    if (!source) {
+      return null;
+    }
+    const x = Number(source.x);
+    const y = Number(source.y);
+    const z = Number(source.z);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return null;
+    }
+    return { x, y, z };
+  }
+
+  function emitTowerCombatEvent(event) {
+    if (typeof onTowerCombatEvent !== "function" || !event || typeof event !== "object") {
+      return;
+    }
+    onTowerCombatEvent({
+      ...event,
+      position: toSoundPosition(event.position),
+    });
+  }
 
   const gunProjectileGeometry = new THREE.BoxGeometry(
     GUN_PROJECTILE_SIZE,
@@ -1856,6 +1880,18 @@ export function createTowerSystem({
       portalColor = mix(portalColor, neonCyan, data * grid);
       portalColor *= smoothstep(0.0, 0.7, maxXY);
     `,
+    solar: `
+      float swirlA = a * 1.8 - uTime * 1.35;
+      vec2 swirlUv = vec2(cos(swirlA), sin(swirlA)) * (r + 0.12);
+      float plasma = fbm(swirlUv * 4.8 + vec2(0.0, uTime * 0.55));
+      float bands = sin((r * 19.0) - (uTime * 3.4) + (a * 3.2)) * 0.5 + 0.5;
+      float coreMask = smoothstep(0.92, 0.12, r);
+      float corona = smoothstep(0.74, 0.28, abs(r - 0.42));
+      vec3 amber = mix(vec3(0.32, 0.14, 0.0), vec3(0.98, 0.58, 0.06), plasma);
+      vec3 gold = mix(amber, vec3(1.0, 0.9, 0.42), bands * coreMask);
+      portalColor = gold + (vec3(1.0, 0.96, 0.7) * corona * 0.72);
+      portalColor *= coreMask;
+    `,
   };
 
   const TOWER_ELEMENT_THEME_BY_TYPE = {
@@ -1865,7 +1901,7 @@ export function createTowerSystem({
     laserSniper: "acid",
     mortar: "magic",
     tesla: "cyber",
-    buff: "water",
+    buff: "solar",
   };
 
   function createElementalPortalMaterial(effectKey, opacity = 1) {
@@ -4807,6 +4843,11 @@ export function createTowerSystem({
     spawnGunMuzzleFlash(tempVecA);
     tower.gunMuzzleFlashTimer = Math.max(0, Number(GUN_TOWER_CONFIG.muzzleFlashDuration) || 0.08);
     tower.gunPortalPulse = 1;
+    emitTowerCombatEvent({
+      kind: "gun_fire",
+      towerType: tower?.type ?? "gun",
+      position: tempVecA,
+    });
     return true;
   }
 
@@ -5167,6 +5208,11 @@ export function createTowerSystem({
 
     const fieldCenter = target.mesh.position.clone();
     spawnSlowFieldEffect(fieldCenter);
+    emitTowerCombatEvent({
+      kind: "slow_proc",
+      towerType: tower?.type ?? "slow",
+      position: fieldCenter,
+    });
 
     if (typeof enemySystem.applyTemporarySlowInAabb === "function") {
       tempVecF.copy(fieldCenter);
@@ -5264,6 +5310,11 @@ export function createTowerSystem({
       tower.chargeTimer -= chargeInterval;
       getAoePulseOrigin(tower, tempVecA);
       spawnAoePulse(tempVecA, pulseRange, pulseDamage);
+      emitTowerCombatEvent({
+        kind: "aoe_pulse",
+        towerType: tower?.type ?? "aoe",
+        position: tempVecA,
+      });
     }
 
     chargeRatio = THREE.MathUtils.clamp(tower.chargeTimer / chargeInterval, 0, 1);
@@ -5429,6 +5480,11 @@ export function createTowerSystem({
 
     const beamEnd = hitTargets[hitTargets.length - 1]?.aimPoint || primaryAimPoint;
     spawnLaserBeam(tempVecB, beamEnd);
+    emitTowerCombatEvent({
+      kind: "laser_sniper_fire",
+      towerType: tower?.type ?? "laserSniper",
+      position: tempVecB,
+    });
     tower.laserSniperPulse = 1.2;
     tower.cooldown = LASER_SNIPER_FIRE_INTERVAL * getTowerFireIntervalScale(tower);
   }
@@ -5569,6 +5625,11 @@ export function createTowerSystem({
       ),
       sourceTower: tower,
     });
+    emitTowerCombatEvent({
+      kind: "mortar_launch",
+      towerType: tower?.type ?? "mortar",
+      position: tempVecA,
+    });
     return true;
   }
 
@@ -5632,12 +5693,18 @@ export function createTowerSystem({
     }
     const explosionPoint = projectile.mesh.position.clone();
     spawnMortarExplosion(explosionPoint, projectile.splashRadius);
-    applyPointDamageToTowerTargetableEnemies(
+    const didHitEnemy = applyPointDamageToTowerTargetableEnemies(
       enemySystem,
       explosionPoint,
       projectile.splashRadius,
       projectile.splashDamage
     );
+    emitTowerCombatEvent({
+      kind: "mortar_impact",
+      towerType: projectile?.sourceTower?.type ?? "mortar",
+      position: explosionPoint,
+      didHitEnemy,
+    });
     scene.remove(projectile.mesh);
   }
 
@@ -5800,6 +5867,12 @@ export function createTowerSystem({
       }
       previousPoint = tempVecB.clone();
     }
+    emitTowerCombatEvent({
+      kind: "tesla_chain",
+      towerType: tower?.type ?? "tesla",
+      position: tempVecA,
+      chainCount: chainTargets.length,
+    });
 
     tower.cooldown = TESLA_FIRE_INTERVAL * getTowerFireIntervalScale(tower);
   }
@@ -5830,13 +5903,20 @@ export function createTowerSystem({
       if (!tower.spikesDidDamageThisCycle && enemySystem) {
         tempVecA.copy(tower.mesh.position);
         tempVecA.y = tower.baseY + 0.45;
-        applyPointDamageToTowerTargetableEnemies(
+        const didHitEnemy = applyPointDamageToTowerTargetableEnemies(
           enemySystem,
           tempVecA,
           SPIKES_HIT_RADIUS,
           SPIKES_DAMAGE * getTowerDamageScale(tower)
         );
         tower.spikesDidDamageThisCycle = true;
+        if (didHitEnemy) {
+          emitTowerCombatEvent({
+            kind: "spikes_proc",
+            towerType: tower?.type ?? "spikes",
+            position: tempVecA,
+          });
+        }
       }
     }
 
@@ -5955,6 +6035,7 @@ export function createTowerSystem({
     const wallCell = tower.plasmaWallCell;
     const targetCells = getPlasmaTargetCellsForTower(tower);
     if (targetCells.length === 0 || !Number.isInteger(wallCell?.y)) {
+      tower.plasmaWasContacting = false;
       updatePlasmaVisualState(tower, deltaSeconds, 0.82);
       return;
     }
@@ -6003,6 +6084,14 @@ export function createTowerSystem({
       }
     }
 
+    if (hitAny && !tower.plasmaWasContacting) {
+      emitTowerCombatEvent({
+        kind: "plasma_burst",
+        towerType: tower?.type ?? "plasma",
+        position: tower.mesh?.position ?? null,
+      });
+    }
+    tower.plasmaWasContacting = hitAny;
     updatePlasmaVisualState(tower, deltaSeconds, hitAny ? 1 : 0.82);
   }
 
@@ -6150,6 +6239,13 @@ export function createTowerSystem({
       effect?.mesh?.material?.dispose?.();
     }
     teslaBoltEffects.length = 0;
+
+    for (const tower of towers) {
+      if (!tower) {
+        continue;
+      }
+      tower.plasmaWasContacting = false;
+    }
   }
 
   function setCombatEnabled(nextEnabled) {

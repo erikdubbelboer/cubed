@@ -23,6 +23,7 @@ export function createPlayer({
   getSurfaceYAtWorld = null,
   onPickupRangeTechGrant = null,
   onWeaponVisualEvent = null,
+  onMovementAudioEvent = null,
 }) {
   const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
   const controls = new PointerLockControls(camera, domElement);
@@ -332,6 +333,9 @@ export function createPlayer({
   let jetpackFuel = jetpackMaxFuel;
   let hasInfiniteJetpackFuel = false;
   let jetpackFuelEfficiencyMultiplier = 1;
+  let movementAudioInitialized = false;
+  let movementAudioWasGrounded = false;
+  let movementAudioJetpackActive = false;
 
   const sharedWeaponConfig = PLAYER_CONFIG.weapon ?? {};
   const weaponConfigs = PLAYER_CONFIG.weapons ?? {};
@@ -799,6 +803,7 @@ export function createPlayer({
     isMenuMode = mode;
     if (isMenuMode) {
       setPrimaryHeld(false);
+      stopJetpackAudio();
     }
     primaryReleasedSinceLastUpdate = false;
   }
@@ -986,6 +991,38 @@ export function createPlayer({
       return;
     }
     onWeaponVisualEvent(event);
+  }
+
+  function getMovementAudioPosition() {
+    return {
+      x: Number(camera.position.x) || 0,
+      y: Number(camera.position.y) || 0,
+      z: Number(camera.position.z) || 0,
+    };
+  }
+
+  function emitMovementAudioEvent(event) {
+    if (typeof onMovementAudioEvent !== "function" || !event || typeof event !== "object") {
+      return;
+    }
+    onMovementAudioEvent(event);
+  }
+
+  function stopJetpackAudio() {
+    if (!movementAudioJetpackActive) {
+      return;
+    }
+    movementAudioJetpackActive = false;
+    emitMovementAudioEvent({
+      kind: "jetpack_stop",
+      position: getMovementAudioPosition(),
+    });
+  }
+
+  function resetMovementAudioState() {
+    stopJetpackAudio();
+    movementAudioInitialized = false;
+    movementAudioWasGrounded = false;
   }
 
   function spawnProjectileFromWeaponType(type) {
@@ -1827,13 +1864,31 @@ export function createPlayer({
 
     const currentSupportY = getSupportCameraYAtPosition(camera.position.x, camera.position.z, camera.position.y);
     const isGrounded = camera.position.y <= currentSupportY + PLAYER_CONFIG.movement.groundedEpsilon;
+    if (!movementAudioInitialized) {
+      movementAudioInitialized = true;
+      movementAudioWasGrounded = isGrounded;
+    }
     if (jumpQueued && isGrounded) {
       verticalVelocity = jumpVelocity;
+      movementAudioWasGrounded = false;
+      emitMovementAudioEvent({
+        kind: "jump",
+        position: getMovementAudioPosition(),
+      });
     }
     jumpQueued = false;
 
     const isTryingJetpack = jumpHeld && !isGrounded;
     const usingJetpack = isTryingJetpack && (hasInfiniteJetpackFuel || jetpackFuel > 0);
+    if (usingJetpack && !movementAudioJetpackActive) {
+      movementAudioJetpackActive = true;
+      emitMovementAudioEvent({
+        kind: "jetpack_start",
+        position: getMovementAudioPosition(),
+      });
+    } else if (!usingJetpack && movementAudioJetpackActive) {
+      stopJetpackAudio();
+    }
     if (usingJetpack) {
       if (hasInfiniteJetpackFuel) {
         jetpackFuel = jetpackMaxFuel;
@@ -1855,10 +1910,15 @@ export function createPlayer({
     }
 
     verticalVelocity -= gravity * deltaSeconds;
+    const verticalVelocityBeforeGroundClamp = verticalVelocity;
     camera.position.y += verticalVelocity * deltaSeconds;
 
     const supportAfterVertical = getSupportCameraYAtPosition(camera.position.x, camera.position.z, camera.position.y);
+    let landingImpactSpeed = 0;
+    let landedThisFrame = false;
     if (camera.position.y < supportAfterVertical) {
+      landedThisFrame = !movementAudioWasGrounded && verticalVelocityBeforeGroundClamp < -1.15;
+      landingImpactSpeed = Math.abs(verticalVelocityBeforeGroundClamp);
       camera.position.y = supportAfterVertical;
       verticalVelocity = 0;
     }
@@ -2131,6 +2191,17 @@ export function createPlayer({
       camera.position.x = THREE.MathUtils.clamp(camera.position.x, minX, maxX);
       camera.position.z = THREE.MathUtils.clamp(camera.position.z, minZ, maxZ);
     }
+
+    const finalSupportY = getSupportCameraYAtPosition(camera.position.x, camera.position.z, camera.position.y);
+    const isGroundedAfterMovement = camera.position.y <= finalSupportY + PLAYER_CONFIG.movement.groundedEpsilon;
+    if (landedThisFrame && isGroundedAfterMovement) {
+      emitMovementAudioEvent({
+        kind: "land",
+        position: getMovementAudioPosition(),
+        impactSpeed: landingImpactSpeed,
+      });
+    }
+    movementAudioWasGrounded = isGroundedAfterMovement;
   }
 
   function update(deltaSeconds, enemySystem) {
@@ -2158,6 +2229,7 @@ export function createPlayer({
     virtualState.forward = 0;
     virtualState.strafe = 0;
     jumpQueued = false;
+    resetMovementAudioState();
     setJumpHeld(false);
   }
 

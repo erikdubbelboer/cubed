@@ -180,6 +180,385 @@ function drawElementalCubeIcon(ctx, x, y, size, palette = {}) {
   ctx.fill();
 }
 
+function traceBurstPath(ctx, cx, cy, outerRadius, innerRadius, points = 8) {
+  if (points < 3) {
+    return;
+  }
+  ctx.beginPath();
+  for (let i = 0; i < points * 2; i += 1) {
+    const angle = (-Math.PI * 0.5) + ((Math.PI * i) / points);
+    const radius = (i % 2 === 0) ? outerRadius : innerRadius;
+    const px = cx + (Math.cos(angle) * radius);
+    const py = cy + (Math.sin(angle) * radius);
+    if (i === 0) {
+      ctx.moveTo(px, py);
+    } else {
+      ctx.lineTo(px, py);
+    }
+  }
+  ctx.closePath();
+}
+
+function drawUpgradeBadge(
+  ctx,
+  x,
+  y,
+  size,
+  renderer,
+  {
+    fill = "rgba(17, 24, 34, 0.88)",
+    stroke = "rgba(220, 236, 255, 0.9)",
+    offsetX = 0.56,
+    offsetY = 0.56,
+    scale = 0.3,
+  } = {}
+) {
+  const badgeSize = size * scale;
+  const badgeX = x + (size * offsetX);
+  const badgeY = y + (size * offsetY);
+  ctx.save();
+  drawPanel(
+    ctx,
+    badgeX,
+    badgeY,
+    badgeSize,
+    badgeSize,
+    badgeSize * 0.28,
+    fill,
+    stroke,
+    Math.max(1.1, badgeSize * 0.11)
+  );
+  renderer(ctx, badgeX, badgeY, badgeSize);
+  ctx.restore();
+}
+
+function drawUpgradeDamageOverlay(ctx, x, y, size) {
+  drawUpgradeBadge(ctx, x, y, size, (badgeCtx, badgeX, badgeY, badgeSize) => {
+    const cx = badgeX + (badgeSize * 0.5);
+    const cy = badgeY + (badgeSize * 0.5);
+    traceBurstPath(badgeCtx, cx, cy, badgeSize * 0.28, badgeSize * 0.14, 7);
+    badgeCtx.fillStyle = "rgba(255, 154, 109, 0.98)";
+    badgeCtx.fill();
+  }, {
+    fill: "rgba(72, 28, 18, 0.9)",
+    stroke: "rgba(255, 203, 170, 0.92)",
+  });
+}
+
+function drawUpgradeFireRateOverlay(ctx, x, y, size) {
+  drawUpgradeBadge(ctx, x, y, size, (badgeCtx, badgeX, badgeY, badgeSize) => {
+    const cx = badgeX + (badgeSize * 0.5);
+    const cy = badgeY + (badgeSize * 0.52);
+    const radius = badgeSize * 0.24;
+    badgeCtx.strokeStyle = "rgba(153, 255, 214, 0.98)";
+    badgeCtx.lineWidth = Math.max(1.1, badgeSize * 0.11);
+    badgeCtx.beginPath();
+    badgeCtx.arc(cx, cy, radius, Math.PI * 0.22, Math.PI * 1.28);
+    badgeCtx.stroke();
+    badgeCtx.beginPath();
+    badgeCtx.arc(cx, cy, radius * 0.68, Math.PI * 1.35, Math.PI * 2.08);
+    badgeCtx.stroke();
+    badgeCtx.fillStyle = "rgba(153, 255, 214, 0.98)";
+    fillPath(badgeCtx, [
+      [cx + (radius * 0.98), cy - (radius * 0.1)],
+      [cx + (radius * 0.68), cy - (radius * 0.18)],
+      [cx + (radius * 0.78), cy + (radius * 0.08)],
+    ], "rgba(153, 255, 214, 0.98)");
+    fillPath(badgeCtx, [
+      [cx - (radius * 0.45), cy + (radius * 0.74)],
+      [cx - (radius * 0.36), cy + (radius * 0.44)],
+      [cx - (radius * 0.65), cy + (radius * 0.55)],
+    ], "rgba(153, 255, 214, 0.98)");
+  }, {
+    fill: "rgba(15, 52, 43, 0.9)",
+    stroke: "rgba(184, 255, 233, 0.92)",
+  });
+}
+
+function drawUpgradeRangeOverlay(ctx, x, y, size) {
+  ctx.save();
+  const cx = x + (size * 0.5);
+  const cy = y + (size * 0.5);
+  ctx.strokeStyle = "rgba(122, 233, 255, 0.94)";
+  ctx.lineWidth = Math.max(1.5, size * 0.045);
+  ctx.beginPath();
+  ctx.arc(cx, cy, size * 0.39, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(178, 246, 255, 0.72)";
+  ctx.lineWidth = Math.max(1.1, size * 0.028);
+  ctx.beginPath();
+  ctx.arc(cx, cy, size * 0.31, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(178, 246, 255, 0.96)";
+  ctx.beginPath();
+  ctx.arc(cx + (size * 0.22), cy - (size * 0.22), size * 0.04, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawUpgradePierceOverlay(ctx, x, y, size) {
+  drawUpgradeBadge(ctx, x, y, size, (badgeCtx, badgeX, badgeY, badgeSize) => {
+    badgeCtx.strokeStyle = "rgba(211, 243, 255, 0.96)";
+    badgeCtx.lineWidth = Math.max(1, badgeSize * 0.1);
+    badgeCtx.lineCap = "round";
+    badgeCtx.beginPath();
+    badgeCtx.moveTo(badgeX + (badgeSize * 0.18), badgeY + (badgeSize * 0.5));
+    badgeCtx.lineTo(badgeX + (badgeSize * 0.78), badgeY + (badgeSize * 0.5));
+    badgeCtx.stroke();
+    badgeCtx.beginPath();
+    badgeCtx.moveTo(badgeX + (badgeSize * 0.38), badgeY + (badgeSize * 0.26));
+    badgeCtx.lineTo(badgeX + (badgeSize * 0.38), badgeY + (badgeSize * 0.74));
+    badgeCtx.moveTo(badgeX + (badgeSize * 0.6), badgeY + (badgeSize * 0.22));
+    badgeCtx.lineTo(badgeX + (badgeSize * 0.6), badgeY + (badgeSize * 0.78));
+    badgeCtx.stroke();
+    fillPath(badgeCtx, [
+      [badgeX + (badgeSize * 0.82), badgeY + (badgeSize * 0.5)],
+      [badgeX + (badgeSize * 0.67), badgeY + (badgeSize * 0.39)],
+      [badgeX + (badgeSize * 0.67), badgeY + (badgeSize * 0.61)],
+    ], "rgba(211, 243, 255, 0.96)");
+  }, {
+    fill: "rgba(22, 42, 63, 0.9)",
+    stroke: "rgba(188, 236, 255, 0.92)",
+  });
+}
+
+function drawUpgradeSlowStrengthOverlay(ctx, x, y, size) {
+  drawUpgradeBadge(ctx, x, y, size, (badgeCtx, badgeX, badgeY, badgeSize) => {
+    const cx = badgeX + (badgeSize * 0.5);
+    const cy = badgeY + (badgeSize * 0.5);
+    const arm = badgeSize * 0.24;
+    badgeCtx.strokeStyle = "rgba(212, 238, 255, 0.96)";
+    badgeCtx.lineWidth = Math.max(1, badgeSize * 0.09);
+    badgeCtx.lineCap = "round";
+    for (let i = 0; i < 3; i += 1) {
+      const angle = (Math.PI * i) / 3;
+      const dx = Math.cos(angle) * arm;
+      const dy = Math.sin(angle) * arm;
+      badgeCtx.beginPath();
+      badgeCtx.moveTo(cx - dx, cy - dy);
+      badgeCtx.lineTo(cx + dx, cy + dy);
+      badgeCtx.stroke();
+    }
+  }, {
+    fill: "rgba(42, 31, 74, 0.9)",
+    stroke: "rgba(220, 210, 255, 0.92)",
+  });
+}
+
+function drawUpgradeDurationOverlay(ctx, x, y, size) {
+  drawUpgradeBadge(ctx, x, y, size, (badgeCtx, badgeX, badgeY, badgeSize) => {
+    const cx = badgeX + (badgeSize * 0.5);
+    const cy = badgeY + (badgeSize * 0.5);
+    const radius = badgeSize * 0.26;
+    badgeCtx.strokeStyle = "rgba(232, 245, 255, 0.96)";
+    badgeCtx.lineWidth = Math.max(1, badgeSize * 0.09);
+    badgeCtx.beginPath();
+    badgeCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+    badgeCtx.stroke();
+    badgeCtx.beginPath();
+    badgeCtx.moveTo(cx, cy);
+    badgeCtx.lineTo(cx, cy - (radius * 0.65));
+    badgeCtx.lineTo(cx + (radius * 0.48), cy);
+    badgeCtx.stroke();
+  }, {
+    fill: "rgba(40, 45, 70, 0.9)",
+    stroke: "rgba(214, 229, 255, 0.9)",
+  });
+}
+
+function drawUpgradeBlastRadiusOverlay(ctx, x, y, size) {
+  drawUpgradeBadge(ctx, x, y, size, (badgeCtx, badgeX, badgeY, badgeSize) => {
+    const cx = badgeX + (badgeSize * 0.5);
+    const cy = badgeY + (badgeSize * 0.5);
+    const radius = badgeSize * 0.18;
+    badgeCtx.strokeStyle = "rgba(167, 245, 255, 0.98)";
+    badgeCtx.lineWidth = Math.max(1, badgeSize * 0.09);
+    badgeCtx.beginPath();
+    badgeCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+    badgeCtx.stroke();
+    for (let i = 0; i < 4; i += 1) {
+      const angle = (Math.PI * 0.25) + ((Math.PI * 0.5) * i);
+      const inner = radius + (badgeSize * 0.05);
+      const outer = radius + (badgeSize * 0.15);
+      badgeCtx.beginPath();
+      badgeCtx.moveTo(cx + (Math.cos(angle) * inner), cy + (Math.sin(angle) * inner));
+      badgeCtx.lineTo(cx + (Math.cos(angle) * outer), cy + (Math.sin(angle) * outer));
+      badgeCtx.stroke();
+    }
+  }, {
+    fill: "rgba(14, 58, 65, 0.9)",
+    stroke: "rgba(168, 248, 255, 0.9)",
+  });
+}
+
+function drawUpgradeChainOverlay(ctx, x, y, size) {
+  drawUpgradeBadge(ctx, x, y, size, (badgeCtx, badgeX, badgeY, badgeSize) => {
+    badgeCtx.strokeStyle = "rgba(255, 167, 219, 0.98)";
+    badgeCtx.lineWidth = Math.max(1.1, badgeSize * 0.1);
+    badgeCtx.lineJoin = "round";
+    badgeCtx.lineCap = "round";
+    badgeCtx.beginPath();
+    badgeCtx.moveTo(badgeX + (badgeSize * 0.24), badgeY + (badgeSize * 0.28));
+    badgeCtx.lineTo(badgeX + (badgeSize * 0.5), badgeY + (badgeSize * 0.48));
+    badgeCtx.lineTo(badgeX + (badgeSize * 0.36), badgeY + (badgeSize * 0.74));
+    badgeCtx.moveTo(badgeX + (badgeSize * 0.5), badgeY + (badgeSize * 0.48));
+    badgeCtx.lineTo(badgeX + (badgeSize * 0.76), badgeY + (badgeSize * 0.26));
+    badgeCtx.moveTo(badgeX + (badgeSize * 0.5), badgeY + (badgeSize * 0.48));
+    badgeCtx.lineTo(badgeX + (badgeSize * 0.76), badgeY + (badgeSize * 0.7));
+    badgeCtx.stroke();
+  }, {
+    fill: "rgba(68, 24, 60, 0.9)",
+    stroke: "rgba(255, 192, 233, 0.92)",
+  });
+}
+
+function drawUpgradeReachOverlay(ctx, x, y, size) {
+  drawUpgradeBadge(ctx, x, y, size, (badgeCtx, badgeX, badgeY, badgeSize) => {
+    badgeCtx.strokeStyle = "rgba(179, 250, 255, 0.98)";
+    badgeCtx.lineWidth = Math.max(1.1, badgeSize * 0.09);
+    badgeCtx.lineCap = "round";
+    badgeCtx.beginPath();
+    badgeCtx.moveTo(badgeX + (badgeSize * 0.22), badgeY + (badgeSize * 0.5));
+    badgeCtx.lineTo(badgeX + (badgeSize * 0.76), badgeY + (badgeSize * 0.5));
+    badgeCtx.stroke();
+    fillPath(badgeCtx, [
+      [badgeX + (badgeSize * 0.8), badgeY + (badgeSize * 0.5)],
+      [badgeX + (badgeSize * 0.6), badgeY + (badgeSize * 0.34)],
+      [badgeX + (badgeSize * 0.6), badgeY + (badgeSize * 0.66)],
+    ], "rgba(179, 250, 255, 0.98)");
+    badgeCtx.beginPath();
+    badgeCtx.moveTo(badgeX + (badgeSize * 0.22), badgeY + (badgeSize * 0.34));
+    badgeCtx.lineTo(badgeX + (badgeSize * 0.38), badgeY + (badgeSize * 0.34));
+    badgeCtx.moveTo(badgeX + (badgeSize * 0.22), badgeY + (badgeSize * 0.66));
+    badgeCtx.lineTo(badgeX + (badgeSize * 0.42), badgeY + (badgeSize * 0.66));
+    badgeCtx.stroke();
+  }, {
+    fill: "rgba(14, 54, 62, 0.9)",
+    stroke: "rgba(188, 248, 255, 0.92)",
+  });
+}
+
+function drawUpgradeWidthOverlay(ctx, x, y, size) {
+  drawUpgradeBadge(ctx, x, y, size, (badgeCtx, badgeX, badgeY, badgeSize) => {
+    badgeCtx.strokeStyle = "rgba(179, 250, 255, 0.98)";
+    badgeCtx.lineWidth = Math.max(1.1, badgeSize * 0.09);
+    badgeCtx.lineCap = "round";
+    badgeCtx.beginPath();
+    badgeCtx.moveTo(badgeX + (badgeSize * 0.26), badgeY + (badgeSize * 0.5));
+    badgeCtx.lineTo(badgeX + (badgeSize * 0.74), badgeY + (badgeSize * 0.5));
+    badgeCtx.stroke();
+    fillPath(badgeCtx, [
+      [badgeX + (badgeSize * 0.18), badgeY + (badgeSize * 0.5)],
+      [badgeX + (badgeSize * 0.34), badgeY + (badgeSize * 0.36)],
+      [badgeX + (badgeSize * 0.34), badgeY + (badgeSize * 0.64)],
+    ], "rgba(179, 250, 255, 0.98)");
+    fillPath(badgeCtx, [
+      [badgeX + (badgeSize * 0.82), badgeY + (badgeSize * 0.5)],
+      [badgeX + (badgeSize * 0.66), badgeY + (badgeSize * 0.36)],
+      [badgeX + (badgeSize * 0.66), badgeY + (badgeSize * 0.64)],
+    ], "rgba(179, 250, 255, 0.98)");
+  }, {
+    fill: "rgba(14, 54, 62, 0.9)",
+    stroke: "rgba(188, 248, 255, 0.92)",
+  });
+}
+
+function drawUpgradePotencyOverlay(ctx, x, y, size) {
+  drawUpgradeBadge(ctx, x, y, size, (badgeCtx, badgeX, badgeY, badgeSize) => {
+    const cx = badgeX + (badgeSize * 0.44);
+    const cy = badgeY + (badgeSize * 0.44);
+    traceBurstPath(badgeCtx, cx, cy, badgeSize * 0.2, badgeSize * 0.1, 6);
+    badgeCtx.fillStyle = "rgba(255, 213, 110, 0.98)";
+    badgeCtx.fill();
+    badgeCtx.strokeStyle = "rgba(255, 243, 190, 0.98)";
+    badgeCtx.lineWidth = Math.max(1, badgeSize * 0.08);
+    badgeCtx.beginPath();
+    badgeCtx.moveTo(badgeX + (badgeSize * 0.7), badgeY + (badgeSize * 0.24));
+    badgeCtx.lineTo(badgeX + (badgeSize * 0.7), badgeY + (badgeSize * 0.62));
+    badgeCtx.moveTo(badgeX + (badgeSize * 0.52), badgeY + (badgeSize * 0.43));
+    badgeCtx.lineTo(badgeX + (badgeSize * 0.88), badgeY + (badgeSize * 0.43));
+    badgeCtx.stroke();
+  }, {
+    fill: "rgba(78, 58, 15, 0.9)",
+    stroke: "rgba(255, 227, 148, 0.92)",
+  });
+}
+
+function drawUpgradeNetworkOverlay(ctx, x, y, size) {
+  drawUpgradeBadge(ctx, x, y, size, (badgeCtx, badgeX, badgeY, badgeSize) => {
+    const nodes = [
+      [badgeX + (badgeSize * 0.28), badgeY + (badgeSize * 0.64)],
+      [badgeX + (badgeSize * 0.5), badgeY + (badgeSize * 0.3)],
+      [badgeX + (badgeSize * 0.74), badgeY + (badgeSize * 0.62)],
+    ];
+    badgeCtx.strokeStyle = "rgba(255, 220, 128, 0.95)";
+    badgeCtx.lineWidth = Math.max(1, badgeSize * 0.075);
+    badgeCtx.beginPath();
+    badgeCtx.moveTo(nodes[0][0], nodes[0][1]);
+    badgeCtx.lineTo(nodes[1][0], nodes[1][1]);
+    badgeCtx.lineTo(nodes[2][0], nodes[2][1]);
+    badgeCtx.stroke();
+    badgeCtx.fillStyle = "rgba(255, 220, 128, 0.98)";
+    for (const [nodeX, nodeY] of nodes) {
+      badgeCtx.beginPath();
+      badgeCtx.arc(nodeX, nodeY, badgeSize * 0.08, 0, Math.PI * 2);
+      badgeCtx.fill();
+    }
+  }, {
+    fill: "rgba(82, 58, 14, 0.9)",
+    stroke: "rgba(255, 227, 148, 0.92)",
+  });
+}
+
+function drawUpgradeCostOverlay(ctx, x, y, size) {
+  drawUpgradeBadge(ctx, x, y, size, (badgeCtx, badgeX, badgeY, badgeSize) => {
+    const cx = badgeX + (badgeSize * 0.5);
+    const cy = badgeY + (badgeSize * 0.5);
+    badgeCtx.fillStyle = "rgba(255, 221, 132, 0.98)";
+    badgeCtx.beginPath();
+    badgeCtx.arc(cx, cy, badgeSize * 0.22, 0, Math.PI * 2);
+    badgeCtx.fill();
+    badgeCtx.fillStyle = "rgba(101, 67, 0, 0.92)";
+    badgeCtx.font = `700 ${Math.max(8, badgeSize * 0.34)}px ${FONT_STACK}`;
+    badgeCtx.textAlign = "center";
+    badgeCtx.textBaseline = "middle";
+    badgeCtx.fillText("$", cx, cy + (badgeSize * 0.02));
+  }, {
+    fill: "rgba(80, 58, 14, 0.9)",
+    stroke: "rgba(255, 227, 148, 0.92)",
+  });
+}
+
+function drawUpgradeTransparencyOverlay(ctx, x, y, size) {
+  drawUpgradeBadge(ctx, x, y, size, (badgeCtx, badgeX, badgeY, badgeSize) => {
+    drawPanel(
+      badgeCtx,
+      badgeX + (badgeSize * 0.24),
+      badgeY + (badgeSize * 0.2),
+      badgeSize * 0.36,
+      badgeSize * 0.36,
+      badgeSize * 0.08,
+      "rgba(182, 221, 255, 0.28)",
+      "rgba(208, 235, 255, 0.76)",
+      Math.max(1, badgeSize * 0.08)
+    );
+    drawPanel(
+      badgeCtx,
+      badgeX + (badgeSize * 0.4),
+      badgeY + (badgeSize * 0.36),
+      badgeSize * 0.36,
+      badgeSize * 0.36,
+      badgeSize * 0.08,
+      "rgba(182, 221, 255, 0.52)",
+      "rgba(228, 245, 255, 0.94)",
+      Math.max(1, badgeSize * 0.08)
+    );
+  }, {
+    fill: "rgba(32, 42, 55, 0.9)",
+    stroke: "rgba(198, 226, 255, 0.92)",
+  });
+}
+
 
 function drawIconTowerLaser(ctx, x, y, size) {
   drawElementalCubeIcon(ctx, x, y, size, {
@@ -272,10 +651,10 @@ function drawIconTowerSpikes(ctx, x, y, size) {
 }
 
 function drawIconTowerBlock(ctx, x, y, size) {
-  const left = x + size * 0.23;
+  const left = x + size * 0.22;
   const top = y + size * 0.22;
-  const width = size * 0.54;
-  const height = size * 0.54;
+  const width = size * 0.56;
+  const height = size * 0.56;
   drawPanel(
     ctx,
     left,
@@ -287,21 +666,6 @@ function drawIconTowerBlock(ctx, x, y, size) {
     "rgba(182, 222, 232, 0.94)",
     Math.max(1.2, size * 0.04)
   );
-  ctx.fillStyle = "rgba(120, 220, 229, 0.9)";
-  ctx.fillRect(
-    left + width * 0.12,
-    top + height * 0.14,
-    width * 0.76,
-    height * 0.18
-  );
-  ctx.strokeStyle = "rgba(197, 242, 248, 0.92)";
-  ctx.lineWidth = Math.max(1, size * 0.03);
-  ctx.beginPath();
-  ctx.moveTo(left + width * 0.16, top + height * 0.48);
-  ctx.lineTo(left + width * 0.84, top + height * 0.48);
-  ctx.moveTo(left + width * 0.5, top + height * 0.36);
-  ctx.lineTo(left + width * 0.5, top + height * 0.82);
-  ctx.stroke();
 }
 
 function drawIconTowerPlasma(ctx, x, y, size) {
@@ -792,7 +1156,143 @@ function drawIconDefault(ctx, x, y, size) {
   drawTowerBaseIcon(ctx, x, y, size);
 }
 
+const TOWER_UPGRADE_ICON_CONFIG = {
+  tower_block_upgrade_cost: {
+    base: drawIconTowerBlock,
+    overlay: drawUpgradeCostOverlay,
+  },
+  tower_block_upgrade_transparency: {
+    base: drawIconTowerBlock,
+    overlay: drawUpgradeTransparencyOverlay,
+  },
+  tower_gun_upgrade_damage: {
+    base: drawIconTowerLaser,
+    overlay: drawUpgradeDamageOverlay,
+  },
+  tower_gun_upgrade_fire_rate: {
+    base: drawIconTowerLaser,
+    overlay: drawUpgradeFireRateOverlay,
+  },
+  tower_gun_upgrade_range: {
+    base: drawIconTowerLaser,
+    overlay: drawUpgradeRangeOverlay,
+  },
+  tower_gun_upgrade_pierce: {
+    base: drawIconTowerLaser,
+    overlay: drawUpgradePierceOverlay,
+  },
+  tower_aoe_upgrade_damage: {
+    base: drawIconTowerAoe,
+    overlay: drawUpgradeDamageOverlay,
+  },
+  tower_aoe_upgrade_fire_rate: {
+    base: drawIconTowerAoe,
+    overlay: drawUpgradeFireRateOverlay,
+  },
+  tower_aoe_upgrade_range: {
+    base: drawIconTowerAoe,
+    overlay: drawUpgradeRangeOverlay,
+  },
+  tower_slow_upgrade_slow_strength: {
+    base: drawIconTowerSlow,
+    overlay: drawUpgradeSlowStrengthOverlay,
+  },
+  tower_slow_upgrade_duration: {
+    base: drawIconTowerSlow,
+    overlay: drawUpgradeDurationOverlay,
+  },
+  tower_slow_upgrade_fire_rate: {
+    base: drawIconTowerSlow,
+    overlay: drawUpgradeFireRateOverlay,
+  },
+  tower_laser_sniper_upgrade_pierce: {
+    base: drawIconTowerLaserSniper,
+    overlay: drawUpgradePierceOverlay,
+  },
+  tower_laser_sniper_upgrade_damage: {
+    base: drawIconTowerLaserSniper,
+    overlay: drawUpgradeDamageOverlay,
+  },
+  tower_laser_sniper_upgrade_fire_rate: {
+    base: drawIconTowerLaserSniper,
+    overlay: drawUpgradeFireRateOverlay,
+  },
+  tower_mortar_upgrade_blast_radius: {
+    base: drawIconTowerMortar,
+    overlay: drawUpgradeBlastRadiusOverlay,
+  },
+  tower_mortar_upgrade_damage: {
+    base: drawIconTowerMortar,
+    overlay: drawUpgradeDamageOverlay,
+  },
+  tower_mortar_upgrade_fire_rate: {
+    base: drawIconTowerMortar,
+    overlay: drawUpgradeFireRateOverlay,
+  },
+  tower_tesla_upgrade_chain: {
+    base: drawIconTowerTesla,
+    overlay: drawUpgradeChainOverlay,
+  },
+  tower_tesla_upgrade_damage: {
+    base: drawIconTowerTesla,
+    overlay: drawUpgradeDamageOverlay,
+  },
+  tower_tesla_upgrade_fire_rate: {
+    base: drawIconTowerTesla,
+    overlay: drawUpgradeFireRateOverlay,
+  },
+  tower_spikes_upgrade_fire_rate: {
+    base: drawIconTowerSpikes,
+    overlay: drawUpgradeFireRateOverlay,
+  },
+  tower_spikes_upgrade_damage: {
+    base: drawIconTowerSpikes,
+    overlay: drawUpgradeDamageOverlay,
+  },
+  tower_spikes_upgrade_duration: {
+    base: drawIconTowerSpikes,
+    overlay: drawUpgradeDurationOverlay,
+  },
+  tower_plasma_upgrade_damage: {
+    base: drawIconTowerPlasma,
+    overlay: drawUpgradeDamageOverlay,
+  },
+  tower_plasma_upgrade_reach: {
+    base: drawIconTowerPlasma,
+    overlay: drawUpgradeReachOverlay,
+  },
+  tower_plasma_upgrade_width: {
+    base: drawIconTowerPlasma,
+    overlay: drawUpgradeWidthOverlay,
+  },
+  tower_buff_upgrade_range: {
+    base: drawIconTowerBuff,
+    overlay: drawUpgradeRangeOverlay,
+  },
+  tower_buff_upgrade_potency: {
+    base: drawIconTowerBuff,
+    overlay: drawUpgradePotencyOverlay,
+  },
+  tower_buff_upgrade_network: {
+    base: drawIconTowerBuff,
+    overlay: drawUpgradeNetworkOverlay,
+  },
+};
+
+function drawTowerUpgradeCompositeIcon(ctx, iconId, x, y, size) {
+  const spec = TOWER_UPGRADE_ICON_CONFIG[iconId];
+  if (!spec) {
+    return false;
+  }
+  spec.base(ctx, x, y, size);
+  spec.overlay(ctx, x, y, size);
+  return true;
+}
+
 export function drawIconById(ctx, iconId, x, y, size) {
+  if (drawTowerUpgradeCompositeIcon(ctx, iconId, x, y, size)) {
+    return;
+  }
   switch (iconId) {
     case "tower_laser_add":
       drawIconTowerLaser(ctx, x, y, size);

@@ -1546,18 +1546,18 @@ export function createEnemySystem(scene, grid, options = {}) {
 
   function triggerEnemyDeathExplosion(enemy) {
     if (!enemy || enemy.deathExplosionProcessed) {
-      return;
+      return false;
     }
     enemy.deathExplosionProcessed = true;
 
     if (deathExplosionChance <= 0 || Math.random() > deathExplosionChance) {
-      return;
+      return false;
     }
 
     const explosionRadius = Math.max(0.1, ENEMY_DEATH_EXPLOSION_BASE_RADIUS + deathExplosionRadiusAdd);
     const damageScale = Math.max(0, ENEMY_DEATH_EXPLOSION_BASE_DAMAGE_SCALE + deathExplosionDamageScaleAdd);
     if (explosionRadius <= 0 || damageScale <= 0) {
-      return;
+      return false;
     }
 
     const explosionCenter = getEnemyCollisionCenter(enemy, tempDefeatDropPosition).clone();
@@ -1566,6 +1566,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       applyDamageAtPoint(explosionCenter, explosionRadius, explosionDamage);
     }
     spawnDeathExplosionEffect(explosionCenter, explosionRadius);
+    return true;
   }
 
   function buildSpawnEventsFromSegments(segments) {
@@ -2059,6 +2060,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     if (!enemy || !enemy.alive || enemy.dying) {
       return;
     }
+    const didExplode = triggerEnemyDeathExplosion(enemy);
     if (onEnemyDefeated) {
       const configuredReward = Number(ENEMY_TYPES[enemy.type]?.cashReward);
       const cashReward = Number.isFinite(configuredReward)
@@ -2066,11 +2068,12 @@ export function createEnemySystem(scene, grid, options = {}) {
         : Math.max(1, Math.floor(enemy.maxHealth || 1));
       if (cashReward > 0) {
         const dropPosition = getEnemyCollisionCenter(enemy, tempDefeatDropPosition).clone();
-        onEnemyDefeated(cashReward, enemy.type, dropPosition, enemy.networkId);
+        onEnemyDefeated(cashReward, enemy.type, dropPosition, enemy.networkId, {
+          didExplode,
+        });
       }
     }
     startEnemyDissolve(enemy);
-    triggerEnemyDeathExplosion(enemy);
   }
 
   function applyDamage(enemy, amount, options = {}) {

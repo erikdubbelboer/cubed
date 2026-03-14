@@ -84,6 +84,7 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Buff towers stack additively per in-range buff source on non-buff towers only.
 - Tower build FX exists: spending and path blocking are immediate, tower attacking starts only after build FX completes.
 - In co-op, tower combat simulates on the host only; the guest tower system remains active for previews, build FX, selection, ownership visuals, and replicated placements, but must not spawn projectiles or apply damage.
+- Tower combat audio follows the combat sim path: host/single-player only for now, emitted from tower fire/proc hooks rather than replicated as a separate network channel.
 - Tower targeting/damage must ignore enemies still intersecting spawn marker cubes.
 - LOS checks include ramp wedge blocking (not only terrain cube AABBs).
 
@@ -130,6 +131,7 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Terrain obstacles use `topInsetFromRadius: 0`; terrain edge side-collision grace applies only to terrain-like obstacles.
 - Ramps expose obstacle/surface helpers for movement support and side blocking.
 - Player X/Z movement is clamped to level bounds; boundary wall visuals are visual-only and must not affect physics.
+- Player jump/landing/jetpack audio is local-only and should stop on menu/reset transitions so procedural loops do not hang.
 
 ## Level Editor Contracts
 - Editor mode toggles with `N` (`waveState === "EDITOR"`) and rebuilds grid in editor mode.
