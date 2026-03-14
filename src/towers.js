@@ -1980,6 +1980,91 @@ export function createTowerSystem({
     });
   }
 
+  function createBlockTowerMesh({
+    bodyColor,
+    accentColor,
+    emissiveColor,
+    edgeColor,
+    opacity = 1,
+    transparent = false,
+    footprintOutlineColor = edgeColor,
+  }) {
+    const root = new THREE.Group();
+    const safeOpacity = THREE.MathUtils.clamp(Number(opacity) || 1, 0.05, 1);
+    const safeTransparent = transparent || safeOpacity < 0.999;
+    const halfSize = Math.max(0.05, BLOCK_TOWER_HALF_SIZE);
+    const height = Math.max(0.05, BLOCK_TOWER_HEIGHT);
+
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color: bodyColor,
+      emissive: emissiveColor,
+      emissiveIntensity: 0.18,
+      roughness: BLOCK_TOWER_CONFIG.roughness,
+      metalness: BLOCK_TOWER_CONFIG.metalness,
+      opacity: safeOpacity,
+      transparent: safeTransparent,
+      depthWrite: !safeTransparent,
+    });
+    const accentMaterial = new THREE.MeshStandardMaterial({
+      color: accentColor,
+      emissive: emissiveColor,
+      emissiveIntensity: 0.3,
+      roughness: Math.max(0, Math.min(1, (Number(BLOCK_TOWER_CONFIG.roughness) || 0.72) * 0.9)),
+      metalness: Math.max(0, Math.min(1, (Number(BLOCK_TOWER_CONFIG.metalness) || 0.08) * 1.1)),
+      opacity: safeOpacity,
+      transparent: safeTransparent,
+      depthWrite: !safeTransparent,
+    });
+
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(halfSize * 2, height, halfSize * 2),
+      bodyMaterial
+    );
+    body.position.y = height * 0.5;
+    root.add(body);
+
+    const accentInset = Math.max(0.02, halfSize * 0.14);
+    const accentWidth = Math.max(0.05, (halfSize * 2) - (accentInset * 2));
+    const accentHeight = Math.max(0.05, height * 0.17);
+    const accent = new THREE.Mesh(
+      new THREE.BoxGeometry(accentWidth, accentHeight, accentWidth),
+      accentMaterial
+    );
+    accent.position.y = height - (accentHeight * 0.5) - 0.01;
+    root.add(accent);
+
+    const outline = createFootprintOutlineMesh({
+      halfSizeX: halfSize,
+      halfSizeZ: halfSize,
+      height,
+      inset: Math.min(halfSize * 0.08, 0.08),
+      color: footprintOutlineColor,
+      opacity: 0.46,
+    });
+    root.add(outline);
+
+    root.userData.materials = [bodyMaterial, accentMaterial];
+    root.userData.blockBodyMaterial = bodyMaterial;
+    root.userData.blockAccentMaterial = accentMaterial;
+    root.userData.footprintOutlineMaterial = outline.userData.footprintOutlineMaterial;
+    bodyMaterial.userData = {
+      ...(bodyMaterial.userData || {}),
+      baseEmissiveIntensity: 0.18,
+    };
+    accentMaterial.userData = {
+      ...(accentMaterial.userData || {}),
+      baseEmissiveIntensity: 0.3,
+    };
+    if (outline.userData?.footprintOutlineMaterial) {
+      outline.userData.footprintOutlineMaterial.userData = {
+        ...(outline.userData.footprintOutlineMaterial.userData || {}),
+        baseOpacity: 0.46,
+      };
+    }
+    applyShadowSettings(root);
+    return root;
+  }
+
   function createAoeTowerMesh({
     color,
     glow,
