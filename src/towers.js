@@ -478,7 +478,7 @@ export function createTowerSystem({
   const endCell = grid.endCell ?? null;
   const gridCellSize = Math.max(0.01, Number(grid.cellSize) || 0);
   const gridCubeHalfSize = gridCellSize * 0.5;
-  const ELEMENTAL_TOWER_SIZE = 0.9;
+  const ELEMENTAL_TOWER_SIZE = gridCellSize * 0.9;
   const ELEMENTAL_TOWER_HALF_SIZE = ELEMENTAL_TOWER_SIZE * 0.5;
   const spawnTargetBlockVolumes = spawnCells
     .map((cell) => {
