@@ -73,9 +73,15 @@ const ENEMY_MODEL_PARTS = [
 ];
 const ENEMY_HEAD_COLOR = 0x66ccff;
 const ENEMY_HEAD_EMISSIVE = 0x16384a;
+const ENEMY_EYE_COLOR = 0x0f1720;
+const ENEMY_EYE_EMISSIVE = 0x030507;
+const ENEMY_EYE_SIZE = 0.14;
+const ENEMY_EYE_INSET = 0.08;
+const ENEMY_EYE_OFFSET_X = 0.24;
+const ENEMY_EYE_OFFSET_Y = 0.08;
 const ENEMY_COLLISION_BOXES = [
-  { hitPart: "body", center: { x: 0, y: 0.02, z: 0 }, halfExtents: { x: 0.9, y: 0.7, z: 0.72 } },
-  { hitPart: "head", center: { x: 0, y: 0.74, z: 0 }, halfExtents: { x: 0.58, y: 0.38, z: 0.55 } },
+  { hitPart: "body", center: { x: 0, y: -0.06, z: 0 }, halfExtents: { x: 0.9, y: 0.6, z: 0.72 } },
+  { hitPart: "head", center: { x: 0, y: 0.76, z: 0 }, halfExtents: { x: 0.58, y: 0.42, z: 0.55 } },
 ];
 
 function getDirectionOnPlane(from, to) {
@@ -1333,7 +1339,10 @@ export function createEnemySystem(scene, grid, options = {}) {
     tempCollisionLocalPoint.applyQuaternion(tempQuatA);
 
     const hitRadius = Math.max(0, Number(radius) || 0);
+    const hitThresholdSq = hitRadius * hitRadius;
     const collisionBoxes = getEnemyCollisionBoxes(enemyMesh);
+    let bestHitPart = null;
+    let bestDistanceSq = Number.POSITIVE_INFINITY;
     for (const box of collisionBoxes) {
       if (!box?.halfExtents || !box?.center) {
         continue;
@@ -1341,11 +1350,20 @@ export function createEnemySystem(scene, grid, options = {}) {
       const dx = Math.max(0, Math.abs(tempCollisionLocalPoint.x - box.center.x) - (box.halfExtents.x + hitRadius));
       const dy = Math.max(0, Math.abs(tempCollisionLocalPoint.y - box.center.y) - (box.halfExtents.y + hitRadius));
       const dz = Math.max(0, Math.abs(tempCollisionLocalPoint.z - box.center.z) - (box.halfExtents.z + hitRadius));
-      if (((dx * dx) + (dy * dy) + (dz * dz)) <= (hitRadius * hitRadius)) {
-        return box.hitPart === "head" ? "head" : "body";
+      const distanceSq = (dx * dx) + (dy * dy) + (dz * dz);
+      if (distanceSq > hitThresholdSq) {
+        continue;
+      }
+      const hitPart = box.hitPart === "head" ? "head" : "body";
+      if (
+        distanceSq < bestDistanceSq
+        || (Math.abs(distanceSq - bestDistanceSq) < 1e-6 && hitPart === "head" && bestHitPart !== "head")
+      ) {
+        bestDistanceSq = distanceSq;
+        bestHitPart = hitPart;
       }
     }
-    return null;
+    return bestHitPart;
   }
 
   function getEnemyContainmentRadius(enemy) {
@@ -1779,6 +1797,13 @@ export function createEnemySystem(scene, grid, options = {}) {
       roughness: ENEMY_CONFIG.bodyRoughness,
       metalness: ENEMY_CONFIG.bodyMetalness,
     });
+    const eyeMaterial = new THREE.MeshStandardMaterial({
+      color: ENEMY_EYE_COLOR,
+      emissive: ENEMY_EYE_EMISSIVE,
+      emissiveIntensity: ENEMY_CONFIG.bodyEmissiveIntensity * 0.75,
+      roughness: 0.35,
+      metalness: 0.25,
+    });
     let bodyMesh = null;
     for (const part of ENEMY_MODEL_PARTS) {
       const width = Math.max(0.01, part.dimensions.width * enemyScale);
@@ -1797,6 +1822,25 @@ export function createEnemySystem(scene, grid, options = {}) {
       );
       partMesh.userData.enemyHitPart = part.hitPart;
       partMesh.userData.enemyPartName = part.name;
+      if (part.name === "head") {
+        const eyeSize = Math.max(0.02, ENEMY_EYE_SIZE * enemyScale);
+        const eyeOffsetX = ENEMY_EYE_OFFSET_X * enemyScale;
+        const eyeOffsetY = ENEMY_EYE_OFFSET_Y * enemyScale;
+        const eyeInset = ENEMY_EYE_INSET * enemyScale;
+        const eyeZ = (depth * 0.5) - (eyeSize * 0.5) - eyeInset;
+        for (const eyeSide of [-1, 1]) {
+          const eyeMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(eyeSize, eyeSize, eyeSize),
+            eyeMaterial
+          );
+          eyeMesh.position.set(eyeOffsetX * eyeSide, eyeOffsetY, eyeZ);
+          eyeMesh.userData.enemyHitPart = "head";
+          eyeMesh.userData.enemyPartName = `head_eye_${eyeSide < 0 ? "left" : "right"}`;
+          eyeMesh.castShadow = true;
+          eyeMesh.receiveShadow = true;
+          partMesh.add(eyeMesh);
+        }
+      }
       visualRoot.add(partMesh);
       if (part.name === "body") {
         bodyMesh = partMesh;
@@ -1860,6 +1904,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       bodyMesh,
       bodyMaterial,
       headMaterial,
+      eyeMaterial,
       baseBodyColor: bodyMaterial.color.clone(),
       baseEmissiveIntensity: bodyMaterial.emissiveIntensity,
       hitPulseTimer: 0,
