@@ -73,12 +73,11 @@ const ENEMY_MODEL_PARTS = [
 ];
 const ENEMY_HEAD_COLOR = 0x66ccff;
 const ENEMY_HEAD_EMISSIVE = 0x16384a;
-const ENEMY_EYE_COLOR = 0x111723;
-const ENEMY_EYE_EMISSIVE = 0x0b111a;
-const ENEMY_EYE_SIZE = 0.17;
-const ENEMY_EYE_INSET = 0.08;
-const ENEMY_EYE_OFFSET_X = 0.24;
-const ENEMY_EYE_OFFSET_Y = 0.08;
+const ENEMY_EYE_COLOR = 0x05070b;
+const ENEMY_EYE_SIZE = 0.22;
+const ENEMY_EYE_INSET = 0.03;
+const ENEMY_EYE_OFFSET_X = 0.26;
+const ENEMY_EYE_OFFSET_Y = 0.1;
 const ENEMY_COLLISION_BOXES = [
   { hitPart: "body", center: { x: 0, y: -0.06, z: 0 }, halfExtents: { x: 0.9, y: 0.6, z: 0.72 } },
   { hitPart: "head", center: { x: 0, y: 0.76, z: 0 }, halfExtents: { x: 0.58, y: 0.42, z: 0.55 } },
@@ -1803,12 +1802,8 @@ export function createEnemySystem(scene, grid, options = {}) {
       roughness: ENEMY_CONFIG.bodyRoughness,
       metalness: ENEMY_CONFIG.bodyMetalness,
     });
-    const eyeMaterial = new THREE.MeshStandardMaterial({
+    const eyeMaterial = new THREE.MeshBasicMaterial({
       color: ENEMY_EYE_COLOR,
-      emissive: ENEMY_EYE_EMISSIVE,
-      emissiveIntensity: ENEMY_CONFIG.bodyEmissiveIntensity * 0.75,
-      roughness: 0.35,
-      metalness: 0.25,
     });
     let bodyMesh = null;
     for (const part of ENEMY_MODEL_PARTS) {
@@ -1833,10 +1828,11 @@ export function createEnemySystem(scene, grid, options = {}) {
         const eyeOffsetX = ENEMY_EYE_OFFSET_X * enemyScale;
         const eyeOffsetY = ENEMY_EYE_OFFSET_Y * enemyScale;
         const eyeInset = ENEMY_EYE_INSET * enemyScale;
-        const eyeZ = (depth * 0.5) - (eyeSize * 0.5) - eyeInset + Math.max(0.002, enemyScale * 0.01);
+        const eyeDepth = Math.max(0.01, eyeSize * 0.45);
+        const eyeZ = (depth * 0.5) - (eyeDepth * 0.5) - eyeInset + Math.max(0.01, enemyScale * 0.035);
         for (const eyeSide of [-1, 1]) {
           const eyeMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(eyeSize, eyeSize, eyeSize),
+            new THREE.BoxGeometry(eyeSize, eyeSize * 0.9, eyeDepth),
             eyeMaterial
           );
           eyeMesh.position.set(eyeOffsetX * eyeSide, eyeOffsetY, eyeZ);
