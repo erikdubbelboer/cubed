@@ -73,11 +73,12 @@ const ENEMY_MODEL_PARTS = [
 ];
 const ENEMY_HEAD_COLOR = 0x66ccff;
 const ENEMY_HEAD_EMISSIVE = 0x16384a;
-const ENEMY_EYE_COLOR = 0x05070b;
-const ENEMY_EYE_SIZE = 0.22;
+const ENEMY_EYE_COLOR = 0x7a0a0a;
+const ENEMY_EYE_SIZE = 0.24;
 const ENEMY_EYE_INSET = 0.03;
 const ENEMY_EYE_OFFSET_X = 0.26;
-const ENEMY_EYE_OFFSET_Y = 0.1;
+const ENEMY_EYE_OFFSET_Y = 0.12;
+const ENEMY_EYE_SLANT_RADIANS = 0.42;
 const ENEMY_COLLISION_BOXES = [
   { hitPart: "body", center: { x: 0, y: -0.06, z: 0 }, halfExtents: { x: 0.9, y: 0.6, z: 0.72 } },
   { hitPart: "head", center: { x: 0, y: 0.76, z: 0 }, halfExtents: { x: 0.58, y: 0.42, z: 0.55 } },
@@ -1802,10 +1803,15 @@ export function createEnemySystem(scene, grid, options = {}) {
       roughness: ENEMY_CONFIG.bodyRoughness,
       metalness: ENEMY_CONFIG.bodyMetalness,
     });
-    const eyeMaterial = new THREE.MeshBasicMaterial({
+    const eyeMaterial = new THREE.MeshStandardMaterial({
       color: ENEMY_EYE_COLOR,
+      emissive: ENEMY_EYE_COLOR,
+      emissiveIntensity: 0.5,
+      roughness: 0.25,
+      metalness: 0.05,
     });
     let bodyMesh = null;
+    let modelTopY = Number.NEGATIVE_INFINITY;
     for (const part of ENEMY_MODEL_PARTS) {
       const width = Math.max(0.01, part.dimensions.width * enemyScale);
       const height = Math.max(0.01, part.dimensions.height * enemyScale);
@@ -1821,6 +1827,10 @@ export function createEnemySystem(scene, grid, options = {}) {
         (part.position.y * enemyScale) + ENEMY_CONFIG.bodyYOffset,
         part.position.z * enemyScale
       );
+      const partTopY = partMesh.position.y + (height * 0.5);
+      if (partTopY > modelTopY) {
+        modelTopY = partTopY;
+      }
       partMesh.userData.enemyHitPart = part.hitPart;
       partMesh.userData.enemyPartName = part.name;
       if (part.name === "head") {
@@ -1836,6 +1846,11 @@ export function createEnemySystem(scene, grid, options = {}) {
             eyeMaterial
           );
           eyeMesh.position.set(eyeOffsetX * eyeSide, eyeOffsetY, eyeZ);
+          eyeMesh.rotation.z = eyeSide < 0 ? ENEMY_EYE_SLANT_RADIANS : -ENEMY_EYE_SLANT_RADIANS;
+          const eyeTopY = partMesh.position.y + eyeMesh.position.y + (eyeSize * 0.45);
+          if (eyeTopY > modelTopY) {
+            modelTopY = eyeTopY;
+          }
           eyeMesh.userData.enemyHitPart = "head";
           eyeMesh.userData.enemyPartName = `head_eye_${eyeSide < 0 ? "left" : "right"}`;
           eyeMesh.castShadow = true;
@@ -1886,13 +1901,12 @@ export function createEnemySystem(scene, grid, options = {}) {
     healthBarFg.position.z = ENEMY_CONFIG.healthBarFgOffsetZ;
     healthBarRoot.add(healthBarBg);
     healthBarRoot.add(healthBarFg);
-    healthBarRoot.position.set(
-      0,
-      bodyMesh.position.y
+    const healthBarBaseOffsetY = (
+      (Number.isFinite(modelTopY) ? modelTopY : bodyMesh.position.y)
       + enemyType.size * ENEMY_CONFIG.healthBarYOffsetFromEnemySize
-      + ENEMY_CONFIG.healthBarYOffset,
-      0
+      + ENEMY_CONFIG.healthBarYOffset
     );
+    healthBarRoot.position.set(0, healthBarBaseOffsetY, 0);
     enemyMesh.add(healthBarRoot);
 
     scene.add(enemyMesh);
@@ -1915,6 +1929,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       healthBarFg,
       healthBarBgWidth,
       healthBarFgWidth,
+      healthBarBaseOffsetY,
       health: enemyType.health,
       maxHealth: enemyType.health,
       speed: BASE_SPEED * enemyType.speedMultiplier,
@@ -2512,6 +2527,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       updateHitPulse(enemy, deltaSeconds);
 
       if (enemy.alive && camera && enemy.healthBarRoot) {
+        enemy.healthBarRoot.position.y = (enemy.visualRoot?.position?.y ?? 0) + (enemy.healthBarBaseOffsetY ?? 0);
         enemy.healthBarRoot.lookAt(camera.position);
       }
     }
