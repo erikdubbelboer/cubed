@@ -188,9 +188,15 @@ export function createSoundSystem({
   getAudioContext = null,
   camera = null,
   masterGain = DEFAULT_MASTER_GAIN,
+  maxMasterGain = null,
   maxVoices = DEFAULT_MAX_VOICES,
 } = {}) {
-  let masterGainValue = clamp(finiteOr(masterGain, DEFAULT_MASTER_GAIN), 0, 1);
+  const initialMasterGain = finiteOr(masterGain, DEFAULT_MASTER_GAIN);
+  const resolvedMaxMasterGain = Math.max(
+    Math.max(MIN_GAIN, initialMasterGain),
+    finiteOr(maxMasterGain, Math.max(1, initialMasterGain))
+  );
+  let masterGainValue = clamp(initialMasterGain, 0, resolvedMaxMasterGain);
   let graphAudioContext = null;
   let effectBus = null;
   let compressorNode = null;
@@ -2271,7 +2277,7 @@ export function createSoundSystem({
   }
 
   function setMasterVolume(nextValue) {
-    masterGainValue = clamp(finiteOr(nextValue, masterGainValue), 0, 1);
+    masterGainValue = clamp(finiteOr(nextValue, masterGainValue), 0, resolvedMaxMasterGain);
     if (masterGainNode && graphAudioContext) {
       masterGainNode.gain.setValueAtTime(masterGainValue, graphAudioContext.currentTime);
     }

@@ -9,6 +9,7 @@ Capture project decisions that are easy to regress but not always obvious from l
 - `src/main.js` is the orchestrator and state owner for wave/menu/economy and system wiring (`grid`, `player`, `enemies`, `towers`, `uiOverlay`, `multiplayer`).
 - Boot flow enters a DOM main menu (`sessionScreen` / `overlayScreen` in `main.js`); the canvas overlay is reserved for HUD, touch controls, and the tech tree.
 - Menu settings persist in `localStorage` via `webgame.masterVolume` and `webgame.difficulty`.
+- `GAME_CONFIG.audio.baseMasterVolume` defines the midpoint of the menu volume slider: `50%` maps to that configured gain and `100%` maps to `2x` that gain; stored `webgame.masterVolume` remains the actual applied master gain.
 
 ## Multiplayer Contracts (Co-op)
 - Transport: `@poki/netlib` via `src/multiplayer.js`.

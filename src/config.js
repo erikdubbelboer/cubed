@@ -90,6 +90,12 @@ export const GAME_CONFIG = {
     },
   },
 
+  audio: {
+    // Master gain at the midpoint of the menu volume slider.
+    // Slider mapping: 0% => 0 gain, 50% => baseMasterVolume, 100% => baseMasterVolume * 2.
+    baseMasterVolume: 1,
+  },
+
   economy: {
     // Starting cash at game start (BTD6-style opening economy).
     startingCash: 50,

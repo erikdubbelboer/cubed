@@ -14,6 +14,7 @@ const SCENE_CONFIG = GAME_CONFIG.scene;
 const LIGHT_CONFIG = GAME_CONFIG.lights;
 const UI_CONFIG = GAME_CONFIG.ui;
 const MOBILE_UI_CONFIG = UI_CONFIG.mobile ?? {};
+const AUDIO_CONFIG = GAME_CONFIG.audio ?? {};
 const WAVE_CONFIG = GAME_CONFIG.waves;
 const TOWER_CONFIG = GAME_CONFIG.towers ?? {};
 const TOWER_SELL_CONFIG = TOWER_CONFIG.sell ?? {};
@@ -61,7 +62,11 @@ const OVERLAY_SCREEN_PAUSE_MENU = "pause_menu";
 const OVERLAY_SCREEN_WEAPON_SELECT = "weapon_select";
 const STORAGE_KEY_MASTER_VOLUME = "webgame.masterVolume";
 const STORAGE_KEY_DIFFICULTY = "webgame.difficulty";
-const DEFAULT_MASTER_VOLUME = 0.18;
+const MASTER_VOLUME_SLIDER_BASE_GAIN = Number.isFinite(Number(AUDIO_CONFIG.baseMasterVolume))
+  ? Math.max(0.01, Number(AUDIO_CONFIG.baseMasterVolume))
+  : 0.18;
+const MASTER_VOLUME_SLIDER_MAX_GAIN = Math.max(0.01, MASTER_VOLUME_SLIDER_BASE_GAIN * 2);
+const DEFAULT_MASTER_VOLUME = MASTER_VOLUME_SLIDER_BASE_GAIN;
 const DIFFICULTY_PRESETS = [
   {
     id: "easy",
@@ -232,6 +237,27 @@ function clampUnitInterval(value, fallback = 0) {
     return Math.max(0, Math.min(1, Number(fallback) || 0));
   }
   return Math.max(0, Math.min(1, numeric));
+}
+
+function clampMasterVolumeGain(value, fallback = DEFAULT_MASTER_VOLUME) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return clamp(Number(fallback) || 0, 0, MASTER_VOLUME_SLIDER_MAX_GAIN);
+  }
+  return clamp(numeric, 0, MASTER_VOLUME_SLIDER_MAX_GAIN);
+}
+
+function masterVolumeGainToSliderUnit(value, fallback = DEFAULT_MASTER_VOLUME) {
+  if (MASTER_VOLUME_SLIDER_MAX_GAIN <= 0) {
+    return 0;
+  }
+  return clampUnitInterval(
+    clampMasterVolumeGain(value, fallback) / MASTER_VOLUME_SLIDER_MAX_GAIN
+  );
+}
+
+function masterVolumeSliderUnitToGain(value, fallback = 0.5) {
+  return clampUnitInterval(value, fallback) * MASTER_VOLUME_SLIDER_MAX_GAIN;
 }
 
 function roundMultiplayerLogNumber(value, digits = 2) {
@@ -764,7 +790,7 @@ let mainMenuNotice = "";
 let selectedDifficultyId = DIFFICULTY_PRESET_BY_ID.has(readStoredString(STORAGE_KEY_DIFFICULTY))
   ? readStoredString(STORAGE_KEY_DIFFICULTY)
   : "normal";
-let masterVolumeSetting = clampUnitInterval(
+let masterVolumeSetting = clampMasterVolumeGain(
   readStoredString(STORAGE_KEY_MASTER_VOLUME),
   DEFAULT_MASTER_VOLUME
 );
@@ -1137,7 +1163,7 @@ function setSelectedDifficulty(nextDifficultyId, { persist = true, broadcast = t
 }
 
 function setMasterVolumeSetting(nextVolume, { persist = true } = {}) {
-  masterVolumeSetting = clampUnitInterval(nextVolume, masterVolumeSetting);
+  masterVolumeSetting = clampMasterVolumeGain(nextVolume, masterVolumeSetting);
   soundSystem?.setMasterVolume?.(masterVolumeSetting);
   if (persist) {
     writeStoredString(STORAGE_KEY_MASTER_VOLUME, masterVolumeSetting);
@@ -1848,7 +1874,7 @@ for (const [difficultyId, button] of menuUi.difficultyButtonsById.entries()) {
 for (const slider of [menuUi.mainVolumeSlider, menuUi.pauseVolumeSlider]) {
   slider.addEventListener("input", (event) => {
     const rawValue = Number(event?.target?.value);
-    setMasterVolumeSetting((Number.isFinite(rawValue) ? rawValue : 0) / 100);
+    setMasterVolumeSetting(masterVolumeSliderUnitToGain((Number.isFinite(rawValue) ? rawValue : 0) / 100));
   });
 }
 
@@ -1915,7 +1941,7 @@ function refreshMenuUi() {
   menuUi.setState({
     sessionScreen,
     overlayScreen,
-    masterVolume: masterVolumeSetting,
+    masterVolume: masterVolumeGainToSliderUnit(masterVolumeSetting),
     mainMenu: {
       title: "Cube Command",
       subtitle: "Start a run, stage co-op, or tune your settings.",
@@ -7193,6 +7219,7 @@ function initGame() {
       getAudioContext: ensureBackgroundAudioContext,
       camera,
       masterGain: masterVolumeSetting,
+      maxMasterGain: MASTER_VOLUME_SLIDER_MAX_GAIN,
     });
   }
   setMasterVolumeSetting(masterVolumeSetting, { persist: false });
