@@ -232,6 +232,12 @@ function writeStoredString(key, value) {
 }
 
 function clampUnitInterval(value, fallback = 0) {
+  if (value == null) {
+    return Math.max(0, Math.min(1, Number(fallback) || 0));
+  }
+  if (typeof value === "string" && value.trim().length <= 0) {
+    return Math.max(0, Math.min(1, Number(fallback) || 0));
+  }
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return Math.max(0, Math.min(1, Number(fallback) || 0));
@@ -240,6 +246,12 @@ function clampUnitInterval(value, fallback = 0) {
 }
 
 function clampMasterVolumeGain(value, fallback = DEFAULT_MASTER_VOLUME) {
+  if (value == null) {
+    return clamp(Number(fallback) || 0, 0, MASTER_VOLUME_SLIDER_MAX_GAIN);
+  }
+  if (typeof value === "string" && value.trim().length <= 0) {
+    return clamp(Number(fallback) || 0, 0, MASTER_VOLUME_SLIDER_MAX_GAIN);
+  }
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return clamp(Number(fallback) || 0, 0, MASTER_VOLUME_SLIDER_MAX_GAIN);
@@ -1975,6 +1987,8 @@ function refreshMenuUi() {
     },
   });
 }
+
+refreshMenuUi();
 
 const clock = new THREE.Clock();
 let isPaused = false;
