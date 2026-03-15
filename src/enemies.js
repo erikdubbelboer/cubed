@@ -73,9 +73,9 @@ const ENEMY_MODEL_PARTS = [
 ];
 const ENEMY_HEAD_COLOR = 0x66ccff;
 const ENEMY_HEAD_EMISSIVE = 0x16384a;
-const ENEMY_EYE_COLOR = 0x0f1720;
-const ENEMY_EYE_EMISSIVE = 0x030507;
-const ENEMY_EYE_SIZE = 0.14;
+const ENEMY_EYE_COLOR = 0x111723;
+const ENEMY_EYE_EMISSIVE = 0x0b111a;
+const ENEMY_EYE_SIZE = 0.17;
 const ENEMY_EYE_INSET = 0.08;
 const ENEMY_EYE_OFFSET_X = 0.24;
 const ENEMY_EYE_OFFSET_Y = 0.08;
@@ -1328,15 +1328,23 @@ export function createEnemySystem(scene, grid, options = {}) {
     return enemyMesh.userData.collisionBoxes;
   }
 
+  function worldPointToEnemyCollisionLocal(enemy, worldPoint, out) {
+    if (!enemy?.visualRoot || !worldPoint) {
+      return out.set(0, 0, 0);
+    }
+    enemy.visualRoot.updateWorldMatrix(true, false);
+    out.copy(worldPoint);
+    enemy.visualRoot.worldToLocal(out);
+    return out;
+  }
+
   function getEnemyHitPartAtPoint(enemyMesh, point, radius = 0) {
     const enemy = findActiveEnemyByMesh(enemyMesh);
     if (!enemy || !enemy.alive || enemy.dying || !point) {
       return null;
     }
 
-    tempCollisionLocalPoint.copy(point).sub(enemy.mesh.position);
-    tempQuatA.copy(enemy.mesh.quaternion).invert();
-    tempCollisionLocalPoint.applyQuaternion(tempQuatA);
+    worldPointToEnemyCollisionLocal(enemy, point, tempCollisionLocalPoint);
 
     const hitRadius = Math.max(0, Number(radius) || 0);
     const hitThresholdSq = hitRadius * hitRadius;
@@ -1386,9 +1394,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       return Number.POSITIVE_INFINITY;
     }
 
-    tempLocalPointA.copy(point).sub(enemy.mesh.position);
-    tempQuatA.copy(enemy.mesh.quaternion).invert();
-    tempLocalPointA.applyQuaternion(tempQuatA);
+    worldPointToEnemyCollisionLocal(enemy, point, tempLocalPointA);
 
     let minDistanceSq = Number.POSITIVE_INFINITY;
     const collisionBoxes = getEnemyCollisionBoxes(enemy.mesh);
@@ -1827,7 +1833,7 @@ export function createEnemySystem(scene, grid, options = {}) {
         const eyeOffsetX = ENEMY_EYE_OFFSET_X * enemyScale;
         const eyeOffsetY = ENEMY_EYE_OFFSET_Y * enemyScale;
         const eyeInset = ENEMY_EYE_INSET * enemyScale;
-        const eyeZ = (depth * 0.5) - (eyeSize * 0.5) - eyeInset;
+        const eyeZ = (depth * 0.5) - (eyeSize * 0.5) - eyeInset + Math.max(0.002, enemyScale * 0.01);
         for (const eyeSide of [-1, 1]) {
           const eyeMesh = new THREE.Mesh(
             new THREE.BoxGeometry(eyeSize, eyeSize, eyeSize),
