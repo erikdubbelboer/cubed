@@ -79,6 +79,13 @@ const ENEMY_EYE_INSET = 0.03;
 const ENEMY_EYE_OFFSET_X = 0.26;
 const ENEMY_EYE_OFFSET_Y = 0.12;
 const ENEMY_EYE_SLANT_RADIANS = 0.42;
+const ENEMY_BROW_COLOR = 0x1a0404;
+const ENEMY_BROW_WIDTH = 0.34;
+const ENEMY_BROW_HEIGHT = 0.08;
+const ENEMY_BROW_DEPTH = 0.06;
+const ENEMY_BROW_OFFSET_Y = 0.23;
+const ENEMY_BROW_OFFSET_X = 0.27;
+const ENEMY_BROW_SLANT_RADIANS = 0.55;
 const ENEMY_COLLISION_BOXES = [
   { hitPart: "body", center: { x: 0, y: -0.06, z: 0 }, halfExtents: { x: 0.9, y: 0.6, z: 0.72 } },
   { hitPart: "head", center: { x: 0, y: 0.76, z: 0 }, halfExtents: { x: 0.58, y: 0.42, z: 0.55 } },
@@ -1810,6 +1817,13 @@ export function createEnemySystem(scene, grid, options = {}) {
       roughness: 0.25,
       metalness: 0.05,
     });
+    const browMaterial = new THREE.MeshStandardMaterial({
+      color: ENEMY_BROW_COLOR,
+      emissive: ENEMY_BROW_COLOR,
+      emissiveIntensity: 0.2,
+      roughness: 0.4,
+      metalness: 0.05,
+    });
     let bodyMesh = null;
     let modelTopY = Number.NEGATIVE_INFINITY;
     for (const part of ENEMY_MODEL_PARTS) {
@@ -1856,6 +1870,29 @@ export function createEnemySystem(scene, grid, options = {}) {
           eyeMesh.castShadow = true;
           eyeMesh.receiveShadow = true;
           partMesh.add(eyeMesh);
+
+          const browWidth = Math.max(0.03, ENEMY_BROW_WIDTH * enemyScale);
+          const browHeight = Math.max(0.02, ENEMY_BROW_HEIGHT * enemyScale);
+          const browDepth = Math.max(0.02, ENEMY_BROW_DEPTH * enemyScale);
+          const browMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(browWidth, browHeight, browDepth),
+            browMaterial
+          );
+          browMesh.position.set(
+            ENEMY_BROW_OFFSET_X * enemyScale * eyeSide,
+            ENEMY_BROW_OFFSET_Y * enemyScale,
+            eyeZ + Math.max(0.005, enemyScale * 0.015)
+          );
+          browMesh.rotation.z = eyeSide < 0 ? -ENEMY_BROW_SLANT_RADIANS : ENEMY_BROW_SLANT_RADIANS;
+          const browTopY = partMesh.position.y + browMesh.position.y + (browHeight * 0.5);
+          if (browTopY > modelTopY) {
+            modelTopY = browTopY;
+          }
+          browMesh.userData.enemyHitPart = "head";
+          browMesh.userData.enemyPartName = `head_brow_${eyeSide < 0 ? "left" : "right"}`;
+          browMesh.castShadow = true;
+          browMesh.receiveShadow = true;
+          partMesh.add(browMesh);
         }
       }
       visualRoot.add(partMesh);
@@ -1905,6 +1942,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       (Number.isFinite(modelTopY) ? modelTopY : bodyMesh.position.y)
       + enemyType.size * ENEMY_CONFIG.healthBarYOffsetFromEnemySize
       + ENEMY_CONFIG.healthBarYOffset
+      - (enemyType.size * 0.18)
     );
     healthBarRoot.position.set(0, healthBarBaseOffsetY, 0);
     enemyMesh.add(healthBarRoot);
