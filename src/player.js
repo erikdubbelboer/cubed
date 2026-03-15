@@ -12,6 +12,7 @@ const TOWER_TOP_SNAP_UP = PLAYER_CONFIG.collision.towerTopSnapUp;
 const STEP_UP_HEIGHT = PLAYER_CONFIG.collision.stepUpHeight ?? 0;
 const SUPPORT_EDGE_EPSILON = PLAYER_CONFIG.collision.supportEdgeEpsilon ?? 0;
 const TERRAIN_EDGE_SIDE_COLLISION_GRACE = PLAYER_CONFIG.collision.terrainEdgeSideCollisionGrace ?? 0;
+const HEADSHOT_DAMAGE_MULTIPLIER = 1.5;
 
 export function createPlayer({
   scene,
@@ -1353,13 +1354,14 @@ export function createPlayer({
     return hitObject.parent?.parent === enemyMesh;
   }
 
-  function findSniperRaycastTarget(enemies, maxDistance) {
+  function findSniperRaycastTarget(enemies, maxDistance, enemySystem = null) {
     sniperRaycaster.near = 0;
     sniperRaycaster.far = Math.max(0.01, maxDistance);
     sniperRaycaster.set(sniperRayOrigin, sniperRayDirection);
 
     let bestEnemyMesh = null;
     let bestDistance = maxDistance;
+    let bestHitPart = "body";
 
     for (const enemyMesh of enemies) {
       if (!enemyMesh) {
@@ -1381,6 +1383,11 @@ export function createPlayer({
         if (distance < bestDistance) {
           bestDistance = distance;
           bestEnemyMesh = enemyMesh;
+          const hitPartFromMesh = intersection.object?.userData?.enemyHitPart;
+          const hitPartFromSystem = enemySystem && typeof enemySystem.getEnemyHitPartAtPoint === "function"
+            ? enemySystem.getEnemyHitPartAtPoint(enemyMesh, intersection.point, 0)
+            : null;
+          bestHitPart = hitPartFromSystem === "head" || hitPartFromMesh === "head" ? "head" : "body";
         }
         break;
       }
@@ -1389,6 +1396,7 @@ export function createPlayer({
     return {
       enemyMesh: bestEnemyMesh,
       distance: bestDistance,
+      hitPart: bestHitPart,
     };
   }
 
@@ -1406,7 +1414,7 @@ export function createPlayer({
       ? enemySystem.getDamageableEnemies()
       : [];
     const blockerDistance = getSniperBlockerDistance(obstacles, maxRange);
-    const raycastHit = findSniperRaycastTarget(enemies, blockerDistance);
+    const raycastHit = findSniperRaycastTarget(enemies, blockerDistance, enemySystem);
     const hitEnemyMesh = raycastHit.enemyMesh;
     const hitDistance = Number.isFinite(raycastHit.distance)
       ? Math.min(blockerDistance, Math.max(0.01, raycastHit.distance))
@@ -1417,9 +1425,10 @@ export function createPlayer({
       && enemySystem
       && typeof enemySystem.applyDamageToEnemyMesh === "function"
     ) {
+      const headshotMultiplier = raycastHit.hitPart === "head" ? HEADSHOT_DAMAGE_MULTIPLIER : 1;
       enemySystem.applyDamageToEnemyMesh(
         hitEnemyMesh,
-        Math.max(0, Number(config.damage) || 0) * getWeaponDamageMultiplier("sniper")
+        Math.max(0, Number(config.damage) || 0) * getWeaponDamageMultiplier("sniper") * headshotMultiplier
       );
     }
 
@@ -1550,7 +1559,7 @@ export function createPlayer({
       return null;
     }
 
-    let closestEnemyMesh = null;
+    let closestHit = null;
     let closestDistSq = Number.POSITIVE_INFINITY;
 
     for (const enemyMesh of enemies) {
@@ -1587,12 +1596,19 @@ export function createPlayer({
 
       if (distSq < closestDistSq) {
         closestDistSq = distSq;
-        closestEnemyMesh = enemyMesh;
+        const hitPart = enemySystem && typeof enemySystem.getEnemyHitPartAtPoint === "function"
+          ? enemySystem.getEnemyHitPartAtPoint(enemyMesh, projectile.mesh.position, hitRadius)
+          : null;
+        closestHit = {
+          enemyMesh,
+          hitPart: hitPart === "head" ? "head" : "body",
+        };
       }
     }
 
-    return closestEnemyMesh;
+    return closestHit;
   }
+
 
   function updateProjectiles(deltaSeconds, enemySystem) {
     const obstacles = getCombatObstacles();
@@ -1606,7 +1622,8 @@ export function createPlayer({
       projectile.mesh.position.addScaledVector(projectile.velocity, deltaSeconds);
       projectile.life -= deltaSeconds;
 
-      const hitEnemyMesh = findProjectileEnemyHit(projectile, enemySystem, enemies);
+      const hitInfo = findProjectileEnemyHit(projectile, enemySystem, enemies);
+      const hitEnemyMesh = hitInfo?.enemyMesh ?? null;
       const hitObstacle = pointHitsObstacle(projectile.mesh.position, obstacles, towerHitPadding);
       const surfaceY = getSurfaceCollisionYAtWorld(projectile.mesh.position.x, projectile.mesh.position.z);
       const hitGround = Number.isFinite(surfaceY) && projectile.mesh.position.y <= surfaceY;
@@ -1657,7 +1674,11 @@ export function createPlayer({
           enemySystem
           && typeof enemySystem.applyDamageToEnemyMesh === "function"
         ) {
-          enemySystem.applyDamageToEnemyMesh(hitEnemyMesh, Math.max(0, Number(projectile.damage) || 0));
+          const headshotMultiplier = hitInfo?.hitPart === "head" ? HEADSHOT_DAMAGE_MULTIPLIER : 1;
+          enemySystem.applyDamageToEnemyMesh(
+            hitEnemyMesh,
+            Math.max(0, Number(projectile.damage) || 0) * headshotMultiplier
+          );
         }
         spawnProjectileImpact(projectile.mesh.position);
         removeProjectile(i);

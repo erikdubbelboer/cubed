@@ -50,6 +50,33 @@ const ENEMY_DEATH_EXPLOSION_VISUAL_DURATION = Math.max(
 );
 const NETWORK_ENEMY_POSITION_DAMPING = Math.max(1, Number(ENEMY_CONFIG.networkPositionDamping) || 18);
 const NETWORK_ENEMY_STALE_REMOVE_MS = Math.max(150, Number(ENEMY_CONFIG.networkStaleRemoveMs) || 350);
+const ENEMY_MODEL_BASE_BODY_WIDTH = 1.693;
+const ENEMY_MODEL_PARTS = [
+  { name: "body", hitPart: "body", dimensions: { width: 1.693, height: 0.699, depth: 1.377 }, position: { x: 0, y: 0, z: 0 } },
+  { name: "head", hitPart: "head", dimensions: { width: 1.101, height: 0.761, depth: 1.033 }, position: { x: 0, y: 0.73, z: 0 } },
+  { name: "BL_leg_main", hitPart: "body", dimensions: { width: 0.348, height: 0.337, depth: 0.294 }, position: { x: -0.605, y: -0.518, z: -0.447 } },
+  { name: "BL_leg_tip", hitPart: "body", dimensions: { width: 0.145, height: 0.219, depth: 0.121 }, position: { x: -0.605, y: -0.796, z: -0.447 } },
+  { name: "BL_leg_sideX", hitPart: "body", dimensions: { width: 0.192, height: 0.248, depth: 0.106 }, position: { x: -0.706, y: -0.474, z: -0.447 } },
+  { name: "BL_leg_sideZ", hitPart: "body", dimensions: { width: 0.147, height: 0.244, depth: 0.163 }, position: { x: -0.605, y: -0.471, z: -0.6 } },
+  { name: "BR_leg_main", hitPart: "body", dimensions: { width: 0.348, height: 0.337, depth: 0.294 }, position: { x: 0.605, y: -0.518, z: -0.447 } },
+  { name: "BR_leg_tip", hitPart: "body", dimensions: { width: 0.145, height: 0.219, depth: 0.121 }, position: { x: 0.605, y: -0.796, z: -0.447 } },
+  { name: "BR_leg_sideX", hitPart: "body", dimensions: { width: 0.192, height: 0.248, depth: 0.106 }, position: { x: 0.706, y: -0.474, z: -0.447 } },
+  { name: "BR_leg_sideZ", hitPart: "body", dimensions: { width: 0.147, height: 0.244, depth: 0.163 }, position: { x: 0.605, y: -0.471, z: -0.6 } },
+  { name: "FL_leg_main", hitPart: "body", dimensions: { width: 0.348, height: 0.337, depth: 0.294 }, position: { x: -0.605, y: -0.518, z: 0.447 } },
+  { name: "FL_leg_tip", hitPart: "body", dimensions: { width: 0.145, height: 0.219, depth: 0.121 }, position: { x: -0.605, y: -0.796, z: 0.447 } },
+  { name: "FL_leg_sideX", hitPart: "body", dimensions: { width: 0.192, height: 0.248, depth: 0.106 }, position: { x: -0.706, y: -0.474, z: 0.447 } },
+  { name: "FL_leg_sideZ", hitPart: "body", dimensions: { width: 0.147, height: 0.244, depth: 0.163 }, position: { x: -0.605, y: -0.471, z: 0.6 } },
+  { name: "FR_leg_main", hitPart: "body", dimensions: { width: 0.348, height: 0.337, depth: 0.294 }, position: { x: 0.605, y: -0.518, z: 0.447 } },
+  { name: "FR_leg_tip", hitPart: "body", dimensions: { width: 0.145, height: 0.219, depth: 0.121 }, position: { x: 0.605, y: -0.796, z: 0.447 } },
+  { name: "FR_leg_sideX", hitPart: "body", dimensions: { width: 0.192, height: 0.248, depth: 0.106 }, position: { x: 0.706, y: -0.474, z: 0.447 } },
+  { name: "FR_leg_sideZ", hitPart: "body", dimensions: { width: 0.147, height: 0.244, depth: 0.163 }, position: { x: 0.605, y: -0.471, z: 0.6 } },
+];
+const ENEMY_HEAD_COLOR = 0x66ccff;
+const ENEMY_HEAD_EMISSIVE = 0x16384a;
+const ENEMY_COLLISION_BOXES = [
+  { hitPart: "body", center: { x: 0, y: 0.02, z: 0 }, halfExtents: { x: 0.9, y: 0.7, z: 0.72 } },
+  { hitPart: "head", center: { x: 0, y: 0.74, z: 0 }, halfExtents: { x: 0.58, y: 0.38, z: 0.55 } },
+];
 
 function getDirectionOnPlane(from, to) {
   const direction = to.clone().sub(from);
@@ -237,6 +264,7 @@ export function createEnemySystem(scene, grid, options = {}) {
   const tempFrontRampContact = new THREE.Vector3();
   const tempBackRampContact = new THREE.Vector3();
   const tempDefeatDropPosition = new THREE.Vector3();
+  const tempCollisionLocalPoint = new THREE.Vector3();
   const deathExplosionEffects = [];
   const deathExplosionGeometry = new THREE.SphereGeometry(1, 14, 10);
   const deathExplosionMaterial = new THREE.MeshBasicMaterial({
@@ -1287,6 +1315,39 @@ export function createEnemySystem(scene, grid, options = {}) {
     return out;
   }
 
+  function getEnemyCollisionBoxes(enemyMesh) {
+    if (!enemyMesh || !Array.isArray(enemyMesh.userData?.collisionBoxes)) {
+      return [];
+    }
+    return enemyMesh.userData.collisionBoxes;
+  }
+
+  function getEnemyHitPartAtPoint(enemyMesh, point, radius = 0) {
+    const enemy = findActiveEnemyByMesh(enemyMesh);
+    if (!enemy || !enemy.alive || enemy.dying || !point) {
+      return null;
+    }
+
+    tempCollisionLocalPoint.copy(point).sub(enemy.mesh.position);
+    tempQuatA.copy(enemy.mesh.quaternion).invert();
+    tempCollisionLocalPoint.applyQuaternion(tempQuatA);
+
+    const hitRadius = Math.max(0, Number(radius) || 0);
+    const collisionBoxes = getEnemyCollisionBoxes(enemyMesh);
+    for (const box of collisionBoxes) {
+      if (!box?.halfExtents || !box?.center) {
+        continue;
+      }
+      const dx = Math.max(0, Math.abs(tempCollisionLocalPoint.x - box.center.x) - (box.halfExtents.x + hitRadius));
+      const dy = Math.max(0, Math.abs(tempCollisionLocalPoint.y - box.center.y) - (box.halfExtents.y + hitRadius));
+      const dz = Math.max(0, Math.abs(tempCollisionLocalPoint.z - box.center.z) - (box.halfExtents.z + hitRadius));
+      if (((dx * dx) + (dy * dy) + (dz * dz)) <= (hitRadius * hitRadius)) {
+        return box.hitPart === "head" ? "head" : "body";
+      }
+    }
+    return null;
+  }
+
   function getEnemyContainmentRadius(enemy) {
     if (!enemy?.mesh) {
       return 0;
@@ -1311,11 +1372,28 @@ export function createEnemySystem(scene, grid, options = {}) {
     tempQuatA.copy(enemy.mesh.quaternion).invert();
     tempLocalPointA.applyQuaternion(tempQuatA);
 
+    let minDistanceSq = Number.POSITIVE_INFINITY;
+    const collisionBoxes = getEnemyCollisionBoxes(enemy.mesh);
+    for (const box of collisionBoxes) {
+      if (!box?.halfExtents || !box?.center) {
+        continue;
+      }
+      const dx = Math.max(0, Math.abs(tempLocalPointA.x - box.center.x) - box.halfExtents.x);
+      const dy = Math.max(0, Math.abs(tempLocalPointA.y - box.center.y) - box.halfExtents.y);
+      const dz = Math.max(0, Math.abs(tempLocalPointA.z - box.center.z) - box.halfExtents.z);
+      const distSq = (dx * dx) + (dy * dy) + (dz * dz);
+      if (distSq < minDistanceSq) {
+        minDistanceSq = distSq;
+      }
+    }
+    if (Number.isFinite(minDistanceSq)) {
+      return minDistanceSq;
+    }
+
     const centerOffsetY = enemy.mesh.userData?.bodyCenterOffsetY;
     if (typeof centerOffsetY === "number") {
       tempLocalPointA.y -= centerOffsetY;
     }
-
     const bodyHalfSize = enemy.mesh.userData?.bodyHalfSize;
     const baseHalfSize = (typeof bodyHalfSize === "number" && bodyHalfSize > 0)
       ? bodyHalfSize
@@ -1324,7 +1402,6 @@ export function createEnemySystem(scene, grid, options = {}) {
     const halfX = baseHalfSize * Math.max(0.001, Math.abs(visualScale?.x ?? 1));
     const halfY = baseHalfSize * Math.max(0.001, Math.abs(visualScale?.y ?? 1));
     const halfZ = baseHalfSize * Math.max(0.001, Math.abs(visualScale?.z ?? 1));
-
     const dx = Math.max(0, Math.abs(tempLocalPointA.x) - halfX);
     const dy = Math.max(0, Math.abs(tempLocalPointA.y) - halfY);
     const dz = Math.max(0, Math.abs(tempLocalPointA.z) - halfZ);
@@ -1687,6 +1764,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     const visualRoot = new THREE.Group();
     enemyMesh.add(visualRoot);
 
+    const enemyScale = enemyType.size / ENEMY_MODEL_BASE_BODY_WIDTH;
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: enemyType.color,
       emissive: enemyType.emissive,
@@ -1694,14 +1772,40 @@ export function createEnemySystem(scene, grid, options = {}) {
       roughness: ENEMY_CONFIG.bodyRoughness,
       metalness: ENEMY_CONFIG.bodyMetalness,
     });
-    const bodyMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(enemyType.size, enemyType.size, enemyType.size),
-      bodyMaterial
-    );
-    bodyMesh.castShadow = true;
-    bodyMesh.receiveShadow = true;
-    bodyMesh.position.y = enemyType.size * 0.5 + ENEMY_CONFIG.bodyYOffset;
-    visualRoot.add(bodyMesh);
+    const headMaterial = new THREE.MeshStandardMaterial({
+      color: ENEMY_HEAD_COLOR,
+      emissive: ENEMY_HEAD_EMISSIVE,
+      emissiveIntensity: ENEMY_CONFIG.bodyEmissiveIntensity,
+      roughness: ENEMY_CONFIG.bodyRoughness,
+      metalness: ENEMY_CONFIG.bodyMetalness,
+    });
+    let bodyMesh = null;
+    for (const part of ENEMY_MODEL_PARTS) {
+      const width = Math.max(0.01, part.dimensions.width * enemyScale);
+      const height = Math.max(0.01, part.dimensions.height * enemyScale);
+      const depth = Math.max(0.01, part.dimensions.depth * enemyScale);
+      const partMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(width, height, depth),
+        part.hitPart === "head" ? headMaterial : bodyMaterial
+      );
+      partMesh.castShadow = true;
+      partMesh.receiveShadow = true;
+      partMesh.position.set(
+        part.position.x * enemyScale,
+        (part.position.y * enemyScale) + ENEMY_CONFIG.bodyYOffset,
+        part.position.z * enemyScale
+      );
+      partMesh.userData.enemyHitPart = part.hitPart;
+      partMesh.userData.enemyPartName = part.name;
+      visualRoot.add(partMesh);
+      if (part.name === "body") {
+        bodyMesh = partMesh;
+      }
+    }
+
+    if (!bodyMesh) {
+      return null;
+    }
 
     const healthBarBgWidth = Math.max(
       ENEMY_CONFIG.healthBarBgMinWidth,
@@ -1755,6 +1859,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       mesh: enemyMesh,
       bodyMesh,
       bodyMaterial,
+      headMaterial,
       baseBodyColor: bodyMaterial.color.clone(),
       baseEmissiveIntensity: bodyMaterial.emissiveIntensity,
       hitPulseTimer: 0,
@@ -1820,6 +1925,19 @@ export function createEnemySystem(scene, grid, options = {}) {
     enemyMesh.userData.visualRootOffsetY = visualRoot.position.y;
     enemyMesh.userData.bodyHalfSize = enemyType.size * 0.5;
     enemyMesh.userData.hitSphereRadius = enemyType.radius;
+    enemyMesh.userData.collisionBoxes = ENEMY_COLLISION_BOXES.map((box) => ({
+      hitPart: box.hitPart,
+      center: {
+        x: box.center.x * enemyScale,
+        y: (box.center.y * enemyScale) + ENEMY_CONFIG.bodyYOffset,
+        z: box.center.z * enemyScale,
+      },
+      halfExtents: {
+        x: box.halfExtents.x * enemyScale,
+        y: box.halfExtents.y * enemyScale,
+        z: box.halfExtents.z * enemyScale,
+      },
+    }));
     enemyMesh.userData.networkId = enemy.networkId;
 
     if (spawnOptions?.position && typeof spawnOptions.position === "object") {
@@ -2773,6 +2891,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     applyDamageToEnemyId,
     setEnemyHealthFromNetwork,
     isPointNearEnemyMesh,
+    getEnemyHitPartAtPoint,
     startWave,
     isWaveClear,
     applyTechGrants,
