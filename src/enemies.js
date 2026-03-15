@@ -79,13 +79,13 @@ const ENEMY_EYE_INSET = 0.03;
 const ENEMY_EYE_OFFSET_X = 0.26;
 const ENEMY_EYE_OFFSET_Y = 0.12;
 const ENEMY_EYE_SLANT_RADIANS = 0.42;
-const ENEMY_BROW_COLOR = 0x1a0404;
-const ENEMY_BROW_WIDTH = 0.34;
-const ENEMY_BROW_HEIGHT = 0.08;
-const ENEMY_BROW_DEPTH = 0.06;
-const ENEMY_BROW_OFFSET_Y = 0.23;
-const ENEMY_BROW_OFFSET_X = 0.27;
-const ENEMY_BROW_SLANT_RADIANS = 0.55;
+const ENEMY_BROW_COLOR = 0x2b0000;
+const ENEMY_BROW_WIDTH = 0.4;
+const ENEMY_BROW_HEIGHT = 0.1;
+const ENEMY_BROW_DEPTH = 0.1;
+const ENEMY_BROW_OFFSET_Y = 0.25;
+const ENEMY_BROW_OFFSET_X = 0.29;
+const ENEMY_BROW_SLANT_RADIANS = 0.68;
 const ENEMY_COLLISION_BOXES = [
   { hitPart: "body", center: { x: 0, y: -0.06, z: 0 }, halfExtents: { x: 0.9, y: 0.6, z: 0.72 } },
   { hitPart: "head", center: { x: 0, y: 0.76, z: 0 }, halfExtents: { x: 0.58, y: 0.42, z: 0.55 } },
@@ -1820,9 +1820,9 @@ export function createEnemySystem(scene, grid, options = {}) {
     const browMaterial = new THREE.MeshStandardMaterial({
       color: ENEMY_BROW_COLOR,
       emissive: ENEMY_BROW_COLOR,
-      emissiveIntensity: 0.2,
-      roughness: 0.4,
-      metalness: 0.05,
+      emissiveIntensity: 0.55,
+      roughness: 0.25,
+      metalness: 0.02,
     });
     let bodyMesh = null;
     let modelTopY = Number.NEGATIVE_INFINITY;
@@ -1881,7 +1881,7 @@ export function createEnemySystem(scene, grid, options = {}) {
           browMesh.position.set(
             ENEMY_BROW_OFFSET_X * enemyScale * eyeSide,
             ENEMY_BROW_OFFSET_Y * enemyScale,
-            eyeZ + Math.max(0.005, enemyScale * 0.015)
+            eyeZ + Math.max(0.012, enemyScale * 0.04)
           );
           browMesh.rotation.z = eyeSide < 0 ? -ENEMY_BROW_SLANT_RADIANS : ENEMY_BROW_SLANT_RADIANS;
           const browTopY = partMesh.position.y + browMesh.position.y + (browHeight * 0.5);
@@ -1942,7 +1942,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       (Number.isFinite(modelTopY) ? modelTopY : bodyMesh.position.y)
       + enemyType.size * ENEMY_CONFIG.healthBarYOffsetFromEnemySize
       + ENEMY_CONFIG.healthBarYOffset
-      - (enemyType.size * 0.18)
+      - (enemyType.size * 0.27)
     );
     healthBarRoot.position.set(0, healthBarBaseOffsetY, 0);
     enemyMesh.add(healthBarRoot);
