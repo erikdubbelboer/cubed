@@ -351,6 +351,9 @@ function summarizeMultiplayerPayloadForLog(type, payload = {}) {
       speedMultiplier: roundMultiplayerLogNumber(payload.speedMultiplier, 3),
       playerCount: Number.isFinite(Number(payload.playerCount)) ? Number(payload.playerCount) : null,
       enemyHealthMultiplier: roundMultiplayerLogNumber(payload.enemyHealthMultiplier, 3),
+      sharedResearchNodeCount: Array.isArray(payload.sharedResearchNodeIds)
+        ? payload.sharedResearchNodeIds.length
+        : 0,
       snapshotTowers: Array.isArray(snapshot?.towers) ? snapshot.towers.length : 0,
       snapshotEnemies: Array.isArray(snapshot?.enemies) ? snapshot.enemies.length : 0,
     };
@@ -392,10 +395,10 @@ function summarizeMultiplayerPayloadForLog(type, payload = {}) {
   }
   if (type === MULTIPLAYER_MESSAGE_TYPE.techChoiceCommit) {
     return {
+      request: payload.request === true,
+      rejected: payload.rejected === true,
       ownerId: typeof payload.ownerId === "string" ? payload.ownerId : null,
-      grantKeys: payload.grants && typeof payload.grants === "object"
-        ? Object.keys(payload.grants)
-        : [],
+      nodeId: typeof payload.nodeId === "string" ? payload.nodeId : null,
     };
   }
   if (type === MULTIPLAYER_MESSAGE_TYPE.weaponChoiceCommit) {
@@ -458,20 +461,6 @@ function summarizeMultiplayerPayloadForLog(type, payload = {}) {
   }
   return payload;
 }
-const LEVELING_CONFIG = ECONOMY_CONFIG.leveling ?? {};
-const DEFAULT_XP_PER_KILL = 1;
-const XP_PER_KILL = Number.isFinite(Number(LEVELING_CONFIG.xpPerKill))
-  ? Math.max(0, Number(LEVELING_CONFIG.xpPerKill))
-  : DEFAULT_XP_PER_KILL;
-const DEFAULT_BASE_XP_TO_LEVEL = 9;
-const BASE_XP_TO_LEVEL = Number.isFinite(Number(LEVELING_CONFIG.baseXpToLevel))
-  ? Math.max(0.01, Number(LEVELING_CONFIG.baseXpToLevel))
-  : DEFAULT_BASE_XP_TO_LEVEL;
-const DEFAULT_LEVEL_XP_GROWTH_MULTIPLIER = 1.1;
-const LEVEL_XP_GROWTH_MULTIPLIER = Number.isFinite(Number(LEVELING_CONFIG.levelXpGrowthMultiplier))
-  ? Math.max(1, Number(LEVELING_CONFIG.levelXpGrowthMultiplier))
-  : DEFAULT_LEVEL_XP_GROWTH_MULTIPLIER;
-const LEVEL_XP_COMPARE_EPSILON = 1e-6;
 const ECONOMY_PICKUP_CONFIG = ECONOMY_CONFIG.pickups ?? {};
 const MONEY_DROP_DENOMINATIONS = [1, 10, 100];
 const MONEY_DROP_MERGE_TARGET_BY_VALUE = new Map([
@@ -2075,7 +2064,7 @@ function isDomOverlayOpen() {
 }
 
 function isLocalGameplayInputBlocked() {
-  return !isInRunSession() || isDomOverlayOpen() || waveState === "MENU" || isPaused;
+  return !isInRunSession() || isDomOverlayOpen() || isTechTreeMenuVisible() || isPaused;
 }
 
 function getIsGameplayActiveForPoki() {
@@ -2572,7 +2561,7 @@ function updatePauseState() {
 function isPlayerMenuModeActive() {
   return sessionScreen === SESSION_SCREEN_MAIN_MENU
     || overlayScreen !== OVERLAY_SCREEN_NONE
-    || waveState === "MENU";
+    || isTechTreeMenuVisible();
 }
 
 function syncPlayerMenuMode() {
@@ -2612,7 +2601,7 @@ function setOverlayScreen(nextOverlayScreen, { pauseSimulation = null, unlockPoi
 }
 
 function openPauseMenu() {
-  if (!isInRunSession() || waveState === "EDITOR" || waveState === "MENU") {
+  if (!isInRunSession() || waveState === "EDITOR" || isTechTreeMenuVisible()) {
     return false;
   }
   if (overlayScreen === OVERLAY_SCREEN_PAUSE_MENU) {
@@ -3210,13 +3199,16 @@ let currentMenuTitle = TECH_TREE_MENU_TITLE;
 let currentMenuSubtitle = "";
 let menuAdvancesWaveOnChoice = true;
 let menuResumeWaveState = "PLAYING";
-let currentExperience = 0;
-let experienceToNextLevel = BASE_XP_TO_LEVEL;
-let levelingTechTreeExhausted = false;
-let researchedNodeIds = new Set();
+let localCoopTechTreeMenuOpen = false;
+let pendingLocalTechChoiceNodeId = null;
+let techTreeFullyResearched = false;
+let localResearchedNodeIds = new Set();
+let sharedResearchedNodeIds = new Set();
 let availableResearchPoints = 0;
+let lastAwardedWaveResearchKey = "";
 let techTreePanX = 0;
 let techTreePanY = 0;
+const remoteTechResearchStateByOwner = new Map();
 const techTreeDesktopDrag = {
   active: false,
   fromLocked: false,
@@ -3410,25 +3402,81 @@ function getTechNodeById(nodeId) {
   return TECH_TREE_NODE_BY_ID.get(nodeId) ?? null;
 }
 
-function isTechNodeResearched(nodeOrId) {
+function isSharedGlobalTechNode(nodeOrId) {
+  const node = typeof nodeOrId === "string" ? getTechNodeById(nodeOrId) : nodeOrId;
+  const enemyGrants = node?.grants?.enemy;
+  return !!(enemyGrants && typeof enemyGrants === "object");
+}
+
+function createSeededTechResearchNodeIdSet() {
+  const seededNodeIds = new Set();
+  for (const node of TECH_TREE_NODES) {
+    if (node?.startsUnlocked === true && typeof node.id === "string") {
+      seededNodeIds.add(node.id);
+    }
+  }
+  if (TECH_TREE_ROOT_NODE_ID) {
+    const rootNode = getTechNodeById(TECH_TREE_ROOT_NODE_ID);
+    if (rootNode?.id) {
+      seededNodeIds.add(rootNode.id);
+    }
+  }
+  return seededNodeIds;
+}
+
+function createRemoteTechResearchState() {
+  return {
+    researchedNodeIds: createSeededTechResearchNodeIdSet(),
+    availableResearchPoints: 0,
+  };
+}
+
+function ensureRemoteTechResearchState(ownerId) {
+  if (typeof ownerId !== "string" || ownerId.length === 0) {
+    return null;
+  }
+  if (!remoteTechResearchStateByOwner.has(ownerId)) {
+    remoteTechResearchStateByOwner.set(ownerId, createRemoteTechResearchState());
+  }
+  return remoteTechResearchStateByOwner.get(ownerId);
+}
+
+function isTechTreeMenuVisible() {
+  return currentMenuMode === MENU_MODE_TECH_TREE
+    && (waveState === "MENU" || localCoopTechTreeMenuOpen);
+}
+
+function isCoopLocalTechTreeMenuVisible() {
+  return currentMenuMode === MENU_MODE_TECH_TREE && localCoopTechTreeMenuOpen;
+}
+
+function isTechNodeResearchedForSet(nodeOrId, researchedNodeIds) {
   const nodeId = typeof nodeOrId === "string" ? nodeOrId : nodeOrId?.id;
   if (typeof nodeId !== "string" || nodeId.length === 0) {
     return false;
   }
-  return researchedNodeIds.has(nodeId);
+  return sharedResearchedNodeIds.has(nodeId) || researchedNodeIds.has(nodeId);
 }
 
-function areTechNodeParentsResearched(node) {
+function isTechNodeResearched(nodeOrId) {
+  return isTechNodeResearchedForSet(nodeOrId, localResearchedNodeIds);
+}
+
+function areTechNodeParentsResearchedForSet(node, researchedNodeIds) {
   if (!node) {
     return false;
   }
   const parentIds = Array.isArray(node.parents) ? node.parents : [];
   for (const parentId of parentIds) {
-    if (!isTechNodeResearched(parentId)) {
+    if (!isTechNodeResearchedForSet(parentId, researchedNodeIds)) {
       return false;
     }
   }
   return true;
+}
+
+function areTechNodeParentsResearched(node) {
+  return areTechNodeParentsResearchedForSet(node, localResearchedNodeIds);
 }
 
 function isTechNodeUnlockable(node) {
@@ -3439,6 +3487,20 @@ function isTechNodeUnlockable(node) {
     return false;
   }
   return availableResearchPoints >= Math.max(0, Number(node.cost) || 0);
+}
+
+function isTechNodeUnlockableForRemoteOwner(node, ownerId) {
+  if (!node) {
+    return false;
+  }
+  const researchState = ensureRemoteTechResearchState(ownerId);
+  if (!researchState || isTechNodeResearchedForSet(node, researchState.researchedNodeIds)) {
+    return false;
+  }
+  if (!areTechNodeParentsResearchedForSet(node, researchState.researchedNodeIds)) {
+    return false;
+  }
+  return researchState.availableResearchPoints >= Math.max(0, Number(node.cost) || 0);
 }
 
 function hasAnyUnlockableTechNode() {
@@ -3459,30 +3521,28 @@ function hasAnyTechResearchRemaining() {
   return false;
 }
 
-function applyTechNodeGrants(grants = {}) {
+function refreshTechTreeCompletionState() {
+  techTreeFullyResearched = !hasAnyTechResearchRemaining();
+  currentMenuSubtitle = getTechTreeMenuSubtitle();
+}
+
+function applyTechNodeGrants(grants = {}, options = {}) {
+  const ownerId = typeof options?.ownerId === "string" && options.ownerId.length > 0
+    ? options.ownerId
+    : localMultiplayerPeerId;
   mpLog("Applying local tech grants", {
-    ownerId: localMultiplayerPeerId,
+    ownerId,
     grantKeys: grants && typeof grants === "object" ? Object.keys(grants) : [],
   });
   let appliedAny = false;
   if (towerSystem && typeof towerSystem.applyTechGrants === "function") {
-    appliedAny = towerSystem.applyTechGrants(grants, { ownerId: localMultiplayerPeerId }) || appliedAny;
+    appliedAny = towerSystem.applyTechGrants(grants, { ownerId }) || appliedAny;
   }
-  if (player && typeof player.applyTechGrants === "function") {
+  if (options.applyPlayerGrants !== false && player && typeof player.applyTechGrants === "function") {
     appliedAny = player.applyTechGrants(grants) || appliedAny;
   }
-  if (enemySystem && shouldHostControlSimulation() && typeof enemySystem.applyTechGrants === "function") {
+  if (options.applyEnemyGrants === true && enemySystem && typeof enemySystem.applyTechGrants === "function") {
     appliedAny = enemySystem.applyTechGrants(grants) || appliedAny;
-  }
-  if (appliedAny && isMultiplayerWithPeer() && multiplayerController) {
-    multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.techChoiceCommit, {
-      ownerId: localMultiplayerPeerId,
-      grants,
-    });
-    mpLog("Broadcast tech choice commit", {
-      ownerId: localMultiplayerPeerId,
-      grantKeys: grants && typeof grants === "object" ? Object.keys(grants) : [],
-    });
   }
   return appliedAny;
 }
@@ -3548,7 +3608,7 @@ function clearTechTreeTooltipState() {
 }
 
 function updateDesktopTechTreeHover(pointerX, pointerY) {
-  if (waveState !== "MENU" || currentMenuMode !== MENU_MODE_TECH_TREE) {
+  if (!isTechTreeMenuVisible()) {
     techTreeDesktopHover.nodeId = null;
     return;
   }
@@ -3596,7 +3656,7 @@ function buildTechTreeTooltipForNode(nodeId, pointerX, pointerY) {
 }
 
 function buildTechTreeTooltipView(showTouchControls) {
-  if (waveState !== "MENU" || currentMenuMode !== MENU_MODE_TECH_TREE) {
+  if (!isTechTreeMenuVisible()) {
     return null;
   }
   if (showTouchControls) {
@@ -3684,6 +3744,9 @@ function updateDesktopTechTreeDragTo(nextX, nextY) {
 }
 
 function finishTechTreeMenuChoice() {
+  const wasLocalCoopMenu = localCoopTechTreeMenuOpen;
+  localCoopTechTreeMenuOpen = false;
+  pendingLocalTechChoiceNodeId = null;
   currentWeaponOptions = [];
   hoveredUpgradeIndex = -1;
   clearTechTreeTooltipState();
@@ -3696,57 +3759,86 @@ function finishTechTreeMenuChoice() {
   clearTechTreeDragState();
   if (menuAdvancesWaveOnChoice) {
     startBuildPhase(currentWave + 1);
-  } else {
+  } else if (!wasLocalCoopMenu) {
     waveState = menuResumeWaveState;
+    syncBuildPhasePathPreviewVisibility();
+  } else {
     syncBuildPhasePathPreviewVisibility();
   }
   menuAdvancesWaveOnChoice = true;
   menuResumeWaveState = "PLAYING";
 }
 
-function applyTechTreeNodeChoice(nodeId) {
+function applyCommittedTechNode(nodeId, ownerId, options = {}) {
   const node = getTechNodeById(nodeId);
-  if (!node || !isTechNodeUnlockable(node)) {
+  if (!node) {
     return false;
   }
+  const isLocalOwner = ownerId === localMultiplayerPeerId || !isMultiplayerWithPeer();
+  const isSharedNode = isSharedGlobalTechNode(node);
   const cost = Math.max(0, Number(node.cost) || 0);
-  if (availableResearchPoints < cost) {
-    return false;
+  if (options.consumeLocalResearchPoint === true && isLocalOwner) {
+    if (availableResearchPoints < cost) {
+      return false;
+    }
+    availableResearchPoints -= cost;
   }
-  availableResearchPoints -= cost;
-  researchedNodeIds.add(node.id);
-  applyTechNodeGrants(node.grants);
-  playSoundEffect("techConfirm");
-  if (!hasAnyTechResearchRemaining()) {
-    levelingTechTreeExhausted = true;
-    currentExperience = experienceToNextLevel;
+  if (isSharedNode) {
+    sharedResearchedNodeIds.add(node.id);
+  } else if (isLocalOwner) {
+    localResearchedNodeIds.add(node.id);
   }
-  currentMenuSubtitle = getTechTreeMenuSubtitle();
-  if (waveState === "MENU" && currentMenuMode === MENU_MODE_TECH_TREE) {
+  const shouldApplyGrants = isLocalOwner || isSharedNode || options.applyRemoteTowerGrants === true;
+  if (shouldApplyGrants) {
+    applyTechNodeGrants(node.grants, {
+      ownerId,
+      applyPlayerGrants: isLocalOwner && !isSharedNode,
+      applyEnemyGrants: isSharedNode && shouldHostControlSimulation(),
+    });
+  }
+  refreshTechTreeCompletionState();
+  if (options.playConfirmSound === true && isLocalOwner) {
+    playSoundEffect("techConfirm");
+  }
+  if (options.closeLocalMenu === true && isLocalOwner && isTechTreeMenuVisible()) {
     finishTechTreeMenuChoice();
   }
   return true;
 }
 
-function markTechTreeExhausted() {
-  levelingTechTreeExhausted = true;
-  currentExperience = experienceToNextLevel;
+function applyRemoteOwnerTechChoice(ownerId, nodeId) {
+  const node = getTechNodeById(nodeId);
+  const researchState = ensureRemoteTechResearchState(ownerId);
+  if (!node || !researchState) {
+    return false;
+  }
+  const cost = Math.max(0, Number(node.cost) || 0);
+  if (!isSharedGlobalTechNode(node)) {
+    researchState.researchedNodeIds.add(node.id);
+  }
+  researchState.availableResearchPoints = Math.max(0, researchState.availableResearchPoints - cost);
+  return true;
 }
 
 function isCoopNonPausingTechMenuActive() {
-  return (
-    isMultiplayerWithPeer()
-    && waveState === "MENU"
-    && currentMenuMode === MENU_MODE_TECH_TREE
-    && menuAdvancesWaveOnChoice === false
-  );
+  return isMultiplayerWithPeer() && isCoopLocalTechTreeMenuVisible();
 }
 
-function tryOpenLevelUpTechTreeMenu() {
+function showLocalCoopTechTreeMenu(options = {}) {
+  localCoopTechTreeMenuOpen = true;
+  showTechTreeMenu(options);
+  return true;
+}
+
+function openTechTreeMenu(options = {}) {
+  const {
+    advanceWaveOnChoice = true,
+    resumeWaveState = "PLAYING",
+    localOnly = false,
+  } = options;
   if (
-    waveState === "MENU"
+    isTechTreeMenuVisible()
     || waveState === "EDITOR"
-    || levelingTechTreeExhausted
     || !player
   ) {
     return false;
@@ -3754,53 +3846,170 @@ function tryOpenLevelUpTechTreeMenu() {
   if (availableResearchPoints <= 0 || !hasAnyUnlockableTechNode()) {
     return false;
   }
-  const resumeWaveState = normalizeMenuResumeWaveState(waveState);
+  if (localOnly) {
+    return showLocalCoopTechTreeMenu({
+      advanceWaveOnChoice,
+      resumeWaveState,
+    });
+  }
+  localCoopTechTreeMenuOpen = false;
   waveState = "MENU";
   showTechTreeMenu({
-    advanceWaveOnChoice: false,
+    advanceWaveOnChoice,
     resumeWaveState,
   });
   return true;
 }
 
-function getExperienceRatio() {
-  if (levelingTechTreeExhausted) {
-    return 1;
+function applyLocalWaveResearchPoint(clearedWave) {
+  const rewardWave = Math.max(1, Math.floor(Number(clearedWave) || 0));
+  const rewardKey = `${Math.max(1, runId)}:${rewardWave}`;
+  if (lastAwardedWaveResearchKey === rewardKey) {
+    return false;
   }
-  if (!Number.isFinite(experienceToNextLevel) || experienceToNextLevel <= 0) {
-    return 1;
-  }
-  return clamp(currentExperience / experienceToNextLevel, 0, 1);
+  lastAwardedWaveResearchKey = rewardKey;
+  availableResearchPoints += 1;
+  refreshTechTreeCompletionState();
+  return true;
 }
 
-function addExperience(amount) {
-  if (levelingTechTreeExhausted) {
-    return false;
+function awardRemoteWaveResearchPointToConnectedPeers() {
+  if (!isMultiplayerHost() || !isMultiplayerWithPeer()) {
+    return;
   }
-  const gainAmount = Number(amount);
-  if (!Number.isFinite(gainAmount) || gainAmount <= 0) {
-    return false;
-  }
-  currentExperience += gainAmount;
-  let leveledUp = false;
-  while (
-    !levelingTechTreeExhausted
-    && currentExperience >= (experienceToNextLevel - LEVEL_XP_COMPARE_EPSILON)
-  ) {
-    if (!hasAnyTechResearchRemaining()) {
-      markTechTreeExhausted();
-      break;
+  const peerIds = Array.isArray(getMultiplayerState().peerIds)
+    ? getMultiplayerState().peerIds
+    : [];
+  for (const peerId of peerIds) {
+    const researchState = ensureRemoteTechResearchState(peerId);
+    if (!researchState) {
+      continue;
     }
-    currentExperience = Math.max(0, currentExperience - experienceToNextLevel);
-    experienceToNextLevel *= LEVEL_XP_GROWTH_MULTIPLIER;
-    availableResearchPoints += 1;
-    leveledUp = true;
+    researchState.availableResearchPoints += 1;
   }
-  if (leveledUp) {
-    currentMenuSubtitle = getTechTreeMenuSubtitle();
-    return tryOpenLevelUpTechTreeMenu();
+}
+
+function handleWaveClearResearchReward({
+  clearedWave = currentWave,
+  startBuildImmediately = false,
+  nextWave = currentWave + 1,
+} = {}) {
+  applyLocalWaveResearchPoint(clearedWave);
+  if (startBuildImmediately) {
+    startBuildPhase(nextWave);
+    openTechTreeMenu({
+      advanceWaveOnChoice: false,
+      resumeWaveState: "BUILD",
+      localOnly: true,
+    });
+    return;
   }
-  return false;
+  if (!openTechTreeMenu({
+    advanceWaveOnChoice: true,
+    resumeWaveState: "BUILD",
+  })) {
+    startBuildPhase(nextWave);
+  }
+}
+
+function applyTechChoiceRejected(nodeId = null) {
+  if (pendingLocalTechChoiceNodeId && pendingLocalTechChoiceNodeId === nodeId) {
+    pendingLocalTechChoiceNodeId = null;
+    playSoundEffect("towerPlaceInvalid", {
+      position: getLocalPlayerSoundPosition(),
+    });
+  }
+}
+
+function applyCommittedRemoteTechState(ownerId, nodeId) {
+  const node = getTechNodeById(nodeId);
+  const researchState = ensureRemoteTechResearchState(ownerId);
+  if (!node || !researchState) {
+    return false;
+  }
+  const cost = Math.max(0, Number(node.cost) || 0);
+  if (!isSharedGlobalTechNode(node)) {
+    researchState.researchedNodeIds.add(node.id);
+  }
+  researchState.availableResearchPoints = Math.max(0, researchState.availableResearchPoints - cost);
+  return true;
+}
+
+function commitLocalTechChoice(nodeId) {
+  const ownerId = localMultiplayerPeerId;
+  const applied = applyCommittedTechNode(nodeId, ownerId, {
+    consumeLocalResearchPoint: true,
+    closeLocalMenu: true,
+    playConfirmSound: true,
+  });
+  if (!applied) {
+    return false;
+  }
+  if (isMultiplayerWithPeer() && multiplayerController) {
+    multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.techChoiceCommit, {
+      request: false,
+      rejected: false,
+      ownerId,
+      nodeId,
+    });
+    mpLog("Broadcast committed local tech choice", {
+      ownerId,
+      nodeId,
+    });
+  }
+  return true;
+}
+
+function applyCommittedTechChoiceFromNetwork(ownerId, nodeId) {
+  const node = getTechNodeById(nodeId);
+  if (!node || typeof ownerId !== "string" || ownerId.length === 0) {
+    return false;
+  }
+  const isLocalOwner = ownerId === localMultiplayerPeerId;
+  if (isLocalOwner) {
+    pendingLocalTechChoiceNodeId = null;
+  }
+  const applied = applyCommittedTechNode(nodeId, ownerId, {
+    consumeLocalResearchPoint: isLocalOwner,
+    closeLocalMenu: isLocalOwner,
+    playConfirmSound: isLocalOwner,
+    applyRemoteTowerGrants: true,
+  });
+  if (applied) {
+    mpLog("Applied committed tech choice", {
+      ownerId,
+      nodeId,
+      shared: isSharedGlobalTechNode(node),
+    });
+  }
+  return applied;
+}
+
+function applyTechTreeNodeChoice(nodeId) {
+  if (pendingLocalTechChoiceNodeId) {
+    return false;
+  }
+  const node = getTechNodeById(nodeId);
+  if (!node || !isTechNodeUnlockable(node)) {
+    return false;
+  }
+  if (!isMultiplayerWithPeer() || isMultiplayerHost()) {
+    return commitLocalTechChoice(nodeId);
+  }
+  const sent = sendReliableToHost(MULTIPLAYER_MESSAGE_TYPE.techChoiceCommit, {
+    request: true,
+    ownerId: localMultiplayerPeerId,
+    nodeId,
+  });
+  if (!sent) {
+    return false;
+  }
+  pendingLocalTechChoiceNodeId = nodeId;
+  mpLog("Sent tech choice request to host", {
+    ownerId: localMultiplayerPeerId,
+    nodeId,
+  });
+  return true;
 }
 
 function showWeaponSelectionMenu() {
@@ -3851,6 +4060,7 @@ function showTechTreeMenu(options = {}) {
   currentMenuSubtitle = getTechTreeMenuSubtitle();
   currentWeaponOptions = [];
   hoveredUpgradeIndex = -1;
+  pendingLocalTechChoiceNodeId = null;
   clearTechTreeTooltipState();
   setPrimaryDownState(false);
   syncPlayerMenuMode();
@@ -4498,7 +4708,7 @@ if (!isTouchDevice) {
 
   window.addEventListener("mousemove", (event) => {
     if (!player) return;
-    if (waveState !== "MENU") {
+    if (!isTechTreeMenuVisible()) {
       techTreeDesktopHover.nodeId = null;
       return;
     }
@@ -4595,7 +4805,7 @@ if (!isTouchDevice) {
       }
     }
 
-    if (waveState === "MENU") {
+    if (isTechTreeMenuVisible()) {
       if (event.button !== 0) {
         return;
       }
@@ -4660,7 +4870,7 @@ if (!isTouchDevice) {
 
   document.addEventListener("mouseup", (event) => {
     if (event.button === 0) {
-      if (waveState === "MENU" && currentMenuMode === MENU_MODE_TECH_TREE && player) {
+      if (isTechTreeMenuVisible() && player) {
         const pointer = player.controls.isLocked
           ? { x: vCursorX, y: vCursorY }
           : getCanvasPointerPosition(event);
@@ -4704,7 +4914,7 @@ if (isTouchDevice) {
     }
 
     const pointer = getCanvasPointerPosition(event);
-    if (waveState === "MENU") {
+    if (isTechTreeMenuVisible()) {
       if (currentMenuMode === MENU_MODE_WEAPON_SELECT) {
         const pickedIndex = uiOverlay.hitTestMenuOption(pointer.x, pointer.y);
         if (pickedIndex >= 0) {
@@ -4807,9 +5017,7 @@ if (isTouchDevice) {
 
     const pointer = getCanvasPointerPosition(event);
     if (
-      waveState === "MENU"
-      && currentMenuMode === MENU_MODE_TECH_TREE
-      && techTreeTouchDrag.pointerId === event.pointerId
+      isTechTreeMenuVisible() && techTreeTouchDrag.pointerId === event.pointerId
     ) {
       updateTouchTechTreeDrag(event.pointerId, pointer.x, pointer.y);
       event.preventDefault();
@@ -4827,7 +5035,7 @@ if (isTouchDevice) {
       const deltaY = pointer.y - mobileInput.lookLastY;
       mobileInput.lookLastX = pointer.x;
       mobileInput.lookLastY = pointer.y;
-      if (waveState !== "MENU" && !isPaused) {
+      if (!isTechTreeMenuVisible() && !isPaused) {
         const lookFromOriginDistance = Math.hypot(
           pointer.x - mobileInput.lookOriginX,
           pointer.y - mobileInput.lookOriginY
@@ -4854,9 +5062,7 @@ if (isTouchDevice) {
       return;
     }
     if (
-      waveState === "MENU"
-      && currentMenuMode === MENU_MODE_TECH_TREE
-      && techTreeTouchDrag.pointerId === event.pointerId
+      isTechTreeMenuVisible() && techTreeTouchDrag.pointerId === event.pointerId
     ) {
       const pointer = getCanvasPointerPosition(event);
       finishTouchTechTreeDrag(event.pointerId, pointer.x, pointer.y);
@@ -4908,7 +5114,7 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (event.code === "Escape" && !event.repeat && waveState !== "MENU") {
+  if (event.code === "Escape" && !event.repeat && !isTechTreeMenuVisible()) {
     requestPauseToggleFromLocalPlayer();
     event.preventDefault();
     return;
@@ -4926,22 +5132,24 @@ window.addEventListener("keydown", (event) => {
 
   if (event.code === "KeyK" && !event.repeat) {
     availableResearchPoints += 1;
-    if (waveState === "MENU") {
+    refreshTechTreeCompletionState();
+    if (isTechTreeMenuVisible()) {
       if (currentMenuMode === MENU_MODE_TECH_TREE) {
         currentMenuSubtitle = getTechTreeMenuSubtitle();
       } else {
-        showTechTreeMenu({
+        openTechTreeMenu({
           advanceWaveOnChoice: false,
           resumeWaveState: normalizeMenuResumeWaveState(menuResumeWaveState),
+          localOnly: isMultiplayerWithPeer(),
         });
       }
       return;
     }
     const resumeWaveState = normalizeMenuResumeWaveState(waveState);
-    waveState = "MENU";
-    showTechTreeMenu({
+    openTechTreeMenu({
       advanceWaveOnChoice: false,
       resumeWaveState,
+      localOnly: isMultiplayerWithPeer(),
     });
     return;
   }
@@ -4955,7 +5163,7 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (waveState === "MENU") {
+  if (isTechTreeMenuVisible()) {
     return;
   }
 
@@ -5175,6 +5383,7 @@ function buildHostStatePayload({ includeSnapshot = false } = {}) {
     speedMultiplier: gameSpeedMultiplier,
     playerCount: getConnectedPlayerCount(),
     enemyHealthMultiplier: getEnemyHealthMultiplierForCurrentPlayerCount(),
+    sharedResearchNodeIds: Array.from(sharedResearchedNodeIds.values()).sort(),
   };
   if (includeSnapshot) {
     payload.snapshot = {
@@ -5203,6 +5412,9 @@ function getHostStateSignature(payload) {
     speedMultiplier: payload.speedMultiplier,
     playerCount: payload.playerCount,
     enemyHealthMultiplier: payload.enemyHealthMultiplier,
+    sharedResearchNodeIds: Array.isArray(payload.sharedResearchNodeIds)
+      ? [...payload.sharedResearchNodeIds].sort()
+      : [],
   });
 }
 
@@ -5295,6 +5507,12 @@ function applyHostStateSyncPayload(payload = {}) {
   if (Number.isFinite(Number(payload.buildPhaseRemainingSeconds))) {
     buildPhaseRemainingSeconds = Math.max(0, Number(payload.buildPhaseRemainingSeconds));
   }
+  if (Array.isArray(payload.sharedResearchNodeIds)) {
+    sharedResearchedNodeIds = new Set(
+      payload.sharedResearchNodeIds.filter((nodeId) => typeof nodeId === "string" && nodeId.length > 0)
+    );
+    refreshTechTreeCompletionState();
+  }
 
   if (enemySystem && Number.isFinite(Number(payload.enemyHealthMultiplier))) {
     enemySystem.setEnemyHealthMultiplier(Math.max(0.01, Number(payload.enemyHealthMultiplier)));
@@ -5339,7 +5557,16 @@ function applyHostStateSyncPayload(payload = {}) {
     openWeaponSelectionOverlay();
   }
   syncPlayerMenuMode();
+  const buildPhaseFollowsClearedWave = Number.isInteger(queuedWaveNumber) && queuedWaveNumber > currentWave;
   if (!payload.snapshot && previousWaveState !== "BUILD" && waveState === "BUILD") {
+    if (buildPhaseFollowsClearedWave) {
+      applyLocalWaveResearchPoint(currentWave);
+      openTechTreeMenu({
+        advanceWaveOnChoice: false,
+        resumeWaveState: "BUILD",
+        localOnly: true,
+      });
+    }
     playSoundEffect("buildPhaseStart");
   }
 }
@@ -5745,7 +5972,8 @@ function handleTowerCommitMessage(peer, payload = {}) {
       return;
     }
     const canPlace = towerSystem?.canPlaceTowerFromPayload?.(placementPayload, {
-      requireUnlocked: false,
+      ownerId,
+      requireUnlocked: true,
       requireAffordable: false,
     });
     if (!canPlace) {
@@ -6015,6 +6243,7 @@ function handleMultiplayerLobbyChanged() {
 
 function handleMultiplayerLeftLobby() {
   mpLog("Left lobby", summarizeMultiplayerStateForLog(getMultiplayerState()));
+  remoteTechResearchStateByOwner.clear();
   resetMultiplayerRuntimeState();
   updateShareOverlayFromLobbyState();
 }
@@ -6024,6 +6253,9 @@ function handleMultiplayerPeerConnected(peer) {
   const hostNow = isMultiplayerHost();
   if (peer?.id) {
     ensureRemotePlayerEntry(peer.id);
+    if (hostNow) {
+      ensureRemoteTechResearchState(peer.id);
+    }
   }
   applyMultiplayerAuthorityForCurrentSystems();
   if (hostNow) {
@@ -6054,6 +6286,7 @@ function handleMultiplayerPeerDisconnected(peer) {
     disposeRemotePlayerEntry(peer.id);
     clearRemoteWeaponEffectsForPeer(peer.id);
     towerSystem?.clearPeerPreview?.(peer.id);
+    remoteTechResearchStateByOwner.delete(peer.id);
   }
   applyMultiplayerAuthorityForCurrentSystems();
   if (hostNow) {
@@ -6180,14 +6413,50 @@ function handleMultiplayerReliableMessage(peer, type, payload) {
 
   if (type === MULTIPLAYER_MESSAGE_TYPE.techChoiceCommit) {
     const ownerId = typeof payload?.ownerId === "string" ? payload.ownerId : peer?.id;
-    const grants = payload?.grants;
-    if (ownerId && grants && towerSystem?.applyTechGrants) {
-      towerSystem.applyTechGrants(grants, { ownerId });
-      mpLog("Applied remote tech grants", {
-        ownerId,
-        grantKeys: Object.keys(grants),
+    const nodeId = typeof payload?.nodeId === "string" ? payload.nodeId : null;
+    if (payload?.request === true) {
+      if (!isMultiplayerHost()) {
+        mpWarn("Guest received tech choice request message; ignoring");
+        return;
+      }
+      const node = nodeId ? getTechNodeById(nodeId) : null;
+      if (!ownerId || !node || !isTechNodeUnlockableForRemoteOwner(node, ownerId)) {
+        mpWarn("Host rejected tech choice request", {
+          ownerId,
+          nodeId,
+        });
+        if (peer?.id) {
+          multiplayerController.sendReliable(peer.id, MULTIPLAYER_MESSAGE_TYPE.techChoiceCommit, {
+            request: false,
+            rejected: true,
+            ownerId,
+            nodeId,
+          });
+        }
+        return;
+      }
+      applyCommittedRemoteTechState(ownerId, nodeId);
+      applyCommittedTechNode(nodeId, ownerId, {
+        applyRemoteTowerGrants: true,
       });
+      multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.techChoiceCommit, {
+        request: false,
+        rejected: false,
+        ownerId,
+        nodeId,
+      });
+      mpLog("Host committed remote tech choice", {
+        ownerId,
+        nodeId,
+      });
+      broadcastHostStateSync(true);
+      return;
     }
+    if (payload?.rejected === true) {
+      applyTechChoiceRejected(nodeId);
+      return;
+    }
+    applyCommittedTechChoiceFromNetwork(ownerId, nodeId);
     return;
   }
 
@@ -6244,7 +6513,6 @@ function handleMultiplayerReliableMessage(peer, type, payload) {
     if (!shouldHostControlSimulation()) {
       if (Number(payload?.cashReward) > 0) {
         spawnMoneyDrops(payload.cashReward, payload.dropPosition);
-        addExperience(XP_PER_KILL);
       }
       playEnemyDeathSounds(payload?.enemyType, payload?.dropPosition, {
         didExplode: payload?.didExplode === true,
@@ -6332,34 +6600,28 @@ function broadcastLocalTowerPreview() {
 }
 
 function resetTechTreeResearchState() {
-  researchedNodeIds = new Set();
+  localResearchedNodeIds = createSeededTechResearchNodeIdSet();
+  sharedResearchedNodeIds = new Set();
   availableResearchPoints = 0;
   techTreePanX = 0;
   techTreePanY = 0;
-  levelingTechTreeExhausted = false;
+  techTreeFullyResearched = false;
+  lastAwardedWaveResearchKey = "";
+  pendingLocalTechChoiceNodeId = null;
+  remoteTechResearchStateByOwner.clear();
 
-  for (const node of TECH_TREE_NODES) {
-    if (node.startsUnlocked !== true) {
+  for (const nodeId of localResearchedNodeIds) {
+    const node = getTechNodeById(nodeId);
+    if (!node) {
       continue;
     }
-    if (researchedNodeIds.has(node.id)) {
-      continue;
-    }
-    researchedNodeIds.add(node.id);
-    applyTechNodeGrants(node.grants);
+    applyTechNodeGrants(node.grants, {
+      ownerId: localMultiplayerPeerId,
+      applyPlayerGrants: !isSharedGlobalTechNode(node),
+      applyEnemyGrants: false,
+    });
   }
-  if (TECH_TREE_ROOT_NODE_ID && !researchedNodeIds.has(TECH_TREE_ROOT_NODE_ID)) {
-    const rootNode = getTechNodeById(TECH_TREE_ROOT_NODE_ID);
-    if (rootNode) {
-      researchedNodeIds.add(rootNode.id);
-      applyTechNodeGrants(rootNode.grants);
-    }
-  }
-
-  if (!hasAnyTechResearchRemaining()) {
-    levelingTechTreeExhausted = true;
-  }
-  currentMenuSubtitle = getTechTreeMenuSubtitle();
+  refreshTechTreeCompletionState();
 }
 
 function resetRunStateForNewLevel() {
@@ -6377,9 +6639,7 @@ function resetRunStateForNewLevel() {
   hoveredUpgradeIndex = -1;
   menuAdvancesWaveOnChoice = true;
   menuResumeWaveState = "PLAYING";
-  currentExperience = 0;
-  experienceToNextLevel = BASE_XP_TO_LEVEL;
-  levelingTechTreeExhausted = false;
+  localCoopTechTreeMenuOpen = false;
   resetTechTreeResearchState();
   clearTechTreeTooltipState();
   clearTechTreeDragState();
@@ -6539,7 +6799,6 @@ function createEnemySystemForCurrentGrid() {
         return;
       }
       spawnMoneyDrops(cashReward, dropPosition);
-      addExperience(XP_PER_KILL);
       playEnemyDeathSounds(enemyType, dropPosition, {
         didExplode: defeatMeta?.didExplode === true,
       });
@@ -6696,7 +6955,8 @@ function enterEditorMode() {
     return true;
   }
 
-  if (waveState === "MENU") {
+  if (isTechTreeMenuVisible()) {
+    localCoopTechTreeMenuOpen = false;
     currentWeaponOptions = [];
     currentMenuMode = MENU_MODE_TECH_TREE;
     currentMenuTitle = TECH_TREE_MENU_TITLE;
@@ -6918,7 +7178,20 @@ function runGameFrame({ renderFrame = true } = {}) {
       } else if (waveState === "DELAY") {
         waveDelay -= simulationDeltaSeconds;
         if (waveDelay <= 0) {
-          startBuildPhase(currentWave + 1);
+          if (isMultiplayerWithPeer()) {
+            awardRemoteWaveResearchPointToConnectedPeers();
+            handleWaveClearResearchReward({
+              clearedWave: currentWave,
+              nextWave: currentWave + 1,
+              startBuildImmediately: true,
+            });
+          } else {
+            handleWaveClearResearchReward({
+              clearedWave: currentWave,
+              nextWave: currentWave + 1,
+              startBuildImmediately: false,
+            });
+          }
         }
       } else if (waveState === "BUILD") {
         buildPhaseRemainingSeconds = Math.max(0, buildPhaseRemainingSeconds - rawDeltaSeconds);
@@ -7064,17 +7337,17 @@ function runGameFrame({ renderFrame = true } = {}) {
   const showTouchControls = (isTouchDevice || forceTouchControls)
     && sessionScreen === SESSION_SCREEN_IN_RUN
     && overlayScreen === OVERLAY_SCREEN_NONE
-    && waveState !== "MENU";
+    && !isTechTreeMenuVisible();
   const touchPortrait = viewportIsPortrait;
   const sellPrompt = buildSellPromptViewState(showTouchControls);
   const activeMenuOptions = getActiveMenuOptions();
-  if (waveState === "MENU" && currentMenuMode === MENU_MODE_TECH_TREE) {
+  if (isTechTreeMenuVisible()) {
     currentMenuSubtitle = getTechTreeMenuSubtitle();
   }
-  const techTreeView = waveState === "MENU" && currentMenuMode === MENU_MODE_TECH_TREE
+  const techTreeView = isTechTreeMenuVisible()
     ? buildTechTreeViewState()
     : null;
-  const techTreeTooltip = waveState === "MENU" && currentMenuMode === MENU_MODE_TECH_TREE
+  const techTreeTooltip = isTechTreeMenuVisible()
     ? buildTechTreeTooltipView(showTouchControls)
     : null;
 
@@ -7082,8 +7355,8 @@ function runGameFrame({ renderFrame = true } = {}) {
     hudVisible,
     showCrosshair: sessionScreen === SESSION_SCREEN_IN_RUN
       && overlayScreen === OVERLAY_SCREEN_NONE
-      && waveState !== "MENU",
-    menuOpen: waveState === "MENU",
+      && !isTechTreeMenuVisible(),
+    menuOpen: isTechTreeMenuVisible(),
     menuMode: currentMenuMode,
     menuOptions: activeMenuOptions.map((option) => ({
       label: option.label,
@@ -7096,10 +7369,9 @@ function runGameFrame({ renderFrame = true } = {}) {
     hoveredMenuIndex: hoveredUpgradeIndex,
     menuCursorX: vCursorX,
     menuCursorY: vCursorY,
-    menuCursorVisible: waveState === "MENU" && !!player?.controls?.isLocked,
+    menuCursorVisible: isTechTreeMenuVisible() && !!player?.controls?.isLocked,
     jetpackFuelRatio: player ? player.getJetpackFuelRatio() : 1,
     money: playerMoney,
-    experienceRatio: getExperienceRatio(),
     waveNumber: hudWaveNumber,
     towerInventory,
     selectedTowerType: waveState === "EDITOR"
@@ -7283,7 +7555,7 @@ function initGame() {
   player.controls.addEventListener("unlock", () => {
     if (suppressPauseMenuOnNextUnlock) {
       suppressPauseMenuOnNextUnlock = false;
-    } else if (isInRunSession() && overlayScreen === OVERLAY_SCREEN_NONE && waveState !== "EDITOR" && waveState !== "MENU") {
+    } else if (isInRunSession() && overlayScreen === OVERLAY_SCREEN_NONE && waveState !== "EDITOR" && !isTechTreeMenuVisible()) {
       openPauseMenu();
     }
     resetMobileInputState();
@@ -7328,11 +7600,13 @@ function initGame() {
     addResearchPoints: (amount = 1) => {
       const value = Math.max(0, Math.floor(Number(amount) || 0));
       availableResearchPoints += value;
+      refreshTechTreeCompletionState();
       return availableResearchPoints;
     },
     getResearchPoints: () => availableResearchPoints,
     researchNode: (nodeId) => applyTechTreeNodeChoice(nodeId),
-    getResearchedNodeIds: () => Array.from(researchedNodeIds.values()),
+    getResearchedNodeIds: () => Array.from(localResearchedNodeIds.values()),
+    getSharedResearchedNodeIds: () => Array.from(sharedResearchedNodeIds.values()),
     lockControls: () => {
       player?.requestPointerLock?.();
     },

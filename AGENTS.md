@@ -37,12 +37,15 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Ownership model:
   - Money, weapon choice, and tech progression are per-player.
   - Tower placements carry `ownerId`; owner-scoped tech applies only to that owner's towers.
+  - Tower unlocks are also owner-scoped; each player may only build the tower types they personally unlocked.
   - Tower selling is allowed for either player on any tower; host validates and commits the sell.
   - Sell refunds are credited to the player that completed the sell hold; `block` refunds use the seller's current owner-scoped block cost, even for blocks placed before that seller researched cheaper block tech.
   - Host death events spawn drops for both clients; each client collects into its own money total.
   - Guest local player weapon hits are still trusted, but damage proposals are coalesced into short reliable batches before being sent to the host.
+- Enemy-global tech grants remain shared-global in co-op; either player may research them once, and the host applies the effect match-wide.
 - Remote player is visual-only and must not be included in movement collision obstacles.
 - Co-op tech selection is non-pausing (local modal while simulation continues).
+- Co-op wave-end tech popups open locally on top of the shared build phase; each player can finish at a different time without pausing the match.
 - Co-op weapon selection is also local, non-pausing, and non-blocking; either player may finish first and re-enter gameplay while the other is still choosing.
 - Co-op pause/menu overlays are local-only; they block only local input and must not pause or broadcast shared simulation state.
 - Co-op hidden-tab resilience:
@@ -55,6 +58,8 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Difficulty presets scale only starting cash and base enemy health for now: `Easy 1.5x / 0.85x`, `Normal 1x / 1x`, `Hard 0.8x / 1.25x`. In co-op, the host-selected difficulty is authoritative.
 - Tower spending/refunds are delegated through `createTowerSystem({ getCurrentMoney, spendMoney, refundMoney })` callbacks.
 - Enemy rewards are emitted only on real death via `onEnemyDefeated(...)`; reaching path end gives no money.
+- There is no experience system. Tech progression comes from research points only.
+- Each cleared wave grants exactly `1` local research point.
 - Rewards are paid through pickup drops, not immediate cash grant:
   - Drops start as `$1` cubes.
   - Settled merge: `10x $1 -> $10`, `10x $10 -> $100` (cap at `$100`).
@@ -68,7 +73,8 @@ Capture project decisions that are easy to regress but not always obvious from l
   - forced first pick `tower_aoe_unlock` while available,
   - graceful no-options exit via `finishUpgradeMenuChoice()`.
 - Wave flow includes build phase:
-  - `PLAYING -> DELAY -> MENU -> BUILD -> PLAYING(next wave)`.
+  - Single-player: `PLAYING -> DELAY -> MENU -> BUILD -> PLAYING(next wave)`.
+  - Co-op: `PLAYING -> DELAY -> BUILD (+ local tech popup) -> PLAYING(next wave)`.
   - Session starts in `BUILD` before wave 1.
   - `Start Wave` can skip remaining build timer.
 - Grant wiring contract:

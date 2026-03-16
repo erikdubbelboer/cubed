@@ -968,15 +968,26 @@ export function createTowerSystem({
   const configuredStartingUnlocks = Array.isArray(GAME_CONFIG.economy?.startingUnlockedTowers)
     ? GAME_CONFIG.economy.startingUnlockedTowers
     : ["gun"];
-  const unlockedTowerTypes = new Set();
+  const startingUnlockedTowerTypes = new Set();
   for (const rawType of configuredStartingUnlocks) {
     const normalizedType = normalizeTowerType(rawType);
     if (normalizedType && getTowerSpec(normalizedType)) {
-      unlockedTowerTypes.add(normalizedType);
+      startingUnlockedTowerTypes.add(normalizedType);
     }
   }
-  if (!unlockedTowerTypes.has("gun")) {
-    unlockedTowerTypes.add("gun");
+  if (!startingUnlockedTowerTypes.has("gun")) {
+    startingUnlockedTowerTypes.add("gun");
+  }
+  const unlockedTowerTypesByOwner = new Map();
+
+  function ensureOwnerUnlockedTowerTypes(ownerId = null) {
+    const key = normalizeOwnerId(ownerId);
+    if (!unlockedTowerTypesByOwner.has(key)) {
+      const nextUnlockedSet = new Set(startingUnlockedTowerTypes);
+      nextUnlockedSet.add("gun");
+      unlockedTowerTypesByOwner.set(key, nextUnlockedSet);
+    }
+    return unlockedTowerTypesByOwner.get(key);
   }
 
   function getTowerCost(type, ownerId = null) {
@@ -1391,25 +1402,27 @@ export function createTowerSystem({
     return onBlockedCellsChanged(getBlockedCells()) !== false;
   }
 
-  function isTowerTypeUnlocked(type) {
+  function isTowerTypeUnlocked(type, ownerId = null) {
     const normalizedType = normalizeTowerType(type);
     if (!normalizedType) {
       return false;
     }
-    return unlockedTowerTypes.has(normalizedType);
+    return ensureOwnerUnlockedTowerTypes(ownerId).has(normalizedType);
   }
 
-  function unlockTowerType(type) {
+  function unlockTowerType(type, ownerId = null) {
     const normalizedType = normalizeTowerType(type);
     if (!normalizedType || !getTowerSpec(normalizedType)) {
       return false;
     }
+    const unlockedTowerTypes = ensureOwnerUnlockedTowerTypes(ownerId);
     const wasUnlocked = unlockedTowerTypes.has(normalizedType);
     unlockedTowerTypes.add(normalizedType);
     return !wasUnlocked;
   }
 
-  function getUnlockedTowerTypes() {
+  function getUnlockedTowerTypes(ownerId = null) {
+    const unlockedTowerTypes = ensureOwnerUnlockedTowerTypes(ownerId);
     return TOWER_TYPE_ORDER.filter((type) => unlockedTowerTypes.has(type));
   }
 
@@ -1556,7 +1569,7 @@ export function createTowerSystem({
     const ownerId = normalizeOwnerId(options?.ownerId);
 
     if (typeof grants.unlockTowerType === "string") {
-      appliedAny = unlockTowerType(grants.unlockTowerType) || appliedAny;
+      appliedAny = unlockTowerType(grants.unlockTowerType, ownerId) || appliedAny;
     }
 
     const towerGrants = grants?.tower;
@@ -3299,10 +3312,10 @@ export function createTowerSystem({
     if (!towerSpec) {
       return false;
     }
-    if (!isTowerTypeUnlocked(normalizedType)) {
+    if (!isTowerTypeUnlocked(normalizedType, activeLocalOwnerId)) {
       return false;
     }
-    if (!canAffordTower(normalizedType)) {
+    if (!canAffordTower(normalizedType, activeLocalOwnerId)) {
       return false;
     }
 
@@ -3339,7 +3352,7 @@ export function createTowerSystem({
     if (
       !buildMode
       || !towerSpec
-      || !isTowerTypeUnlocked(selectedTowerType)
+      || !isTowerTypeUnlocked(selectedTowerType, activeLocalOwnerId)
     ) {
       preview.visible = false;
       hidePathRangeHighlights();
@@ -3375,7 +3388,7 @@ export function createTowerSystem({
       preview.position.copy(nextPlacement.position);
       preview.rotation.y = nextPlacement.rotationY || 0;
       previewPlacement = nextPlacement;
-      previewValid = canAffordTower(selectedTowerType)
+      previewValid = canAffordTower(selectedTowerType, activeLocalOwnerId)
         && isPlacementValid(nextPlacement);
       setPreviewValidityVisual(previewValid);
       hidePathRangeHighlights();
@@ -3430,7 +3443,7 @@ export function createTowerSystem({
       preview.position.copy(nextPlacement.position);
     }
     previewPlacement = nextPlacement;
-    previewValid = canAffordTower(selectedTowerType)
+    previewValid = canAffordTower(selectedTowerType, activeLocalOwnerId)
       && isPlacementValid(nextPlacement);
     setPreviewValidityVisual(previewValid);
     setPathRangeHighlightValidityVisual(previewValid);
@@ -3542,7 +3555,7 @@ export function createTowerSystem({
     const requireAffordable = options?.requireAffordable !== false;
     const spendCost = options?.spendCost !== false;
 
-    if (requireUnlocked && !isTowerTypeUnlocked(normalizedType)) {
+    if (requireUnlocked && !isTowerTypeUnlocked(normalizedType, ownerId)) {
       return { success: false, reason: "locked" };
     }
     if (requireAffordable && !canAffordTower(normalizedType, ownerId)) {
@@ -4041,7 +4054,7 @@ export function createTowerSystem({
       !buildMode
       || !previewValid
       || !selectedTowerType
-      || !isTowerTypeUnlocked(selectedTowerType)
+      || !isTowerTypeUnlocked(selectedTowerType, activeLocalOwnerId)
       || !previewPlacement
       || !previewPlacement.position
     ) {
@@ -4064,7 +4077,7 @@ export function createTowerSystem({
     if (!result.success) {
       return false;
     }
-    if (!canAffordTower(normalizedType)) {
+    if (!canAffordTower(normalizedType, activeLocalOwnerId)) {
       cancelPlacement();
     } else if (resolvedPlacement.footprintKey) {
       setPreviewSuppressedFootprint(resolvedPlacement.footprintKey);
@@ -6406,8 +6419,8 @@ export function createTowerSystem({
 
   function getStatusText() {
     if (buildMode) {
-      if (selectedTowerType && !canAffordTower(selectedTowerType)) {
-        const towerCost = getTowerCost(selectedTowerType);
+      if (selectedTowerType && !canAffordTower(selectedTowerType, activeLocalOwnerId)) {
+        const towerCost = getTowerCost(selectedTowerType, activeLocalOwnerId);
         return `Build mode: need $${towerCost}`;
       }
       if (previewValid) {
@@ -6419,29 +6432,31 @@ export function createTowerSystem({
     return `Towers built: ${towers.length}`;
   }
 
-  function getAvailableTowers(type = null) {
+  function getAvailableTowers(type = null, ownerId = null) {
+    const resolvedOwnerId = normalizeOwnerId(ownerId);
     if (typeof type === "string") {
       const normalizedType = normalizeTowerType(type);
-      if (!normalizedType || !isTowerTypeUnlocked(normalizedType)) {
+      if (!normalizedType || !isTowerTypeUnlocked(normalizedType, resolvedOwnerId)) {
         return 0;
       }
-      return canAffordTower(normalizedType) ? 1 : 0;
+      return canAffordTower(normalizedType, resolvedOwnerId) ? 1 : 0;
     }
-    return getTowerInventory().reduce(
+    return getTowerInventory(resolvedOwnerId).reduce(
       (total, entry) => total + (entry.affordable ? 1 : 0),
       0
     );
   }
 
-  function getTowerInventory() {
+  function getTowerInventory(ownerId = null) {
+    const resolvedOwnerId = normalizeOwnerId(ownerId);
     return TOWER_TYPE_ORDER
-      .filter((type) => unlockedTowerTypes.has(type))
+      .filter((type) => isTowerTypeUnlocked(type, resolvedOwnerId))
       .map((type) => ({
         type,
         label: TOWER_DISPLAY_NAMES[type] || type,
-        remaining: canAffordTower(type) ? 1 : 0,
-        affordable: canAffordTower(type),
-        cost: getTowerCost(type),
+        remaining: canAffordTower(type, resolvedOwnerId) ? 1 : 0,
+        affordable: canAffordTower(type, resolvedOwnerId),
+        cost: getTowerCost(type, resolvedOwnerId),
       }));
   }
 
@@ -6467,6 +6482,10 @@ export function createTowerSystem({
       activeLocalOwnerId = nextOwnerId;
     }
     if (previousOwnerId !== activeLocalOwnerId) {
+      const previousUnlockedTowerTypes = unlockedTowerTypesByOwner.get(previousOwnerId) ?? null;
+      if (previousUnlockedTowerTypes && !unlockedTowerTypesByOwner.has(activeLocalOwnerId)) {
+        unlockedTowerTypesByOwner.set(activeLocalOwnerId, new Set(previousUnlockedTowerTypes));
+      }
       const previousOwnerMap = towerTechModifiersByOwner.get(previousOwnerId) ?? null;
       if (previousOwnerMap && !towerTechModifiersByOwner.has(activeLocalOwnerId)) {
         const clonedOwnerMap = new Map();
@@ -6481,6 +6500,7 @@ export function createTowerSystem({
         }
       }
     }
+    ensureOwnerUnlockedTowerTypes(activeLocalOwnerId);
     ensureOwnerTechModifiers(activeLocalOwnerId);
     return activeLocalOwnerId;
   }
@@ -6511,7 +6531,7 @@ export function createTowerSystem({
       return false;
     }
     const ownerId = options.ownerId ?? payload?.ownerId ?? normalizeOwnerId(null);
-    if (options.requireUnlocked !== false && !isTowerTypeUnlocked(parsedPlacement.towerType)) {
+    if (options.requireUnlocked !== false && !isTowerTypeUnlocked(parsedPlacement.towerType, ownerId)) {
       return false;
     }
     if (options.requireAffordable !== false && !canAffordTower(parsedPlacement.towerType, ownerId)) {
@@ -6829,7 +6849,7 @@ export function createTowerSystem({
       if (!towerSpec) {
         return false;
       }
-      unlockTowerType(normalizedType);
+      unlockTowerType(normalizedType, options.ownerId ?? normalizeOwnerId(null));
 
       const targetCell = typeof grid.worldToCell === "function"
         ? grid.worldToCell(x, z)

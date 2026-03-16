@@ -101,15 +101,6 @@ export const GAME_CONFIG = {
     startingCash: 50,
     // Tower types available before any unlock upgrades are chosen.
     startingUnlockedTowers: ["gun"],
-    // Kill-based XP leveling for upgrade picks.
-    leveling: {
-      // XP granted for each enemy kill.
-      xpPerKill: 1,
-      // XP required for the first level-up.
-      baseXpToLevel: 17.1,
-      // Multiplier applied to each subsequent XP requirement.
-      levelXpGrowthMultiplier: 1.1,
-    },
     // Enemy reward pickups (physical cash cubes).
     pickups: {
       // Horizontal pickup radius around the player (world units).
