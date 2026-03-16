@@ -1925,6 +1925,16 @@ export function createUiOverlay({
     return stackBottom;
   }
 
+  function getMobileBuildPhaseStackAnchor() {
+    if (!state.showTouchControls || state.menuOpen) {
+      return null;
+    }
+    return {
+      panelX: clamp(viewportWidth * 0.02, 12, 20),
+      panelY: clamp(viewportHeight * 0.12, 96, 110),
+    };
+  }
+
   function drawWaveHud() {
     const waveRect = getWaveCounterRect();
     if (!waveRect) {
@@ -1985,19 +1995,44 @@ export function createUiOverlay({
     if (!state.buildPhaseActive || state.menuOpen) {
       return null;
     }
+    const mobileBuildPhaseAnchor = getMobileBuildPhaseStackAnchor();
     const panelHeight = state.showTouchControls
       ? clamp(viewportHeight * 0.056, 34, 52)
       : clamp(viewportHeight * 0.052, 32, 48);
     const panelWidth = state.showTouchControls
-      ? clamp(viewportWidth * 0.24, 126, 228)
+      ? clamp(viewportWidth * 0.18, 128, 168)
       : clamp(viewportWidth * 0.2, 130, 246);
-    const panelX = clamp(viewportWidth * 0.02, 12, 20);
-    const panelY = clamp(viewportHeight * 0.02, 12, 20);
+    const panelX = mobileBuildPhaseAnchor
+      ? mobileBuildPhaseAnchor.panelX
+      : clamp(viewportWidth * 0.02, 12, 20);
+    const panelY = mobileBuildPhaseAnchor
+      ? mobileBuildPhaseAnchor.panelY
+      : clamp(viewportHeight * 0.02, 12, 20);
     return {
       panelX,
       panelY,
       panelWidth,
       panelHeight,
+    };
+  }
+
+  function getMobileStartWaveButtonRect(buttonHeight) {
+    if (!state.showTouchControls || !state.showNextWaveButton || state.menuOpen) {
+      return null;
+    }
+    const buildPhaseTimerRect = getBuildPhaseTimerRect();
+    if (!buildPhaseTimerRect) {
+      return null;
+    }
+    const resolvedButtonHeight = Number.isFinite(buttonHeight)
+      ? buttonHeight
+      : clamp(buildPhaseTimerRect.panelHeight * 0.92, 30, 54);
+    const verticalGap = clamp(viewportHeight * 0.012, 6, 10);
+    return {
+      x: buildPhaseTimerRect.panelX,
+      y: buildPhaseTimerRect.panelY + buildPhaseTimerRect.panelHeight + verticalGap,
+      width: clamp(Math.max(buildPhaseTimerRect.panelWidth, 132), 128, 176),
+      height: resolvedButtonHeight,
     };
   }
 
@@ -2080,6 +2115,7 @@ export function createUiOverlay({
     const showPause = !!state.showPauseButton;
     const showSpeed = !!state.showSpeedButton;
     const showNextWave = !!state.showNextWaveButton;
+    const showMobileStartWaveButton = state.showTouchControls && showNextWave;
     if (!showPause && !showSpeed && !showNextWave) {
       return;
     }
@@ -2110,24 +2146,19 @@ export function createUiOverlay({
         active: fastMode,
       });
     }
-    if (showNextWave) {
+    if (showNextWave && !showMobileStartWaveButton) {
       buttons.push({
         id: "next_wave",
-        label: "Start Wave",
+        label: "Start Wave (F)",
         active: false,
       });
     }
-    if (buttons.length === 0) {
+    if (buttons.length === 0 && !showMobileStartWaveButton) {
       return;
     }
 
     drawCtx.font = `700 ${labelFontSize}px ${FONT_STACK}`;
-    let nextRightX = panelX - buttonGap;
-    for (const button of buttons) {
-      const textWidth = drawCtx.measureText(button.label).width;
-      const buttonWidth = clamp(textWidth + (buttonHeight * 0.86), 44, 126);
-      const x = Math.max(6, nextRightX - buttonWidth);
-      const y = panelY + (panelHeight - buttonHeight) * 0.5;
+    function drawHudButton(button, x, y, buttonWidth) {
       const fillStyle = button.active
         ? "rgba(44, 92, 128, 0.9)"
         : "rgba(14, 30, 45, 0.76)";
@@ -2162,7 +2193,34 @@ export function createUiOverlay({
       if (state.showTouchControls) {
         pushTouchBlockedRect(x, y, buttonWidth, buttonHeight);
       }
+    }
+
+    let nextRightX = panelX - buttonGap;
+    for (const button of buttons) {
+      const textWidth = drawCtx.measureText(button.label).width;
+      const buttonWidth = clamp(textWidth + (buttonHeight * 0.86), 44, 126);
+      const x = Math.max(6, nextRightX - buttonWidth);
+      const y = panelY + (panelHeight - buttonHeight) * 0.5;
+      drawHudButton(button, x, y, buttonWidth);
       nextRightX = x - buttonGap;
+    }
+
+    if (showMobileStartWaveButton) {
+      const button = {
+        id: "next_wave",
+        label: "Start Wave",
+        active: false,
+      };
+      const mobileButtonRect = getMobileStartWaveButtonRect(buttonHeight);
+      if (mobileButtonRect) {
+        const textWidth = drawCtx.measureText(button.label).width;
+        const buttonWidth = clamp(
+          Math.max(mobileButtonRect.width, textWidth + (buttonHeight * 0.86)),
+          44,
+          176
+        );
+        drawHudButton(button, mobileButtonRect.x, mobileButtonRect.y, buttonWidth);
+      }
     }
 
     drawCtx.textAlign = "left";

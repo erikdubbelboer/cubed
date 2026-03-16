@@ -302,20 +302,12 @@ export function createEnemySystem(scene, grid, options = {}) {
     return parsed;
   }
 
-  const gridBaseY = Number.isFinite(Number(grid?.tileTopY))
-    ? Number(grid.tileTopY)
-    : 0;
   const gridCellSize = Math.max(0.0001, Number(grid?.cellSize) || 1);
-  function markerLevelToWorldY(level) {
-    const numericLevel = Math.floor(Number(level) || 0);
-    return gridBaseY + (Math.max(0, numericLevel) * gridCellSize);
-  }
-
-  const endCellSurfaceY = markerLevelToWorldY(endCell.y ?? 0);
-  const endCellCenter = typeof grid?.cellToWorldCenter === "function"
-    ? grid.cellToWorldCenter(endCell.x, endCell.z, endCellSurfaceY)
-    : new THREE.Vector3();
-  const endHalfSize = gridCellSize * 0.5;
+  const endReachPoint = getEnemyCenterForCell(endCell.x, endCell.z, new THREE.Vector3());
+  const endCenterReachRadius = Math.max(
+    ENEMY_CONFIG.directionEpsilon,
+    gridCellSize * 0.05
+  );
   const networkSnapDistance = gridCellSize;
 
   function isCellInsideLevel(cellX, cellZ) {
@@ -1497,29 +1489,13 @@ export function createEnemySystem(scene, grid, options = {}) {
     applyEnemyOrientation(enemy);
   }
 
-  function isEnemyFullyInsideEndCube(enemy) {
-    if (!enemy?.mesh || endHalfSize <= 0) {
+  function hasEnemyReachedEndCenter(enemy) {
+    if (!enemy?.pathCenter || endCenterReachRadius <= 0) {
       return false;
     }
-
-    const containmentRadius = getEnemyContainmentRadius(enemy);
-    const center = getEnemyCollisionCenter(enemy, tempCollisionCenterA);
-
-    const minX = endCellCenter.x - endHalfSize;
-    const maxX = endCellCenter.x + endHalfSize;
-    const minZ = endCellCenter.z - endHalfSize;
-    const maxZ = endCellCenter.z + endHalfSize;
-    const minY = endCellSurfaceY;
-    const maxY = endCellSurfaceY + gridCellSize;
-
-    return (
-      center.x - containmentRadius >= minX
-      && center.x + containmentRadius <= maxX
-      && center.z - containmentRadius >= minZ
-      && center.z + containmentRadius <= maxZ
-      && center.y - containmentRadius >= minY
-      && center.y + containmentRadius <= maxY
-    );
+    tempCollisionCenterA.copy(enemy.pathCenter);
+    return tempCollisionCenterA.distanceToSquared(endReachPoint)
+      <= (endCenterReachRadius * endCenterReachRadius);
   }
 
   function getEnemyCurrentCell(enemy) {
@@ -2555,7 +2531,7 @@ export function createEnemySystem(scene, grid, options = {}) {
         updateEnemyTravel(enemy, deltaSeconds);
       }
 
-      if (!networkViewMode && isEnemyFullyInsideEndCube(enemy)) {
+      if (!networkViewMode && hasEnemyReachedEndCenter(enemy)) {
         enemy.alive = false;
         scene.remove(enemy.mesh);
         removeEnemyAtIndex(i);

@@ -394,7 +394,13 @@ export function createPlayer({
   const projectileDirection = new THREE.Vector3();
   const projectileEnemyCollisionCenter = new THREE.Vector3();
   const projectileSpawnWorldPos = new THREE.Vector3();
+  const projectilePreviousWorldPos = new THREE.Vector3();
   const projectileImpactWorldPos = new THREE.Vector3();
+  const projectileImpactNormal = new THREE.Vector3();
+  const projectileImpactTravel = new THREE.Vector3();
+  const projectileImpactRay = new THREE.Ray();
+  const projectileImpactBox = new THREE.Box3();
+  const projectileImpactBoxHitPoint = new THREE.Vector3();
   const sniperRayOrigin = new THREE.Vector3();
   const sniperRayDirection = new THREE.Vector3();
   const sniperRayPoint = new THREE.Vector3();
@@ -1451,9 +1457,163 @@ export function createPlayer({
     projectiles.splice(index, 1);
   }
 
-  function spawnProjectileImpact(position) {
+  function resolveProjectileImpactNormalFromBoxHit(hitPoint, boxMin, boxMax, outNormal = new THREE.Vector3()) {
+    const distances = [
+      Math.abs(hitPoint.x - boxMin.x),
+      Math.abs(hitPoint.x - boxMax.x),
+      Math.abs(hitPoint.y - boxMin.y),
+      Math.abs(hitPoint.y - boxMax.y),
+      Math.abs(hitPoint.z - boxMin.z),
+      Math.abs(hitPoint.z - boxMax.z),
+    ];
+
+    let bestIndex = 0;
+    let bestDistance = distances[0];
+    for (let i = 1; i < distances.length; i += 1) {
+      if (distances[i] >= bestDistance) {
+        continue;
+      }
+      bestDistance = distances[i];
+      bestIndex = i;
+    }
+
+    switch (bestIndex) {
+      case 0:
+        outNormal.set(-1, 0, 0);
+        break;
+      case 1:
+        outNormal.set(1, 0, 0);
+        break;
+      case 2:
+        outNormal.set(0, -1, 0);
+        break;
+      case 3:
+        outNormal.set(0, 1, 0);
+        break;
+      case 4:
+        outNormal.set(0, 0, -1);
+        break;
+      default:
+        outNormal.set(0, 0, 1);
+        break;
+    }
+    return outNormal;
+  }
+
+  function resolveProjectileBoxImpact(startPosition, endPosition, obstacle, outPoint, outNormal) {
+    const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
+    const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
+      ? Number(obstacle.halfSizeX)
+      : Number(obstacle?.halfSize);
+    const obstacleHalfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
+      ? Number(obstacle.halfSizeZ)
+      : Number(obstacle?.halfSize);
+    const obstacleHeight = Number(obstacle?.height);
+    const obstacleBaseY = Number(obstacle?.baseY ?? 0);
+    if (
+      !obstaclePos
+      || !Number.isFinite(obstacleHalfSizeX)
+      || !Number.isFinite(obstacleHalfSizeZ)
+      || !Number.isFinite(obstacleHeight)
+      || obstacleHeight <= 0
+      || !Number.isFinite(obstacleBaseY)
+    ) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    projectileImpactTravel.copy(endPosition).sub(startPosition);
+    const travelDistanceSq = projectileImpactTravel.lengthSq();
+    if (travelDistanceSq <= MIN_COLLISION_DISTANCE_SQ) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    const travelDistance = Math.sqrt(travelDistanceSq);
+    projectileImpactBox.min.set(
+      obstaclePos.x - obstacleHalfSizeX,
+      obstacleBaseY,
+      obstaclePos.z - obstacleHalfSizeZ
+    );
+    projectileImpactBox.max.set(
+      obstaclePos.x + obstacleHalfSizeX,
+      obstacleBaseY + obstacleHeight,
+      obstaclePos.z + obstacleHalfSizeZ
+    );
+
+    projectileImpactRay.origin.copy(startPosition);
+    projectileImpactRay.direction.copy(projectileImpactTravel).divideScalar(travelDistance);
+    const hitPoint = projectileImpactRay.intersectBox(projectileImpactBox, projectileImpactBoxHitPoint);
+    if (!hitPoint) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    const hitDistanceSq = projectileImpactBoxHitPoint.distanceToSquared(startPosition);
+    const maxDistance = travelDistance + 1e-4;
+    if (hitDistanceSq > (maxDistance * maxDistance)) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    outPoint.copy(projectileImpactBoxHitPoint);
+    resolveProjectileImpactNormalFromBoxHit(
+      projectileImpactBoxHitPoint,
+      projectileImpactBox.min,
+      projectileImpactBox.max,
+      outNormal
+    );
+    return hitDistanceSq;
+  }
+
+  function resolveProjectileEnvironmentImpact(startPosition, endPosition, obstacles, surfaceY = null) {
+    let bestDistanceSq = Number.POSITIVE_INFINITY;
+    let foundObstacleHit = false;
+
+    for (const obstacle of obstacles) {
+      if (obstacle?.kind === "ramp" || obstacle?.kind === "cylinder") {
+        continue;
+      }
+
+      const hitDistanceSq = resolveProjectileBoxImpact(
+        startPosition,
+        endPosition,
+        obstacle,
+        projectileImpactWorldPos,
+        projectileImpactNormal
+      );
+      if (hitDistanceSq >= bestDistanceSq) {
+        continue;
+      }
+
+      bestDistanceSq = hitDistanceSq;
+      foundObstacleHit = true;
+    }
+
+    if (foundObstacleHit) {
+      return {
+        kind: "obstacle",
+        position: projectileImpactWorldPos,
+        normal: projectileImpactNormal,
+      };
+    }
+
+    if (Number.isFinite(surfaceY) && endPosition.y <= surfaceY) {
+      projectileImpactWorldPos.copy(endPosition);
+      projectileImpactWorldPos.y = surfaceY;
+      projectileImpactNormal.copy(yAxis);
+      return {
+        kind: "ground",
+        position: projectileImpactWorldPos,
+        normal: projectileImpactNormal,
+      };
+    }
+
+    return null;
+  }
+
+  function spawnProjectileImpact(position, normal = null) {
     const root = new THREE.Group();
     root.position.copy(position);
+    if (normal && normal.isVector3 && normal.lengthSq() > MIN_COLLISION_DISTANCE_SQ) {
+      root.quaternion.setFromUnitVectors(yAxis, projectileImpactNormal.copy(normal).normalize());
+    }
 
     const flashMaterial = new THREE.MeshBasicMaterial({
       color: PLAYER_CONFIG.projectileImpact.flashColor,
@@ -1605,6 +1765,7 @@ export function createPlayer({
 
     for (let i = projectiles.length - 1; i >= 0; i -= 1) {
       const projectile = projectiles[i];
+      projectilePreviousWorldPos.copy(projectile.mesh.position);
       projectile.velocity.y -= Math.max(0, Number(projectile.gravity) || 0) * deltaSeconds;
       projectile.mesh.position.addScaledVector(projectile.velocity, deltaSeconds);
       projectile.life -= deltaSeconds;
@@ -1614,17 +1775,28 @@ export function createPlayer({
       const hitObstacle = pointHitsObstacle(projectile.mesh.position, obstacles, towerHitPadding);
       const surfaceY = getSurfaceCollisionYAtWorld(projectile.mesh.position.x, projectile.mesh.position.z);
       const hitGround = Number.isFinite(surfaceY) && projectile.mesh.position.y <= surfaceY;
+      const environmentImpact = (hitObstacle || hitGround)
+        ? resolveProjectileEnvironmentImpact(
+          projectilePreviousWorldPos,
+          projectile.mesh.position,
+          obstacles,
+          surfaceY
+        )
+        : null;
       const tooFarFromPlayer =
         projectile.mesh.position.distanceToSquared(camera.position) > projectileMaxDistanceFromPlayerSq;
 
       if (projectile.kind === "bazooka") {
         const shouldExplode = !!hitEnemyMesh || hitObstacle || hitGround || projectile.life <= 0;
         if (shouldExplode) {
-          projectileImpactWorldPos.copy(projectile.mesh.position);
-          if (hitGround && Number.isFinite(surfaceY)) {
-            projectileImpactWorldPos.y = surfaceY;
+          if (environmentImpact) {
+            projectileImpactWorldPos.copy(environmentImpact.position);
+            projectileImpactNormal.copy(environmentImpact.normal);
+          } else {
+            projectileImpactWorldPos.copy(projectile.mesh.position);
+            projectileImpactNormal.set(0, 1, 0);
           }
-          spawnProjectileImpact(projectileImpactWorldPos);
+          spawnProjectileImpact(projectileImpactWorldPos, projectileImpactNormal);
           spawnBazookaExplosion(
             projectileImpactWorldPos,
             Math.max(0.1, Number(projectile.splashRadius) || 0.1),
@@ -1646,12 +1818,12 @@ export function createPlayer({
         continue;
       }
 
-      if (hitGround) {
-        projectileImpactWorldPos.copy(projectile.mesh.position);
-        if (Number.isFinite(surfaceY)) {
-          projectileImpactWorldPos.y = surfaceY;
+      if (hitGround && environmentImpact?.kind !== "obstacle") {
+        if (environmentImpact) {
+          spawnProjectileImpact(environmentImpact.position, environmentImpact.normal);
+        } else {
+          spawnProjectileImpact(projectile.mesh.position);
         }
-        spawnProjectileImpact(projectileImpactWorldPos);
         removeProjectile(i);
         continue;
       }
@@ -1673,7 +1845,11 @@ export function createPlayer({
       }
 
       if (hitObstacle) {
-        spawnProjectileImpact(projectile.mesh.position);
+        if (environmentImpact) {
+          spawnProjectileImpact(environmentImpact.position, environmentImpact.normal);
+        } else {
+          spawnProjectileImpact(projectile.mesh.position);
+        }
         removeProjectile(i);
         continue;
       }

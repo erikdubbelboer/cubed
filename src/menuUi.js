@@ -260,10 +260,14 @@ export function createMenuUi({
     color: "#ffffff",
     font: "700 13px \"Segoe UI\", sans-serif",
   });
+  const mainFullscreenButton = createButton("Enter Fullscreen", {
+    width: "100%",
+  });
   mainVolumeRow.appendChild(mainVolumeSlider);
   mainVolumeRow.appendChild(mainVolumeValue);
   mainVolumeSection.appendChild(mainVolumeHeader);
   mainVolumeSection.appendChild(mainVolumeRow);
+  mainVolumeSection.appendChild(mainFullscreenButton);
 
   mainPanel.appendChild(mainTitle);
   mainPanel.appendChild(mainSubtitle);
@@ -322,10 +326,14 @@ export function createMenuUi({
     color: "#ffffff",
     font: "700 13px \"Segoe UI\", sans-serif",
   });
+  const pauseFullscreenButton = createButton("Enter Fullscreen", {
+    width: "100%",
+  });
   pauseVolumeRow.appendChild(pauseVolumeSlider);
   pauseVolumeRow.appendChild(pauseVolumeValue);
   pauseVolumeSection.appendChild(pauseVolumeHeader);
   pauseVolumeSection.appendChild(pauseVolumeRow);
+  pauseVolumeSection.appendChild(pauseFullscreenButton);
   pausePanel.appendChild(pauseTitle);
   pausePanel.appendChild(pauseSubtitle);
   pausePanel.appendChild(pauseResumeButton);
@@ -429,6 +437,10 @@ export function createMenuUi({
     const safeVolume = Math.max(0, Math.min(1, Number(state.masterVolume) || 0));
     syncVolumeControls(mainVolumeSlider, mainVolumeValue, safeVolume);
     syncVolumeControls(pauseVolumeSlider, pauseVolumeValue, safeVolume);
+    mainFullscreenButton.textContent = typeof mainState.fullscreenLabel === "string" && mainState.fullscreenLabel.length > 0
+      ? mainState.fullscreenLabel
+      : "Enter Fullscreen";
+    setButtonEnabled(mainFullscreenButton, mainState.fullscreenDisabled !== true);
 
     const pauseState = state.pauseMenu ?? {};
     pauseTitle.textContent = typeof pauseState.title === "string" && pauseState.title.length > 0
@@ -439,6 +451,10 @@ export function createMenuUi({
       ? pauseState.resumeLabel
       : "Resume";
     setButtonEnabled(pauseResumeButton, pauseState.resumeDisabled !== true);
+    pauseFullscreenButton.textContent = typeof pauseState.fullscreenLabel === "string" && pauseState.fullscreenLabel.length > 0
+      ? pauseState.fullscreenLabel
+      : "Enter Fullscreen";
+    setButtonEnabled(pauseFullscreenButton, pauseState.fullscreenDisabled !== true);
 
     const weaponState = state.weaponMenu ?? {};
     weaponTitle.textContent = typeof weaponState.title === "string" && weaponState.title.length > 0
@@ -457,6 +473,8 @@ export function createMenuUi({
     difficultyButtonsById,
     mainVolumeSlider,
     pauseVolumeSlider,
+    mainFullscreenButton,
+    pauseFullscreenButton,
     pauseResumeButton,
     pauseBackButton,
     weaponButtonsByType,

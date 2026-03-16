@@ -920,6 +920,7 @@ const menuUi = createMenuUi({
   weaponOptions: RUN_WEAPON_OPTIONS,
   difficultyOptions: DIFFICULTY_PRESETS,
 });
+let fullscreenRequestPending = false;
 let hostLobbyToastHideTimeoutId = null;
 let hostLobbyToastFadeTimeoutId = null;
 
@@ -1933,6 +1934,12 @@ for (const slider of [menuUi.mainVolumeSlider, menuUi.pauseVolumeSlider]) {
   });
 }
 
+for (const button of [menuUi.mainFullscreenButton, menuUi.pauseFullscreenButton]) {
+  button.addEventListener("click", () => {
+    void toggleGameFullscreen();
+  });
+}
+
 menuUi.startButton.addEventListener("click", () => {
   startSessionFromMainMenu();
 });
@@ -1992,6 +1999,8 @@ function refreshMenuUi() {
   const difficultyHint = guestInLobby
     ? "Host controls difficulty."
     : "Difficulty changes starting cash and enemy health.";
+  const fullscreenLabel = isGameFullscreen() ? "Exit Fullscreen" : "Enter Fullscreen";
+  const fullscreenDisabled = fullscreenRequestPending || !canToggleGameFullscreen();
 
   menuUi.setState({
     sessionScreen,
@@ -2015,12 +2024,16 @@ function refreshMenuUi() {
       shareUrl,
       nativeShareVisible: shareUrl.length > 0 && typeof navigator.share === "function",
       nativeShareDisabled: false,
+      fullscreenLabel,
+      fullscreenDisabled,
     },
     pauseMenu: {
       title: pauseTitle,
       subtitle: pauseSubtitle,
       resumeLabel: "Resume",
       resumeDisabled: false,
+      fullscreenLabel,
+      fullscreenDisabled,
     },
     weaponMenu: {
       title: WEAPON_MENU_TITLE,
@@ -2419,26 +2432,6 @@ function playTowerPlacementFailureSound(towerType = null) {
   });
 }
 
-let fullscreenRequestPending = false;
-let fullscreenAutoRequestEnabled = true;
-let fullscreenInteractionBound = false;
-
-const FULLSCREEN_INTERACTION_EVENTS = ["pointerup", "touchend", "click"];
-const FULLSCREEN_BLOCKED_HOSTNAMES = new Set(["localhost", "127.0.0.1"]);
-
-function isRunningInIframe() {
-  try {
-    return window.self !== window.top;
-  } catch {
-    return true;
-  }
-}
-
-function isFullscreenBlockedEnvironment() {
-  const hostname = window.location?.hostname?.toLowerCase?.() ?? "";
-  return isRunningInIframe() || FULLSCREEN_BLOCKED_HOSTNAMES.has(hostname);
-}
-
 function getFullscreenElement() {
   return document.fullscreenElement ?? document.webkitFullscreenElement ?? null;
 }
@@ -2465,6 +2458,29 @@ function getGameFullscreenTarget() {
   return null;
 }
 
+function getGameFullscreenExit() {
+  if (typeof document.exitFullscreen === "function") {
+    return document.exitFullscreen.bind(document);
+  }
+  if (typeof document.webkitExitFullscreen === "function") {
+    return document.webkitExitFullscreen.bind(document);
+  }
+  return null;
+}
+
+function isFullscreenDocumentEnabled() {
+  if (document.fullscreenEnabled === true || document.webkitFullscreenEnabled === true) {
+    return true;
+  }
+  if (document.fullscreenEnabled === false && document.webkitFullscreenEnabled !== true) {
+    return false;
+  }
+  if (document.webkitFullscreenEnabled === false && document.fullscreenEnabled !== true) {
+    return false;
+  }
+  return true;
+}
+
 function isGameFullscreen() {
   const fullscreenElement = getFullscreenElement();
   if (!fullscreenElement || !app) {
@@ -2476,102 +2492,70 @@ function isGameFullscreen() {
     || (typeof app.contains === "function" && app.contains(fullscreenElement));
 }
 
-function requestGameFullscreen() {
-  if (isFullscreenBlockedEnvironment()) {
-    fullscreenAutoRequestEnabled = false;
+function canToggleGameFullscreen() {
+  if (isGameFullscreen()) {
+    return typeof getGameFullscreenExit() === "function";
+  }
+  if (!isFullscreenDocumentEnabled()) {
+    return false;
+  }
+  return typeof getGameFullscreenTarget()?.request === "function";
+}
+
+function handleGameFullscreenError(error) {
+  if (
+    error?.name === "AbortError"
+    || error?.name === "NotAllowedError"
+    || error?.name === "SecurityError"
+  ) {
     return;
   }
-  if (!fullscreenAutoRequestEnabled || fullscreenRequestPending || isGameFullscreen()) {
+  console.warn("Fullscreen request failed:", error);
+}
+
+async function toggleGameFullscreen() {
+  if (fullscreenRequestPending) {
     return;
   }
 
-  const fullscreenTarget = getGameFullscreenTarget();
-  if (!fullscreenTarget || typeof fullscreenTarget.request !== "function") {
-    fullscreenAutoRequestEnabled = false;
+  const request = isGameFullscreen()
+    ? getGameFullscreenExit()
+    : getGameFullscreenTarget()?.request;
+  if (typeof request !== "function") {
+    refreshMenuUi();
     return;
   }
 
-  let maybePromise;
   fullscreenRequestPending = true;
+  refreshMenuUi();
   try {
-    maybePromise = fullscreenTarget.request();
+    const maybePromise = request();
+    if (maybePromise && typeof maybePromise.then === "function") {
+      await maybePromise;
+    }
   } catch (error) {
+    handleGameFullscreenError(error);
+  } finally {
     fullscreenRequestPending = false;
-    if (error?.name === "TypeError" || error?.name === "NotSupportedError") {
-      fullscreenAutoRequestEnabled = false;
-      return;
-    }
-    if (
-      error?.name !== "AbortError"
-      && error?.name !== "NotAllowedError"
-      && error?.name !== "SecurityError"
-    ) {
-      console.warn("Fullscreen request failed:", error);
-    }
-    return;
+    refreshMenuUi();
   }
-
-  if (!maybePromise || typeof maybePromise.then !== "function") {
-    fullscreenRequestPending = false;
-    return;
-  }
-
-  maybePromise.then(() => {
-    fullscreenRequestPending = false;
-  }).catch((error) => {
-    fullscreenRequestPending = false;
-    if (error?.name === "TypeError" || error?.name === "NotSupportedError") {
-      fullscreenAutoRequestEnabled = false;
-      return;
-    }
-    if (
-      error?.name !== "AbortError"
-      && error?.name !== "NotAllowedError"
-      && error?.name !== "SecurityError"
-    ) {
-      console.warn("Fullscreen request failed:", error);
-    }
-  });
-}
-
-function handleGameFullscreenInteraction(event) {
-  if (event?.isTrusted === false) {
-    return;
-  }
-  if (typeof event?.button === "number" && event.button !== 0) {
-    return;
-  }
-  requestGameFullscreen();
-}
-
-function bindGameFullscreenInteraction() {
-  if (fullscreenInteractionBound || isFullscreenBlockedEnvironment()) {
-    if (isFullscreenBlockedEnvironment()) {
-      fullscreenAutoRequestEnabled = false;
-    }
-    return;
-  }
-
-  for (const eventName of FULLSCREEN_INTERACTION_EVENTS) {
-    window.addEventListener(eventName, handleGameFullscreenInteraction, {
-      capture: true,
-      passive: true,
-    });
-  }
-  fullscreenInteractionBound = true;
 }
 
 document.addEventListener("fullscreenchange", () => {
   fullscreenRequestPending = false;
+  refreshMenuUi();
 });
 document.addEventListener("fullscreenerror", () => {
   fullscreenRequestPending = false;
+  refreshMenuUi();
 }, true);
 document.addEventListener("webkitfullscreenchange", () => {
   fullscreenRequestPending = false;
+  refreshMenuUi();
 });
 document.addEventListener("webkitfullscreenerror", () => {
   fullscreenRequestPending = false;
+  refreshMenuUi();
 }, true);
 
 function handleGlobalUserInteraction() {
@@ -5242,11 +5226,6 @@ if (!isTouchDevice) {
       if (didMutateLevel) {
         rebuildEditorGridFromCurrentModel();
       }
-      return;
-    }
-
-    if (event.button === 2 && towerSystem) {
-      towerSystem.selectTower("gun");
       return;
     }
 
@@ -7991,7 +7970,6 @@ function initGame() {
   player.controls.addEventListener("lock", () => {
     syncPlayerMenuMode();
   });
-  bindGameFullscreenInteraction();
 
   // Debug API to let browser scripts skip UI
   window.gameDebug = {

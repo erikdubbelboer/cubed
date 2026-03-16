@@ -129,7 +129,7 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Blocking contract:
   - `canBlockCell`/`canBlockCells` must preserve at least one route from every spawn to `end`.
   - `setBlockedCells` commits blockers and reroutes active enemies immediately.
-- Enemy completion at endpoint requires full body inside end volume.
+- Enemy completion at endpoint currently despawns when the enemy route center reaches the end marker center; there is no lives/game-over handling yet.
 - Tower placement is grid-snapped; spawn/end/ramp cells are not buildable.
 
 ## Input, Collision, and Viewport Invariants
