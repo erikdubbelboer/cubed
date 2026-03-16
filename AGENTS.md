@@ -40,7 +40,7 @@ Capture project decisions that are easy to regress but not always obvious from l
   - Tower unlocks are also owner-scoped; each player may only build the tower types they personally unlocked.
   - Tower selling is allowed for either player on any tower; host validates and commits the sell.
   - Sell refunds are credited to the player that completed the sell hold; `block` refunds use the seller's current owner-scoped block cost, even for blocks placed before that seller researched cheaper block tech.
-  - Host death events spawn drops for both clients; each client collects into its own money total.
+  - Money drops are host-authoritative in co-op; one confirmed pickup removes the drop for both clients and grants the full value to both players' local money totals.
   - Guest local player weapon hits are still trusted, but damage proposals are coalesced into short reliable batches before being sent to the host.
 - Enemy-global tech grants remain shared-global in co-op; either player may research them once, and the host applies the effect match-wide.
 - Remote player is visual-only and must not be included in movement collision obstacles.
@@ -64,7 +64,7 @@ Capture project decisions that are easy to regress but not always obvious from l
   - Drops start as `$1` cubes.
   - Settled merge: `10x $1 -> $10`, `10x $10 -> $100` (cap at `$100`).
   - Cash is granted on pickup arrival, not on range entry.
-- `grants.pickupRangeAdd` increases pickup radius.
+- `grants.pickupRangeAdd` increases the owner's 3D pickup radius from player feet to the drop.
 - Tower availability is unlock-based (not stock). `gun` must always be unlocked as fallback.
 - `tower.block.costSet` and `tower.block.opacitySet` are owner-scoped absolute overrides; block opacity upgrades must update existing owned blocks immediately and new sells refund the seller's current block cost rather than historical spend.
 - Upgrade system is config-driven (`GAME_CONFIG.upgrades[]`) with:

@@ -157,6 +157,7 @@ const MULTIPLAYER_HEALTH_SCALE_COOP = 2;
 const MULTIPLAYER_TRANSFORM_SEND_INTERVAL = 1 / 20;
 const MULTIPLAYER_PREVIEW_SEND_INTERVAL = 1 / 15;
 const MULTIPLAYER_ENEMY_STATE_SEND_INTERVAL = 0.1;
+const MULTIPLAYER_MONEY_DROP_STATE_SEND_INTERVAL = MULTIPLAYER_ENEMY_STATE_SEND_INTERVAL;
 const MULTIPLAYER_STATE_SYNC_INTERVAL = 0.75;
 const MULTIPLAYER_DAMAGE_BATCH_SEND_INTERVAL = 0.05;
 const MULTIPLAYER_MAX_WEAPON_FX_EVENTS_PER_PACKET = 8;
@@ -173,6 +174,8 @@ const MULTIPLAYER_MESSAGE_TYPE = {
   enemyState: "enemy_state",
   enemyDamage: "enemy_damage",
   enemyDeath: "enemy_death",
+  moneyDropState: "money_drop_state",
+  moneyPickupCommit: "money_pickup_commit",
   hostEnded: "host_ended",
   playerTransform: "player_transform",
   towerPreview: "tower_preview",
@@ -356,6 +359,7 @@ function summarizeMultiplayerPayloadForLog(type, payload = {}) {
         : 0,
       snapshotTowers: Array.isArray(snapshot?.towers) ? snapshot.towers.length : 0,
       snapshotEnemies: Array.isArray(snapshot?.enemies) ? snapshot.enemies.length : 0,
+      snapshotMoneyDrops: Array.isArray(snapshot?.moneyDrops) ? snapshot.moneyDrops.length : 0,
     };
   }
   if (type === MULTIPLAYER_MESSAGE_TYPE.waveCmd) {
@@ -440,6 +444,20 @@ function summarizeMultiplayerPayloadForLog(type, payload = {}) {
       dropPosition: summarizePositionForLog(payload.dropPosition),
     };
   }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.moneyDropState) {
+    return {
+      seq: Number.isFinite(Number(payload.seq)) ? Number(payload.seq) : null,
+      drops: Array.isArray(payload.drops) ? payload.drops.length : 0,
+    };
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.moneyPickupCommit) {
+    return {
+      collectorId: typeof payload.collectorId === "string" ? payload.collectorId : null,
+      value: roundMultiplayerLogNumber(payload.value, 2),
+      dropIds: Array.isArray(payload.dropIds) ? payload.dropIds.length : 0,
+      position: summarizePositionForLog(payload.position),
+    };
+  }
   if (type === MULTIPLAYER_MESSAGE_TYPE.hostEnded) {
     return {};
   }
@@ -471,10 +489,6 @@ const DEFAULT_MONEY_PICKUP_BASE_RANGE = 1.35;
 const MONEY_PICKUP_BASE_RANGE = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.basePickupRange))
   ? Math.max(0.05, Number(ECONOMY_PICKUP_CONFIG.basePickupRange))
   : DEFAULT_MONEY_PICKUP_BASE_RANGE;
-const DEFAULT_MONEY_PICKUP_UPGRADE_ADD = 0.5;
-const MONEY_PICKUP_UPGRADE_ADD = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.pickupRangeUpgradeAdd))
-  ? Number(ECONOMY_PICKUP_CONFIG.pickupRangeUpgradeAdd)
-  : DEFAULT_MONEY_PICKUP_UPGRADE_ADD;
 const MONEY_DROP_SIZE = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.cubeSize))
   ? Math.max(0.05, Number(ECONOMY_PICKUP_CONFIG.cubeSize))
   : 0.26;
@@ -799,17 +813,22 @@ const pendingMultiplayerReadyWaiters = [];
 let multiplayerTransformTimer = 0;
 let multiplayerPreviewTimer = 0;
 let multiplayerEnemyStateTimer = 0;
+let multiplayerMoneyDropStateTimer = 0;
 let multiplayerStateSyncTimer = 0;
 let multiplayerDamageBatchTimer = 0;
 let nextMultiplayerEnemyStateSeq = 1;
+let nextMultiplayerMoneyDropStateSeq = 1;
 let lastBroadcastHostStateSignature = "";
 let hasAppliedHostSnapshot = false;
+let lastAppliedMoneyDropStateSeq = 0;
 const multiplayerUnreliableStats = {
   lastFlushAtMs: 0,
   rxPlayerTransform: 0,
   rxTowerPreview: 0,
+  rxMoneyDropState: 0,
   txPlayerTransform: 0,
   txTowerPreview: 0,
+  txMoneyDropState: 0,
 };
 
 function noteUnreliableMultiplayerTraffic(direction, type) {
@@ -820,6 +839,10 @@ function noteUnreliableMultiplayerTraffic(direction, type) {
     }
     if (type === MULTIPLAYER_MESSAGE_TYPE.towerPreview) {
       multiplayerUnreliableStats.rxTowerPreview += 1;
+      return;
+    }
+    if (type === MULTIPLAYER_MESSAGE_TYPE.moneyDropState) {
+      multiplayerUnreliableStats.rxMoneyDropState += 1;
     }
     return;
   }
@@ -829,6 +852,10 @@ function noteUnreliableMultiplayerTraffic(direction, type) {
   }
   if (type === MULTIPLAYER_MESSAGE_TYPE.towerPreview) {
     multiplayerUnreliableStats.txTowerPreview += 1;
+    return;
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.moneyDropState) {
+    multiplayerUnreliableStats.txMoneyDropState += 1;
   }
 }
 
@@ -843,23 +870,34 @@ function flushUnreliableMultiplayerStatsLog(force = false) {
   const {
     rxPlayerTransform,
     rxTowerPreview,
+    rxMoneyDropState,
     txPlayerTransform,
     txTowerPreview,
+    txMoneyDropState,
   } = multiplayerUnreliableStats;
-  const total = rxPlayerTransform + rxTowerPreview + txPlayerTransform + txTowerPreview;
+  const total = rxPlayerTransform
+    + rxTowerPreview
+    + rxMoneyDropState
+    + txPlayerTransform
+    + txTowerPreview
+    + txMoneyDropState;
   multiplayerUnreliableStats.lastFlushAtMs = nowMs;
   multiplayerUnreliableStats.rxPlayerTransform = 0;
   multiplayerUnreliableStats.rxTowerPreview = 0;
+  multiplayerUnreliableStats.rxMoneyDropState = 0;
   multiplayerUnreliableStats.txPlayerTransform = 0;
   multiplayerUnreliableStats.txTowerPreview = 0;
+  multiplayerUnreliableStats.txMoneyDropState = 0;
   if (total <= 0) {
     return;
   }
   mpLog("Unreliable traffic (since last sample)", {
     txPlayerTransform,
     txTowerPreview,
+    txMoneyDropState,
     rxPlayerTransform,
     rxTowerPreview,
+    rxMoneyDropState,
   });
 }
 
@@ -1119,11 +1157,14 @@ const moneyDropMaterialsByValue = new Map(
   })
 );
 const activeMoneyDrops = [];
+const activeMoneyDropEntriesById = new Map();
 const activeMoneyDropMergeJobs = [];
 const moneyDropMergeScratch = [];
 const moneyDropTempFeetPosition = new THREE.Vector3();
+const moneyDropCollectorTempFeetPosition = new THREE.Vector3();
 let nextMoneyDropMergeJobId = 1;
-let moneyPickupRangeBonus = 0;
+let nextMoneyDropId = 1;
+const moneyPickupRangeBonusByOwner = new Map();
 
 let player;
 let enemySystem;
@@ -1185,8 +1226,16 @@ function getMultiplayerState() {
     };
   }
   const state = multiplayerController.getState();
+  const previousLocalPeerId = localMultiplayerPeerId;
   if (typeof state?.localPeerId === "string" && state.localPeerId.length > 0) {
     localMultiplayerPeerId = state.localPeerId;
+  }
+  if (previousLocalPeerId !== localMultiplayerPeerId) {
+    const previousBonus = getMoneyPickupRangeBonusForOwner(previousLocalPeerId);
+    moneyPickupRangeBonusByOwner.delete(previousLocalPeerId);
+    if (previousBonus > 0) {
+      setMoneyPickupRangeBonusForOwner(localMultiplayerPeerId, previousBonus);
+    }
   }
   return {
     ...state,
@@ -1271,6 +1320,7 @@ function ensureRemotePlayerEntry(peerId) {
   entry = {
     mesh,
     lastUpdateAt: 0,
+    worldPosition: new THREE.Vector3(),
   };
   remotePlayersByPeerId.set(peerId, entry);
   mpLog("Created remote player mesh", { peerId, remotePlayers: remotePlayersByPeerId.size });
@@ -1289,6 +1339,7 @@ function applyRemotePlayerTransform(peerId, transform = {}) {
     return false;
   }
   const eyeHeight = Math.max(0.4, Number(grid?.eyeHeight) || 1.7);
+  entry.worldPosition.set(px, py, pz);
   entry.mesh.position.set(px, py - eyeHeight + (REMOTE_PLAYER_HEIGHT * 0.5), pz);
   const yaw = Number(transform?.yaw);
   if (Number.isFinite(yaw)) {
@@ -1689,9 +1740,12 @@ function resetMultiplayerRuntimeState({ resetLocalOwnerId = false } = {}) {
   multiplayerTransformTimer = 0;
   multiplayerPreviewTimer = 0;
   multiplayerEnemyStateTimer = 0;
+  multiplayerMoneyDropStateTimer = 0;
   multiplayerStateSyncTimer = 0;
   multiplayerDamageBatchTimer = 0;
   nextMultiplayerEnemyStateSeq = 1;
+  nextMultiplayerMoneyDropStateSeq = 1;
+  lastAppliedMoneyDropStateSeq = 0;
   lastBroadcastHostStateSignature = "";
   clearAllRemotePlayers();
   clearAllRemoteWeaponEffects();
@@ -2690,17 +2744,29 @@ function getMoneyDropSurfaceYAtWorld(worldX, worldZ) {
   return Number.isFinite(fallbackY) ? fallbackY : 0;
 }
 
-function getEffectiveMoneyPickupRange() {
-  return Math.max(0.05, MONEY_PICKUP_BASE_RANGE + moneyPickupRangeBonus);
+function normalizeMoneyPickupOwnerId(ownerId = localMultiplayerPeerId) {
+  return typeof ownerId === "string" && ownerId.length > 0
+    ? ownerId
+    : DEFAULT_LOCAL_MULTIPLAYER_PEER_ID;
 }
 
-function upgradeMoneyPickupRange(addAmount = MONEY_PICKUP_UPGRADE_ADD) {
-  const safeAdd = Number(addAmount);
-  if (!Number.isFinite(safeAdd) || safeAdd <= 0) {
-    return getEffectiveMoneyPickupRange();
+function setMoneyPickupRangeBonusForOwner(ownerId, totalBonus = 0) {
+  const normalizedOwnerId = normalizeMoneyPickupOwnerId(ownerId);
+  const safeBonus = Number(totalBonus);
+  if (!Number.isFinite(safeBonus) || safeBonus <= 0) {
+    moneyPickupRangeBonusByOwner.delete(normalizedOwnerId);
+    return 0;
   }
-  moneyPickupRangeBonus += safeAdd;
-  return getEffectiveMoneyPickupRange();
+  moneyPickupRangeBonusByOwner.set(normalizedOwnerId, safeBonus);
+  return safeBonus;
+}
+
+function getMoneyPickupRangeBonusForOwner(ownerId = localMultiplayerPeerId) {
+  return Math.max(0, Number(moneyPickupRangeBonusByOwner.get(normalizeMoneyPickupOwnerId(ownerId))) || 0);
+}
+
+function getEffectiveMoneyPickupRange(ownerId = localMultiplayerPeerId) {
+  return Math.max(0.05, MONEY_PICKUP_BASE_RANGE + getMoneyPickupRangeBonusForOwner(ownerId));
 }
 
 function removeMoneyDropEntry(dropEntry) {
@@ -2708,6 +2774,9 @@ function removeMoneyDropEntry(dropEntry) {
     return;
   }
   dropEntry.removed = true;
+  if (typeof dropEntry.id === "string" && dropEntry.id.length > 0) {
+    activeMoneyDropEntriesById.delete(dropEntry.id);
+  }
   dropEntry.mergeJobId = null;
   if (dropEntry.mesh?.parent) {
     dropEntry.mesh.parent.remove(dropEntry.mesh);
@@ -2732,16 +2801,28 @@ function createMoneyDropEntry(value, x, y, z, options = {}) {
   moneyDropGroup.add(mesh);
 
   const entry = {
+    id: typeof options.id === "string" && options.id.length > 0
+      ? options.id
+      : `drop_${nextMoneyDropId++}`,
     value: normalizedValue,
     mesh,
     velocity: new THREE.Vector3(0, 0, 0),
     settled: options.settled === true,
     homing: options.homing === true,
+    collectorId: typeof options.collectorId === "string" && options.collectorId.length > 0
+      ? options.collectorId
+      : null,
+    lastHostSeq: Number.isFinite(Number(options.lastHostSeq))
+      ? Number(options.lastHostSeq)
+      : 0,
     mergeJobId: null,
     removed: false,
   };
 
-  if (entry.homing) {
+  if (options.fromNetwork === true) {
+    entry.settled = false;
+    entry.velocity.set(0, 0, 0);
+  } else if (entry.homing) {
     entry.settled = false;
     entry.velocity.set(0, 0, 0);
   } else if (entry.settled) {
@@ -2756,6 +2837,7 @@ function createMoneyDropEntry(value, x, y, z, options = {}) {
   }
 
   activeMoneyDrops.push(entry);
+  activeMoneyDropEntriesById.set(entry.id, entry);
   return entry;
 }
 
@@ -2769,8 +2851,10 @@ function clearMoneyDrops() {
     }
   }
   activeMoneyDrops.length = 0;
+  activeMoneyDropEntriesById.clear();
   activeMoneyDropMergeJobs.length = 0;
   nextMoneyDropMergeJobId = 1;
+  nextMoneyDropId = 1;
 }
 
 function spawnMoneyDrops(cashReward, dropPosition) {
@@ -2811,6 +2895,178 @@ function spawnMoneyDrops(cashReward, dropPosition) {
     },
     value: rewardValue,
   });
+}
+
+function buildMoneyDropSnapshot(dropEntry) {
+  if (!dropEntry || dropEntry.removed || !dropEntry.mesh) {
+    return null;
+  }
+  return {
+    id: dropEntry.id,
+    value: dropEntry.value,
+    x: dropEntry.mesh.position.x,
+    y: dropEntry.mesh.position.y,
+    z: dropEntry.mesh.position.z,
+    claimable: dropEntry.mergeJobId === null && !dropEntry.homing,
+    collectorId: dropEntry.collectorId,
+  };
+}
+
+function buildHostMoneyDropSnapshotList() {
+  const drops = [];
+  for (const dropEntry of activeMoneyDrops) {
+    const snapshot = buildMoneyDropSnapshot(dropEntry);
+    if (snapshot) {
+      drops.push(snapshot);
+    }
+  }
+  return drops;
+}
+
+function removeMoneyDropEntriesById(dropIds = []) {
+  if (!Array.isArray(dropIds) || dropIds.length === 0) {
+    return 0;
+  }
+  let removedCount = 0;
+  for (const dropId of dropIds) {
+    if (typeof dropId !== "string" || dropId.length <= 0) {
+      continue;
+    }
+    const dropEntry = activeMoneyDropEntriesById.get(dropId);
+    if (!dropEntry) {
+      continue;
+    }
+    removeMoneyDropEntry(dropEntry);
+    removedCount += 1;
+  }
+  return removedCount;
+}
+
+function applyAuthoritativeMoneyDropSnapshots(snapshotDrops = [], { seq = 0 } = {}) {
+  if (isMultiplayerHost()) {
+    return false;
+  }
+  const incomingDropIds = new Set();
+  const safeSeq = Number.isFinite(Number(seq)) ? Number(seq) : 0;
+  for (const snapshotDrop of Array.isArray(snapshotDrops) ? snapshotDrops : []) {
+    const dropId = typeof snapshotDrop?.id === "string" ? snapshotDrop.id : "";
+    const dropValue = Math.max(1, Math.floor(Number(snapshotDrop?.value) || 1));
+    const px = Number(snapshotDrop?.x);
+    const py = Number(snapshotDrop?.y);
+    const pz = Number(snapshotDrop?.z);
+    if (!dropId || !Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) {
+      continue;
+    }
+    incomingDropIds.add(dropId);
+    const collectorId = typeof snapshotDrop?.collectorId === "string" && snapshotDrop.collectorId.length > 0
+      ? snapshotDrop.collectorId
+      : null;
+    let dropEntry = activeMoneyDropEntriesById.get(dropId);
+    if (dropEntry?.value !== dropValue) {
+      removeMoneyDropEntry(dropEntry);
+      dropEntry = null;
+    }
+    if (!dropEntry) {
+      dropEntry = createMoneyDropEntry(dropValue, px, py, pz, {
+        id: dropId,
+        collectorId,
+        fromNetwork: true,
+        lastHostSeq: safeSeq,
+      });
+      if (!dropEntry) {
+        continue;
+      }
+    }
+    dropEntry.value = dropValue;
+    dropEntry.collectorId = collectorId;
+    dropEntry.homing = collectorId !== null;
+    dropEntry.settled = false;
+    dropEntry.mergeJobId = null;
+    dropEntry.lastHostSeq = safeSeq;
+    dropEntry.velocity.set(0, 0, 0);
+    dropEntry.mesh.position.set(px, py, pz);
+  }
+
+  for (let i = activeMoneyDrops.length - 1; i >= 0; i -= 1) {
+    const dropEntry = activeMoneyDrops[i];
+    if (!dropEntry || dropEntry.removed) {
+      continue;
+    }
+    if (!incomingDropIds.has(dropEntry.id)) {
+      removeMoneyDropEntry(dropEntry);
+    }
+  }
+  return true;
+}
+
+function applyHostMoneyDropStatePayload(payload = {}) {
+  if (isMultiplayerHost()) {
+    return false;
+  }
+  const seq = Number(payload?.seq);
+  if (!Number.isFinite(seq) || seq <= lastAppliedMoneyDropStateSeq) {
+    return false;
+  }
+  lastAppliedMoneyDropStateSeq = seq;
+  const applied = applyAuthoritativeMoneyDropSnapshots(payload?.drops, { seq });
+  if (applied) {
+    mpLog("Applied host money drop state", summarizeMultiplayerPayloadForLog(MULTIPLAYER_MESSAGE_TYPE.moneyDropState, payload));
+  }
+  return applied;
+}
+
+function broadcastHostMoneyDropState() {
+  if (!multiplayerController || !isMultiplayerHost() || !isMultiplayerWithPeer()) {
+    return false;
+  }
+  const payload = {
+    seq: nextMultiplayerMoneyDropStateSeq++,
+    drops: buildHostMoneyDropSnapshotList(),
+  };
+  multiplayerController.broadcastUnreliable(MULTIPLAYER_MESSAGE_TYPE.moneyDropState, payload);
+  noteUnreliableMultiplayerTraffic("tx", MULTIPLAYER_MESSAGE_TYPE.moneyDropState);
+  mpLog("Broadcast host money drop state", summarizeMultiplayerPayloadForLog(MULTIPLAYER_MESSAGE_TYPE.moneyDropState, payload));
+  return true;
+}
+
+function applyMoneyPickupCommitPayload(payload = {}) {
+  removeMoneyDropEntriesById(payload?.dropIds);
+  const collectedValue = Math.max(0, Math.floor(Number(payload?.value) || 0));
+  if (collectedValue <= 0) {
+    return false;
+  }
+  addMoney(collectedValue);
+  playSoundEffect("moneyPickup", {
+    position: payload?.position ?? getLocalPlayerSoundPosition(),
+    value: collectedValue,
+  });
+  return true;
+}
+
+function commitCollectedMoneyDrops({ collectorId = null, dropIds = [], value = 0, position = null } = {}) {
+  const normalizedDropIds = Array.isArray(dropIds)
+    ? dropIds.filter((dropId) => typeof dropId === "string" && dropId.length > 0)
+    : [];
+  const collectedValue = Math.max(0, Math.floor(Number(value) || 0));
+  if (normalizedDropIds.length === 0 || collectedValue <= 0) {
+    return false;
+  }
+  const payload = {
+    collectorId: typeof collectorId === "string" && collectorId.length > 0
+      ? collectorId
+      : localMultiplayerPeerId,
+    dropIds: normalizedDropIds,
+    value: collectedValue,
+    position: position && typeof position === "object"
+      ? { x: position.x, y: position.y, z: position.z }
+      : null,
+  };
+  applyMoneyPickupCommitPayload(payload);
+  if (isMultiplayerWithPeer() && multiplayerController) {
+    multiplayerController.broadcastReliable(MULTIPLAYER_MESSAGE_TYPE.moneyPickupCommit, payload);
+    broadcastHostMoneyDropState();
+  }
+  return true;
 }
 
 function findSettledMergeCandidateNear(worldX, worldZ, value, maxDistance = MONEY_DROP_MERGE_RADIUS * 2.2) {
@@ -3020,15 +3276,92 @@ function getPlayerFeetPosition(outPosition) {
   return true;
 }
 
-function updateMoneyDropHomingAndCollection(deltaSeconds) {
-  if (!getPlayerFeetPosition(moneyDropTempFeetPosition)) {
-    return;
+function getRemotePlayerFeetPosition(peerId, outPosition) {
+  if (!outPosition || typeof peerId !== "string" || peerId.length <= 0) {
+    return false;
   }
-  const pickupRange = getEffectiveMoneyPickupRange();
-  const pickupRangeSq = pickupRange * pickupRange;
+  const entry = remotePlayersByPeerId.get(peerId);
+  if (!entry?.worldPosition) {
+    return false;
+  }
+  const eyeHeight = Number.isFinite(Number(grid?.eyeHeight))
+    ? Number(grid.eyeHeight)
+    : 1.7;
+  outPosition.set(
+    entry.worldPosition.x,
+    entry.worldPosition.y - eyeHeight,
+    entry.worldPosition.z
+  );
+  return true;
+}
+
+function getMoneyDropCollectorFeetPosition(collectorId, outPosition) {
+  const normalizedCollectorId = normalizeMoneyPickupOwnerId(collectorId);
+  if (!isMultiplayerWithPeer() || normalizedCollectorId === normalizeMoneyPickupOwnerId(localMultiplayerPeerId)) {
+    return getPlayerFeetPosition(outPosition);
+  }
+  return getRemotePlayerFeetPosition(normalizedCollectorId, outPosition);
+}
+
+function selectMoneyDropCollector(dropEntry) {
+  if (!dropEntry?.mesh) {
+    return null;
+  }
+  let bestCollectorId = null;
+  let bestDistanceSq = Number.POSITIVE_INFINITY;
+
+  if (getPlayerFeetPosition(moneyDropTempFeetPosition)) {
+    const localPickupRange = getEffectiveMoneyPickupRange(localMultiplayerPeerId);
+    const localPickupRangeSq = localPickupRange * localPickupRange;
+    const localDx = moneyDropTempFeetPosition.x - dropEntry.mesh.position.x;
+    const localDy = moneyDropTempFeetPosition.y - dropEntry.mesh.position.y;
+    const localDz = moneyDropTempFeetPosition.z - dropEntry.mesh.position.z;
+    const localDistanceSq = (localDx * localDx) + (localDy * localDy) + (localDz * localDz);
+    if (localDistanceSq <= localPickupRangeSq) {
+      bestCollectorId = localMultiplayerPeerId;
+      bestDistanceSq = localDistanceSq;
+    }
+  }
+
+  if (isMultiplayerHost() && isMultiplayerWithPeer()) {
+    for (const [peerId] of remotePlayersByPeerId.entries()) {
+      if (!getRemotePlayerFeetPosition(peerId, moneyDropCollectorTempFeetPosition)) {
+        continue;
+      }
+      const pickupRange = getEffectiveMoneyPickupRange(peerId);
+      const pickupRangeSq = pickupRange * pickupRange;
+      const dx = moneyDropCollectorTempFeetPosition.x - dropEntry.mesh.position.x;
+      const dy = moneyDropCollectorTempFeetPosition.y - dropEntry.mesh.position.y;
+      const dz = moneyDropCollectorTempFeetPosition.z - dropEntry.mesh.position.z;
+      const distanceSq = (dx * dx) + (dy * dy) + (dz * dz);
+      if (distanceSq > pickupRangeSq || distanceSq >= bestDistanceSq) {
+        continue;
+      }
+      bestCollectorId = peerId;
+      bestDistanceSq = distanceSq;
+    }
+  }
+
+  return bestCollectorId;
+}
+
+function clearMoneyDropCollectorForOwner(ownerId) {
+  const normalizedOwnerId = normalizeMoneyPickupOwnerId(ownerId);
+  for (const dropEntry of activeMoneyDrops) {
+    if (!dropEntry || dropEntry.removed || dropEntry.collectorId !== normalizedOwnerId) {
+      continue;
+    }
+    dropEntry.collectorId = null;
+    dropEntry.homing = false;
+    dropEntry.settled = false;
+    dropEntry.velocity.set(0, 0, 0);
+  }
+}
+
+function updateMoneyDropHomingAndCollection(deltaSeconds) {
   const safeDelta = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
   const homingStep = MONEY_DROP_HOMING_SPEED * safeDelta;
-  let collectedValue = 0;
+  const collectedBatchesByOwner = new Map();
 
   for (let i = activeMoneyDrops.length - 1; i >= 0; i -= 1) {
     const dropEntry = activeMoneyDrops[i];
@@ -3036,23 +3369,40 @@ function updateMoneyDropHomingAndCollection(deltaSeconds) {
       continue;
     }
 
-    const toFeetX = moneyDropTempFeetPosition.x - dropEntry.mesh.position.x;
-    const toFeetY = moneyDropTempFeetPosition.y - dropEntry.mesh.position.y;
-    const toFeetZ = moneyDropTempFeetPosition.z - dropEntry.mesh.position.z;
-    const horizontalDistanceSq = (toFeetX * toFeetX) + (toFeetZ * toFeetZ);
-
-    if (!dropEntry.homing && horizontalDistanceSq <= pickupRangeSq) {
+    if (!dropEntry.homing) {
+      const collectorId = selectMoneyDropCollector(dropEntry);
+      if (!collectorId) {
+        continue;
+      }
       dropEntry.homing = true;
+      dropEntry.collectorId = collectorId;
       dropEntry.settled = false;
       dropEntry.velocity.set(0, 0, 0);
     }
-    if (!dropEntry.homing) {
+    if (!dropEntry.homing || !getMoneyDropCollectorFeetPosition(dropEntry.collectorId, moneyDropCollectorTempFeetPosition)) {
       continue;
     }
 
-    const distanceSq = horizontalDistanceSq + (toFeetY * toFeetY);
+    const toFeetX = moneyDropCollectorTempFeetPosition.x - dropEntry.mesh.position.x;
+    const toFeetY = moneyDropCollectorTempFeetPosition.y - dropEntry.mesh.position.y;
+    const toFeetZ = moneyDropCollectorTempFeetPosition.z - dropEntry.mesh.position.z;
+    const distanceSq = (toFeetX * toFeetX) + (toFeetY * toFeetY) + (toFeetZ * toFeetZ);
     if (distanceSq <= MONEY_DROP_PICKUP_ARRIVAL_DISTANCE_SQ) {
-      collectedValue += Math.max(0, dropEntry.value || 0);
+      const batchOwnerId = normalizeMoneyPickupOwnerId(dropEntry.collectorId);
+      const existingBatch = collectedBatchesByOwner.get(batchOwnerId) ?? {
+        collectorId: batchOwnerId,
+        dropIds: [],
+        value: 0,
+        position: null,
+      };
+      existingBatch.dropIds.push(dropEntry.id);
+      existingBatch.value += Math.max(0, dropEntry.value || 0);
+      existingBatch.position = {
+        x: moneyDropCollectorTempFeetPosition.x,
+        y: moneyDropCollectorTempFeetPosition.y,
+        z: moneyDropCollectorTempFeetPosition.z,
+      };
+      collectedBatchesByOwner.set(batchOwnerId, existingBatch);
       removeMoneyDropEntry(dropEntry);
       continue;
     }
@@ -3063,7 +3413,21 @@ function updateMoneyDropHomingAndCollection(deltaSeconds) {
 
     const distance = Math.sqrt(distanceSq);
     if (distance <= 1e-6) {
-      collectedValue += Math.max(0, dropEntry.value || 0);
+      const batchOwnerId = normalizeMoneyPickupOwnerId(dropEntry.collectorId);
+      const existingBatch = collectedBatchesByOwner.get(batchOwnerId) ?? {
+        collectorId: batchOwnerId,
+        dropIds: [],
+        value: 0,
+        position: null,
+      };
+      existingBatch.dropIds.push(dropEntry.id);
+      existingBatch.value += Math.max(0, dropEntry.value || 0);
+      existingBatch.position = {
+        x: moneyDropCollectorTempFeetPosition.x,
+        y: moneyDropCollectorTempFeetPosition.y,
+        z: moneyDropCollectorTempFeetPosition.z,
+      };
+      collectedBatchesByOwner.set(batchOwnerId, existingBatch);
       removeMoneyDropEntry(dropEntry);
       continue;
     }
@@ -3074,17 +3438,16 @@ function updateMoneyDropHomingAndCollection(deltaSeconds) {
     dropEntry.mesh.position.z += toFeetZ * moveScale;
   }
 
-  if (collectedValue > 0) {
-    addMoney(collectedValue);
-    playSoundEffect("moneyPickup", {
-      position: moneyDropTempFeetPosition,
-      value: collectedValue,
-    });
+  for (const batch of collectedBatchesByOwner.values()) {
+    commitCollectedMoneyDrops(batch);
   }
 }
 
 function updateMoneyDrops(deltaSeconds) {
   if (activeMoneyDrops.length === 0) {
+    return;
+  }
+  if (isMultiplayerGuest()) {
     return;
   }
 
@@ -3431,12 +3794,44 @@ function createRemoteTechResearchState() {
   };
 }
 
+function getMoneyPickupRangeBonusForResearchedNodeIds(researchedNodeIds) {
+  if (!(researchedNodeIds instanceof Set) || researchedNodeIds.size === 0) {
+    return 0;
+  }
+  let totalBonus = 0;
+  for (const nodeId of researchedNodeIds) {
+    const node = getTechNodeById(nodeId);
+    const pickupRangeAdd = Number(node?.grants?.player?.pickupRangeAdd);
+    if (Number.isFinite(pickupRangeAdd) && pickupRangeAdd > 0) {
+      totalBonus += pickupRangeAdd;
+    }
+  }
+  return totalBonus;
+}
+
+function syncMoneyPickupRangeBonusForOwner(ownerId = localMultiplayerPeerId) {
+  const normalizedOwnerId = normalizeMoneyPickupOwnerId(ownerId);
+  if (normalizedOwnerId === normalizeMoneyPickupOwnerId(localMultiplayerPeerId) || !isMultiplayerWithPeer()) {
+    setMoneyPickupRangeBonusForOwner(
+      normalizedOwnerId,
+      getMoneyPickupRangeBonusForResearchedNodeIds(localResearchedNodeIds)
+    );
+    return;
+  }
+  const remoteResearchState = remoteTechResearchStateByOwner.get(normalizedOwnerId);
+  setMoneyPickupRangeBonusForOwner(
+    normalizedOwnerId,
+    getMoneyPickupRangeBonusForResearchedNodeIds(remoteResearchState?.researchedNodeIds)
+  );
+}
+
 function ensureRemoteTechResearchState(ownerId) {
   if (typeof ownerId !== "string" || ownerId.length === 0) {
     return null;
   }
   if (!remoteTechResearchStateByOwner.has(ownerId)) {
     remoteTechResearchStateByOwner.set(ownerId, createRemoteTechResearchState());
+    syncMoneyPickupRangeBonusForOwner(ownerId);
   }
   return remoteTechResearchStateByOwner.get(ownerId);
 }
@@ -3787,6 +4182,9 @@ function applyCommittedTechNode(nodeId, ownerId, options = {}) {
     sharedResearchedNodeIds.add(node.id);
   } else if (isLocalOwner) {
     localResearchedNodeIds.add(node.id);
+  }
+  if (!isSharedNode) {
+    syncMoneyPickupRangeBonusForOwner(ownerId);
   }
   const shouldApplyGrants = isLocalOwner || isSharedNode || options.applyRemoteTowerGrants === true;
   if (shouldApplyGrants) {
@@ -5393,6 +5791,7 @@ function buildHostStatePayload({ includeSnapshot = false } = {}) {
       enemies: enemySystem && typeof enemySystem.getActiveEnemySnapshots === "function"
         ? enemySystem.getActiveEnemySnapshots()
         : [],
+      moneyDrops: buildHostMoneyDropSnapshotList(),
     };
   }
   return payload;
@@ -5521,6 +5920,7 @@ function applyHostStateSyncPayload(payload = {}) {
   if (payload.snapshot && typeof payload.snapshot === "object") {
     const snapshotTowers = Array.isArray(payload.snapshot.towers) ? payload.snapshot.towers : [];
     const snapshotEnemies = Array.isArray(payload.snapshot.enemies) ? payload.snapshot.enemies : [];
+    const snapshotMoneyDrops = Array.isArray(payload.snapshot.moneyDrops) ? payload.snapshot.moneyDrops : [];
     if (towerSystem) {
       towerSystem.clearAllTowers();
       for (const towerSnapshot of snapshotTowers) {
@@ -5545,10 +5945,12 @@ function applyHostStateSyncPayload(payload = {}) {
         }
       }
     }
+    applyAuthoritativeMoneyDropSnapshots(snapshotMoneyDrops, { seq: 0 });
     hasAppliedHostSnapshot = true;
     mpLog("Applied host snapshot state", {
       towers: snapshotTowers.length,
       enemies: snapshotEnemies.length,
+      moneyDrops: snapshotMoneyDrops.length,
     });
   }
 
@@ -6244,6 +6646,11 @@ function handleMultiplayerLobbyChanged() {
 function handleMultiplayerLeftLobby() {
   mpLog("Left lobby", summarizeMultiplayerStateForLog(getMultiplayerState()));
   remoteTechResearchStateByOwner.clear();
+  for (const ownerId of Array.from(moneyPickupRangeBonusByOwner.keys())) {
+    if (ownerId !== normalizeMoneyPickupOwnerId(localMultiplayerPeerId)) {
+      moneyPickupRangeBonusByOwner.delete(ownerId);
+    }
+  }
   resetMultiplayerRuntimeState();
   updateShareOverlayFromLobbyState();
 }
@@ -6287,6 +6694,8 @@ function handleMultiplayerPeerDisconnected(peer) {
     clearRemoteWeaponEffectsForPeer(peer.id);
     towerSystem?.clearPeerPreview?.(peer.id);
     remoteTechResearchStateByOwner.delete(peer.id);
+    moneyPickupRangeBonusByOwner.delete(peer.id);
+    clearMoneyDropCollectorForOwner(peer.id);
   }
   applyMultiplayerAuthorityForCurrentSystems();
   if (hostNow) {
@@ -6511,9 +6920,6 @@ function handleMultiplayerReliableMessage(peer, type, payload) {
 
   if (type === MULTIPLAYER_MESSAGE_TYPE.enemyDeath) {
     if (!shouldHostControlSimulation()) {
-      if (Number(payload?.cashReward) > 0) {
-        spawnMoneyDrops(payload.cashReward, payload.dropPosition);
-      }
       playEnemyDeathSounds(payload?.enemyType, payload?.dropPosition, {
         didExplode: payload?.didExplode === true,
       });
@@ -6523,6 +6929,11 @@ function handleMultiplayerReliableMessage(peer, type, payload) {
         cashReward: roundMultiplayerLogNumber(payload?.cashReward, 2),
       });
     }
+    return;
+  }
+
+  if (type === MULTIPLAYER_MESSAGE_TYPE.moneyPickupCommit) {
+    applyMoneyPickupCommitPayload(payload);
     return;
   }
 
@@ -6540,6 +6951,10 @@ function handleMultiplayerUnreliableMessage(peer, type, payload) {
   noteUnreliableMultiplayerTraffic("rx", type);
   if (type === MULTIPLAYER_MESSAGE_TYPE.enemyState) {
     applyHostEnemyStatePayload(payload);
+    return;
+  }
+  if (type === MULTIPLAYER_MESSAGE_TYPE.moneyDropState) {
+    applyHostMoneyDropStatePayload(payload);
     return;
   }
   if (type === MULTIPLAYER_MESSAGE_TYPE.playerTransform) {
@@ -6609,6 +7024,8 @@ function resetTechTreeResearchState() {
   lastAwardedWaveResearchKey = "";
   pendingLocalTechChoiceNodeId = null;
   remoteTechResearchStateByOwner.clear();
+  moneyPickupRangeBonusByOwner.clear();
+  syncMoneyPickupRangeBonusForOwner(localMultiplayerPeerId);
 
   for (const nodeId of localResearchedNodeIds) {
     const node = getTechNodeById(nodeId);
@@ -6627,7 +7044,6 @@ function resetTechTreeResearchState() {
 function resetRunStateForNewLevel() {
   player?.resetRunState?.();
   playerMoney = getStartingCashForSelectedDifficulty();
-  moneyPickupRangeBonus = 0;
   currentWave = WAVE_CONFIG.initialWave;
   waveDelay = 0;
   queuedWaveNumber = null;
@@ -6799,6 +7215,9 @@ function createEnemySystemForCurrentGrid() {
         return;
       }
       spawnMoneyDrops(cashReward, dropPosition);
+      if (isMultiplayerWithPeer()) {
+        broadcastHostMoneyDropState();
+      }
       playEnemyDeathSounds(enemyType, dropPosition, {
         didExplode: defeatMeta?.didExplode === true,
       });
@@ -7250,6 +7669,7 @@ function runGameFrame({ renderFrame = true } = {}) {
     multiplayerTransformTimer = 0;
     multiplayerPreviewTimer = 0;
     multiplayerEnemyStateTimer = 0;
+    multiplayerMoneyDropStateTimer = 0;
     multiplayerDamageBatchTimer = 0;
     pendingGuestDamageByEnemyId.clear();
     pendingLocalWeaponFxEvents.length = 0;
@@ -7274,6 +7694,16 @@ function runGameFrame({ renderFrame = true } = {}) {
     }
   } else {
     multiplayerEnemyStateTimer = 0;
+  }
+
+  if (isMultiplayerHost() && isMultiplayerWithPeer()) {
+    multiplayerMoneyDropStateTimer += rawDeltaSeconds;
+    if (multiplayerMoneyDropStateTimer >= MULTIPLAYER_MONEY_DROP_STATE_SEND_INTERVAL) {
+      multiplayerMoneyDropStateTimer = 0;
+      broadcastHostMoneyDropState();
+    }
+  } else {
+    multiplayerMoneyDropStateTimer = 0;
   }
 
   if (isMultiplayerHost() && isMultiplayerWithPeer()) {
@@ -7514,9 +7944,6 @@ function initGame() {
     camera,
     domElement: renderer.domElement,
     eyeHeight: grid.eyeHeight,
-    onPickupRangeTechGrant: (addAmount) => {
-      upgradeMoneyPickupRange(addAmount);
-    },
     onWeaponVisualEvent: (event) => {
       playLocalWeaponSound(event);
       if (!isMultiplayerWithPeer()) {

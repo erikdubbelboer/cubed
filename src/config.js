@@ -103,7 +103,7 @@ export const GAME_CONFIG = {
     startingUnlockedTowers: ["gun"],
     // Enemy reward pickups (physical cash cubes).
     pickups: {
-      // Horizontal pickup radius around the player (world units).
+      // 3D pickup radius from the player's feet to the cube (world units).
       basePickupRange: 3,
       // Additive pickup radius granted by the pickup-range upgrade.
       pickupRangeUpgradeAdd: 1,
