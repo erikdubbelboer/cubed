@@ -1131,7 +1131,6 @@ const uiOverlay = createUiOverlay({
   width: viewportWidth,
   height: viewportHeight,
   maxPixelRatio: SCENE_CONFIG.maxPixelRatio,
-  mount: app,
   mobileConfig: {
     movePadRadiusPx: UI_CONFIG.movePadRadiusPx,
     ...MOBILE_UI_CONFIG,
@@ -8232,8 +8231,10 @@ function initGame() {
     return typeof grid?.getLevelObjects === "function" ? grid.getLevelObjects() : [];
   };
 
+  applyViewportMetrics(getViewportMetrics());
   resetRunStateForNewLevel();
   enterMainMenuState();
+  runGameFrame({ renderFrame: true });
   reportPokiGameLoadingFinished();
   refreshBackgroundKeepAlive();
   startMainLoop();
@@ -8295,6 +8296,8 @@ function scheduleViewportSync() {
 
 window.addEventListener("resize", scheduleViewportSync);
 window.addEventListener("orientationchange", scheduleViewportSync);
+window.addEventListener("load", scheduleViewportSync);
+window.addEventListener("pageshow", scheduleViewportSync);
 if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
   window.visualViewport.addEventListener("resize", scheduleViewportSync);
 }
