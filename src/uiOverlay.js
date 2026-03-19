@@ -1524,15 +1524,60 @@ export function createUiOverlay({
       refund: 0,
       keyHint: "",
     },
+    runtimeUi: {
+      sessionScreen: "in_run",
+      overlayScreen: "none",
+      masterVolume: 1,
+      mainMenu: {
+        title: "Cube Command",
+        subtitle: "",
+        status: "",
+        startLabel: "Start",
+        startDisabled: false,
+        selectedDifficultyId: "normal",
+        difficultyDisabled: false,
+        difficultyHint: "",
+        difficultyOptions: [],
+        shareVisible: false,
+        shareLabel: "Share Co-op",
+        shareDisabled: false,
+        shareStatus: "",
+        shareUrl: "",
+        nativeShareVisible: false,
+        nativeShareDisabled: false,
+        fullscreenLabel: "Enter Fullscreen",
+        fullscreenDisabled: false,
+      },
+      pauseMenu: {
+        title: "Paused",
+        subtitle: "",
+        resumeLabel: "Resume",
+        resumeDisabled: false,
+        fullscreenLabel: "Enter Fullscreen",
+        fullscreenDisabled: false,
+      },
+      weaponMenu: {
+        title: "Choose Your Weapon",
+        subtitle: "",
+        options: [],
+      },
+      hostToast: {
+        visible: false,
+        message: "",
+        alpha: 0,
+      },
+    },
   };
 
   let menuOptionRects = [];
+  let runtimeActionRects = [];
   let techTreeNodeRects = [];
   let techTreePanelRect = null;
   let towerSlotRects = [];
   let hudButtonRects = [];
   let touchActionZones = [];
   let touchBlockedRects = [];
+  let shareLinkInputRect = null;
   const touchControlLayout = {
     movePad: {
       centerX: 0,
@@ -1699,6 +1744,111 @@ export function createUiOverlay({
         refund: Math.max(0, Math.floor(Number(partialState.sellPrompt.refund) || 0)),
         keyHint: typeof partialState.sellPrompt.keyHint === "string" ? partialState.sellPrompt.keyHint : "",
       };
+    }
+    if (partialState.runtimeUi && typeof partialState.runtimeUi === "object") {
+      const runtimeUi = partialState.runtimeUi;
+      state.runtimeUi.sessionScreen = runtimeUi.sessionScreen === "main_menu" ? "main_menu" : "in_run";
+      state.runtimeUi.overlayScreen = typeof runtimeUi.overlayScreen === "string"
+        ? runtimeUi.overlayScreen
+        : "none";
+      if (typeof runtimeUi.masterVolume === "number" && Number.isFinite(runtimeUi.masterVolume)) {
+        state.runtimeUi.masterVolume = clamp(runtimeUi.masterVolume, 0, 1);
+      }
+
+      if (runtimeUi.mainMenu && typeof runtimeUi.mainMenu === "object") {
+        const mainMenu = runtimeUi.mainMenu;
+        state.runtimeUi.mainMenu = {
+          ...state.runtimeUi.mainMenu,
+          title: typeof mainMenu.title === "string" && mainMenu.title.length > 0
+            ? mainMenu.title
+            : state.runtimeUi.mainMenu.title,
+          subtitle: typeof mainMenu.subtitle === "string" ? mainMenu.subtitle : "",
+          status: typeof mainMenu.status === "string" ? mainMenu.status : "",
+          startLabel: typeof mainMenu.startLabel === "string" && mainMenu.startLabel.length > 0
+            ? mainMenu.startLabel
+            : "Start",
+          startDisabled: mainMenu.startDisabled === true,
+          selectedDifficultyId: typeof mainMenu.selectedDifficultyId === "string" && mainMenu.selectedDifficultyId.length > 0
+            ? mainMenu.selectedDifficultyId
+            : state.runtimeUi.mainMenu.selectedDifficultyId,
+          difficultyDisabled: mainMenu.difficultyDisabled === true,
+          difficultyHint: typeof mainMenu.difficultyHint === "string" ? mainMenu.difficultyHint : "",
+          difficultyOptions: Array.isArray(mainMenu.difficultyOptions)
+            ? mainMenu.difficultyOptions
+              .filter((option) => option && typeof option.id === "string" && option.id.length > 0)
+              .map((option) => ({
+                id: option.id,
+                label: typeof option.label === "string" && option.label.length > 0
+                  ? option.label
+                  : option.id,
+              }))
+            : [],
+          shareVisible: mainMenu.shareVisible === true,
+          shareLabel: typeof mainMenu.shareLabel === "string" && mainMenu.shareLabel.length > 0
+            ? mainMenu.shareLabel
+            : "Share Co-op",
+          shareDisabled: mainMenu.shareDisabled === true,
+          shareStatus: typeof mainMenu.shareStatus === "string" ? mainMenu.shareStatus : "",
+          shareUrl: typeof mainMenu.shareUrl === "string" ? mainMenu.shareUrl : "",
+          nativeShareVisible: mainMenu.nativeShareVisible === true,
+          nativeShareDisabled: mainMenu.nativeShareDisabled === true,
+          fullscreenLabel: typeof mainMenu.fullscreenLabel === "string" && mainMenu.fullscreenLabel.length > 0
+            ? mainMenu.fullscreenLabel
+            : "Enter Fullscreen",
+          fullscreenDisabled: mainMenu.fullscreenDisabled === true,
+        };
+      }
+
+      if (runtimeUi.pauseMenu && typeof runtimeUi.pauseMenu === "object") {
+        const pauseMenu = runtimeUi.pauseMenu;
+        state.runtimeUi.pauseMenu = {
+          ...state.runtimeUi.pauseMenu,
+          title: typeof pauseMenu.title === "string" && pauseMenu.title.length > 0
+            ? pauseMenu.title
+            : "Paused",
+          subtitle: typeof pauseMenu.subtitle === "string" ? pauseMenu.subtitle : "",
+          resumeLabel: typeof pauseMenu.resumeLabel === "string" && pauseMenu.resumeLabel.length > 0
+            ? pauseMenu.resumeLabel
+            : "Resume",
+          resumeDisabled: pauseMenu.resumeDisabled === true,
+          fullscreenLabel: typeof pauseMenu.fullscreenLabel === "string" && pauseMenu.fullscreenLabel.length > 0
+            ? pauseMenu.fullscreenLabel
+            : "Enter Fullscreen",
+          fullscreenDisabled: pauseMenu.fullscreenDisabled === true,
+        };
+      }
+
+      if (runtimeUi.weaponMenu && typeof runtimeUi.weaponMenu === "object") {
+        const weaponMenu = runtimeUi.weaponMenu;
+        state.runtimeUi.weaponMenu = {
+          title: typeof weaponMenu.title === "string" && weaponMenu.title.length > 0
+            ? weaponMenu.title
+            : "Choose Your Weapon",
+          subtitle: typeof weaponMenu.subtitle === "string" ? weaponMenu.subtitle : "",
+          options: Array.isArray(weaponMenu.options)
+            ? weaponMenu.options
+              .filter((option) => option && typeof option.type === "string" && option.type.length > 0)
+              .map((option) => ({
+                type: option.type,
+                label: typeof option.label === "string" && option.label.length > 0
+                  ? option.label
+                  : option.type,
+                iconId: typeof option.iconId === "string" && option.iconId.length > 0
+                  ? option.iconId
+                  : "weapon_machine_gun",
+              }))
+            : [],
+        };
+      }
+
+      if (runtimeUi.hostToast && typeof runtimeUi.hostToast === "object") {
+        const hostToast = runtimeUi.hostToast;
+        state.runtimeUi.hostToast = {
+          visible: hostToast.visible === true,
+          message: typeof hostToast.message === "string" ? hostToast.message : "",
+          alpha: clamp(Number(hostToast.alpha) || 0, 0, 1),
+        };
+      }
     }
   }
 
@@ -2769,6 +2919,623 @@ export function createUiOverlay({
     drawCtx.textBaseline = "alphabetic";
   }
 
+  function formatPercentText(value) {
+    return `${Math.round(clamp(Number(value) || 0, 0, 1) * 100)}%`;
+  }
+
+  function isRuntimeMainMenuVisible() {
+    return state.runtimeUi.sessionScreen === "main_menu";
+  }
+
+  function isRuntimePauseMenuVisible() {
+    return state.runtimeUi.sessionScreen === "in_run"
+      && state.runtimeUi.overlayScreen === "pause_menu";
+  }
+
+  function isRuntimeWeaponMenuVisible() {
+    return state.runtimeUi.sessionScreen === "in_run"
+      && state.runtimeUi.overlayScreen === "weapon_select";
+  }
+
+  function isRuntimeUiVisible() {
+    return isRuntimeMainMenuVisible()
+      || isRuntimePauseMenuVisible()
+      || isRuntimeWeaponMenuVisible();
+  }
+
+  function registerRuntimeActionRect(rect) {
+    if (!rect || typeof rect.id !== "string" || rect.id.length === 0) {
+      return;
+    }
+    runtimeActionRects.push({
+      id: rect.id,
+      kind: typeof rect.kind === "string" ? rect.kind : "button",
+      x: Number(rect.x) || 0,
+      y: Number(rect.y) || 0,
+      width: Math.max(0, Number(rect.width) || 0),
+      height: Math.max(0, Number(rect.height) || 0),
+      trackX: Number(rect.trackX) || 0,
+      trackWidth: Math.max(0, Number(rect.trackWidth) || 0),
+    });
+  }
+
+  function drawRuntimeButton({
+    x,
+    y,
+    width,
+    height,
+    label,
+    actionId = "",
+    disabled = false,
+    selected = false,
+    primary = false,
+  }) {
+    const fill = disabled
+      ? "rgba(28, 38, 54, 0.68)"
+      : (selected
+        ? "rgba(39, 112, 202, 0.96)"
+        : (primary ? "rgba(39, 112, 202, 0.96)" : "rgba(20, 31, 50, 0.94)"));
+    const stroke = disabled
+      ? "rgba(130, 156, 188, 0.28)"
+      : (selected || primary
+        ? "rgba(157, 214, 255, 0.58)"
+        : "rgba(255, 255, 255, 0.18)");
+    drawPanel(
+      drawCtx,
+      x,
+      y,
+      width,
+      height,
+      clamp(height * 0.28, 10, 16),
+      fill,
+      stroke,
+      disabled ? 1 : 1.25
+    );
+
+    drawCtx.fillStyle = disabled ? "rgba(232, 241, 255, 0.58)" : "rgba(244, 248, 255, 0.98)";
+    drawCtx.textAlign = "center";
+    drawCtx.textBaseline = "middle";
+    const fittedLabel = fitLabelText(
+      drawCtx,
+      label,
+      Math.max(24, width - 18),
+      clamp(height * 0.34, 13, 17),
+      11,
+      700
+    );
+    drawCtx.font = `700 ${fittedLabel.fontSize}px ${FONT_STACK}`;
+    drawCtx.fillText(fittedLabel.text, x + width * 0.5, y + height * 0.54);
+
+    if (actionId && !disabled) {
+      registerRuntimeActionRect({
+        id: actionId,
+        x,
+        y,
+        width,
+        height,
+      });
+    }
+  }
+
+  function drawRuntimeSlider({
+    x,
+    y,
+    width,
+    label,
+    value,
+    actionId,
+    disabled = false,
+  }) {
+    const safeValue = clamp(value, 0, 1);
+    const labelFont = clamp(width * 0.043, 12, 14);
+    const trackHeight = clamp(viewportHeight * 0.012, 8, 11);
+    const knobRadius = clamp(trackHeight * 1.2, 9, 12);
+    const trackY = y + labelFont + 12;
+    const percentText = formatPercentText(safeValue);
+
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "middle";
+    drawCtx.fillStyle = "rgba(255, 255, 255, 0.96)";
+    drawCtx.font = `700 ${labelFont}px ${FONT_STACK}`;
+    drawCtx.fillText(label, x, y + (labelFont * 0.5));
+
+    drawCtx.textAlign = "right";
+    drawCtx.fillStyle = disabled ? "rgba(229, 239, 255, 0.54)" : "rgba(255, 255, 255, 0.9)";
+    drawCtx.fillText(percentText, x + width, y + (labelFont * 0.5));
+
+    drawPanel(
+      drawCtx,
+      x,
+      trackY,
+      width,
+      trackHeight,
+      999,
+      "rgba(8, 15, 25, 0.84)",
+      disabled ? "rgba(130, 156, 188, 0.25)" : "rgba(164, 213, 255, 0.4)",
+      1
+    );
+
+    const fillWidth = Math.max(0, width * safeValue);
+    if (fillWidth > 0.5) {
+      const gradient = drawCtx.createLinearGradient(x, trackY, x + width, trackY);
+      gradient.addColorStop(0, disabled ? "rgba(93, 128, 163, 0.46)" : "#58f3ff");
+      gradient.addColorStop(1, disabled ? "rgba(112, 156, 194, 0.56)" : "#5fb6ff");
+      drawPanel(
+        drawCtx,
+        x,
+        trackY,
+        fillWidth,
+        trackHeight,
+        999,
+        gradient,
+        null
+      );
+    }
+
+    const knobX = x + (width * safeValue);
+    drawCtx.beginPath();
+    drawCtx.arc(knobX, trackY + (trackHeight * 0.5), knobRadius, 0, Math.PI * 2);
+    drawCtx.fillStyle = disabled ? "rgba(208, 224, 241, 0.46)" : "rgba(237, 247, 255, 0.96)";
+    drawCtx.fill();
+    drawCtx.lineWidth = 1.6;
+    drawCtx.strokeStyle = disabled ? "rgba(114, 147, 178, 0.3)" : "rgba(112, 186, 255, 0.9)";
+    drawCtx.stroke();
+
+    if (actionId && !disabled) {
+      registerRuntimeActionRect({
+        id: actionId,
+        kind: "slider",
+        x,
+        y,
+        width,
+        height: (trackY - y) + Math.max(trackHeight, knobRadius * 2),
+        trackX: x,
+        trackWidth: width,
+      });
+    }
+
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "alphabetic";
+
+    return {
+      height: (trackY - y) + Math.max(trackHeight, knobRadius * 2),
+    };
+  }
+
+  function drawShareInputSlot(x, y, width, height) {
+    drawPanel(
+      drawCtx,
+      x,
+      y,
+      width,
+      height,
+      clamp(height * 0.26, 9, 12),
+      "rgba(7, 12, 20, 0.9)",
+      "rgba(255, 255, 255, 0.18)",
+      1.1
+    );
+    shareLinkInputRect = { x, y, width, height };
+  }
+
+  function drawRuntimeMainMenu() {
+    const mainMenu = state.runtimeUi.mainMenu;
+    const compact = viewportHeight < 760 || viewportWidth < 900;
+    const panelWidth = compact
+      ? clamp(viewportWidth * 0.92, 300, 480)
+      : clamp(viewportWidth * 0.56, 360, 540);
+    const pad = compact ? 16 : 22;
+    const sectionGap = compact ? 12 : 14;
+    const buttonHeight = compact ? 44 : 50;
+    const titleFontSize = compact ? 28 : 32;
+    const shareInputHeight = compact ? 38 : 40;
+    const sliderWidth = panelWidth - (pad * 2);
+    const shareHasUrl = typeof mainMenu.shareUrl === "string" && mainMenu.shareUrl.length > 0;
+    const showNativeShare = mainMenu.shareVisible && shareHasUrl && mainMenu.nativeShareVisible;
+    const difficultyOptions = Array.isArray(mainMenu.difficultyOptions) && mainMenu.difficultyOptions.length > 0
+      ? mainMenu.difficultyOptions
+      : [
+        { id: "easy", label: "Easy" },
+        { id: "normal", label: "Normal" },
+        { id: "hard", label: "Hard" },
+      ];
+
+    const titleBlockHeight = titleFontSize + 18;
+    const difficultyBlockHeight = buttonHeight;
+    const shareBlockHeight = mainMenu.shareVisible
+      ? (
+        buttonHeight
+          + 14
+          + (shareHasUrl ? shareInputHeight + 10 : 0)
+          + (showNativeShare ? buttonHeight + 10 : 0)
+      )
+      : 0;
+    const sliderBlockHeight = 52;
+    const volumeBlockHeight = sliderBlockHeight + 10 + buttonHeight;
+    const panelHeight = (pad * 2)
+      + titleBlockHeight
+      + buttonHeight
+      + difficultyBlockHeight
+      + volumeBlockHeight
+      + (mainMenu.shareVisible ? shareBlockHeight : 0)
+      + (sectionGap * (mainMenu.shareVisible ? 3 : 2));
+    const panelX = (viewportWidth - panelWidth) * 0.5;
+    const panelY = clamp((viewportHeight - panelHeight) * 0.5, 8, Math.max(8, viewportHeight - panelHeight - 8));
+
+    drawCtx.fillStyle = "rgba(3, 8, 17, 0.62)";
+    drawCtx.fillRect(0, 0, viewportWidth, viewportHeight);
+    drawPanel(
+      drawCtx,
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+      20,
+      "rgba(12, 18, 31, 0.98)",
+      "rgba(162, 203, 255, 0.2)",
+      1.2
+    );
+
+    let cursorY = panelY + pad;
+
+    drawCtx.textAlign = "center";
+    drawCtx.textBaseline = "top";
+    drawCtx.fillStyle = "#ffffff";
+    drawCtx.font = `800 ${titleFontSize}px ${FONT_STACK}`;
+    drawCtx.fillText(mainMenu.title || "Cube Command", panelX + panelWidth * 0.5, cursorY);
+    cursorY += titleBlockHeight;
+
+    drawRuntimeButton({
+      x: panelX + pad,
+      y: cursorY,
+      width: panelWidth - (pad * 2),
+      height: buttonHeight,
+      label: mainMenu.startLabel || "Start",
+      actionId: "main_start",
+      disabled: mainMenu.startDisabled === true,
+      primary: true,
+    });
+    cursorY += buttonHeight + sectionGap;
+
+    const difficultyGap = 8;
+    const difficultyWidth = (
+      panelWidth - (pad * 2) - (difficultyGap * Math.max(0, difficultyOptions.length - 1))
+    ) / Math.max(1, difficultyOptions.length);
+    for (let i = 0; i < difficultyOptions.length; i += 1) {
+      const option = difficultyOptions[i];
+      const buttonX = panelX + pad + (i * (difficultyWidth + difficultyGap));
+      drawRuntimeButton({
+        x: buttonX,
+        y: cursorY,
+        width: difficultyWidth,
+        height: buttonHeight,
+        label: option.label,
+        actionId: `main_difficulty:${option.id}`,
+        disabled: mainMenu.difficultyDisabled === true,
+        selected: option.id === mainMenu.selectedDifficultyId,
+      });
+    }
+    cursorY += buttonHeight + sectionGap;
+
+    if (mainMenu.shareVisible) {
+      drawRuntimeButton({
+        x: panelX + pad,
+        y: cursorY,
+        width: panelWidth - (pad * 2),
+        height: buttonHeight,
+        label: mainMenu.shareLabel || "Share Co-op",
+        actionId: "main_share",
+        disabled: mainMenu.shareDisabled === true,
+      });
+      cursorY += buttonHeight + 10;
+
+      if (shareHasUrl) {
+        drawShareInputSlot(panelX + pad, cursorY, panelWidth - (pad * 2), shareInputHeight);
+        cursorY += shareInputHeight + 10;
+      }
+
+      if (showNativeShare) {
+        drawRuntimeButton({
+          x: panelX + pad,
+          y: cursorY,
+          width: panelWidth - (pad * 2),
+          height: buttonHeight,
+          label: "Native Share",
+          actionId: "main_native_share",
+          disabled: mainMenu.nativeShareDisabled === true,
+        });
+        cursorY += buttonHeight + 10;
+      }
+
+      cursorY += Math.max(0, sectionGap - 10);
+    }
+
+    const sliderLayout = drawRuntimeSlider({
+      x: panelX + pad,
+      y: cursorY,
+      width: sliderWidth,
+      label: "Master Volume",
+      value: state.runtimeUi.masterVolume,
+      actionId: "main_volume",
+      disabled: false,
+    });
+    cursorY += sliderLayout.height + 10;
+
+    drawRuntimeButton({
+      x: panelX + pad,
+      y: cursorY,
+      width: panelWidth - (pad * 2),
+      height: buttonHeight,
+      label: mainMenu.fullscreenLabel || "Enter Fullscreen",
+      actionId: "main_fullscreen",
+      disabled: mainMenu.fullscreenDisabled === true,
+    });
+
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "alphabetic";
+  }
+
+  function drawRuntimePauseMenu() {
+    const pauseMenu = state.runtimeUi.pauseMenu;
+    const compact = viewportHeight < 720 || viewportWidth < 860;
+    const panelWidth = compact
+      ? clamp(viewportWidth * 0.9, 280, 460)
+      : clamp(viewportWidth * 0.46, 320, 520);
+    const pad = compact ? 16 : 22;
+    const buttonHeight = compact ? 44 : 48;
+    const sectionGap = compact ? 12 : 14;
+    const sliderBlockHeight = 52;
+    const panelHeight = (pad * 2) + 6
+      + buttonHeight
+      + buttonHeight
+      + sliderBlockHeight
+      + buttonHeight
+      + (sectionGap * 3);
+    const panelX = (viewportWidth - panelWidth) * 0.5;
+    const panelY = clamp((viewportHeight - panelHeight) * 0.5, 8, Math.max(8, viewportHeight - panelHeight - 8));
+
+    drawCtx.fillStyle = "rgba(3, 8, 17, 0.62)";
+    drawCtx.fillRect(0, 0, viewportWidth, viewportHeight);
+    drawPanel(
+      drawCtx,
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+      20,
+      "rgba(12, 18, 31, 0.98)",
+      "rgba(162, 203, 255, 0.2)",
+      1.2
+    );
+
+    let cursorY = panelY + pad + 6;
+
+    drawRuntimeButton({
+      x: panelX + pad,
+      y: cursorY,
+      width: panelWidth - (pad * 2),
+      height: buttonHeight,
+      label: pauseMenu.resumeLabel || "Resume",
+      actionId: "pause_resume",
+      disabled: pauseMenu.resumeDisabled === true,
+      primary: true,
+    });
+    cursorY += buttonHeight + sectionGap;
+
+    drawRuntimeButton({
+      x: panelX + pad,
+      y: cursorY,
+      width: panelWidth - (pad * 2),
+      height: buttonHeight,
+      label: "Back to Main Menu",
+      actionId: "pause_back",
+      disabled: false,
+    });
+    cursorY += buttonHeight + sectionGap;
+
+    const sliderLayout = drawRuntimeSlider({
+      x: panelX + pad,
+      y: cursorY,
+      width: panelWidth - (pad * 2),
+      label: "Master Volume",
+      value: state.runtimeUi.masterVolume,
+      actionId: "pause_volume",
+      disabled: false,
+    });
+    cursorY += sliderLayout.height + sectionGap;
+
+    drawRuntimeButton({
+      x: panelX + pad,
+      y: cursorY,
+      width: panelWidth - (pad * 2),
+      height: buttonHeight,
+      label: pauseMenu.fullscreenLabel || "Enter Fullscreen",
+      actionId: "pause_fullscreen",
+      disabled: pauseMenu.fullscreenDisabled === true,
+    });
+
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "alphabetic";
+  }
+
+  function drawRuntimeWeaponMenu() {
+    const weaponMenu = state.runtimeUi.weaponMenu;
+    const options = Array.isArray(weaponMenu.options) ? weaponMenu.options : [];
+    const isMobileMenu = state.touchPortrait || viewportWidth < 780;
+    const panelWidth = isMobileMenu
+      ? clamp(viewportWidth * 0.88, 286, 470)
+      : clamp(viewportWidth * 0.82, 290, 470);
+    const panelPadding = isMobileMenu
+      ? clamp(panelWidth * 0.06, 14, 22)
+      : clamp(panelWidth * 0.07, 16, 26);
+    const cardCount = Math.min(3, options.length);
+    let cardHeight = isMobileMenu
+      ? clamp(viewportHeight * 0.095, 56, 82)
+      : clamp(viewportHeight * 0.11, 64, 92);
+    let cardGap = isMobileMenu
+      ? clamp(cardHeight * 0.16, 8, 13)
+      : clamp(cardHeight * 0.2, 10, 18);
+    let cardsHeight = cardCount > 0
+      ? (cardCount * cardHeight) + ((cardCount - 1) * cardGap)
+      : 0;
+    let panelHeight = cardsHeight + panelPadding * 2;
+    if (isMobileMenu) {
+      const topInset = clamp(viewportHeight * 0.035, 14, 26);
+      const bottomInset = clamp(viewportHeight * 0.02, 12, 20);
+      const maxPanelHeight = viewportHeight - topInset - bottomInset;
+      if (panelHeight > maxPanelHeight && cardCount > 0) {
+        const maxCardsHeight = Math.max(cardCount * 46, maxPanelHeight - panelPadding * 2);
+        const nextCardHeight = (maxCardsHeight - ((cardCount - 1) * cardGap)) / cardCount;
+        cardHeight = clamp(nextCardHeight, 46, cardHeight);
+        cardGap = clamp(cardHeight * 0.14, 6, 11);
+        cardsHeight = (cardCount * cardHeight) + ((cardCount - 1) * cardGap);
+        panelHeight = cardsHeight + panelPadding * 2;
+      }
+    }
+    const panelX = (viewportWidth - panelWidth) * 0.5;
+    const panelY = isMobileMenu
+      ? clamp(viewportHeight * 0.035, 8, Math.max(8, viewportHeight - panelHeight - 8))
+      : (viewportHeight - panelHeight) * 0.5;
+
+    drawCtx.fillStyle = "rgba(4, 8, 20, 0.85)";
+    drawCtx.fillRect(0, 0, viewportWidth, viewportHeight);
+    drawPanel(
+      drawCtx,
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+      clamp(panelWidth * 0.04, 12, 18),
+      "rgba(14, 23, 38, 0.96)",
+      "rgba(80, 133, 200, 0.95)",
+      1.5
+    );
+
+    const cardX = panelX + panelPadding;
+    const cardWidth = panelWidth - panelPadding * 2;
+    let cardY = panelY + panelPadding;
+
+    for (let i = 0; i < cardCount; i += 1) {
+      const option = options[i];
+      drawPanel(
+        drawCtx,
+        cardX,
+        cardY,
+        cardWidth,
+        cardHeight,
+        clamp(cardHeight * 0.15, 8, 14),
+        "rgba(24, 44, 70, 0.82)",
+        "rgba(93, 161, 245, 0.72)",
+        1.2
+      );
+
+      const iconSize = cardHeight * 0.9;
+      const iconX = cardX + clamp(cardWidth * 0.03, 10, 16);
+      const iconY = cardY + (cardHeight - iconSize) * 0.5;
+      drawPanel(
+        drawCtx,
+        iconX,
+        iconY,
+        iconSize,
+        iconSize,
+        clamp(iconSize * 0.17, 7, 12),
+        "rgba(8, 18, 30, 0.64)",
+        "rgba(148, 214, 255, 0.72)",
+        1
+      );
+      drawIconById(drawCtx, option.iconId, iconX + 2, iconY + 2, iconSize - 4);
+
+      drawCtx.textAlign = "left";
+      drawCtx.textBaseline = "middle";
+      drawCtx.fillStyle = "rgba(240, 247, 255, 0.98)";
+      const optionPrefix = state.showKeyboardHints ? `${i + 1}. ` : "";
+      const optionText = `${optionPrefix}${option.label}`;
+      const textMaxWidth = Math.max(
+        24,
+        cardWidth - (iconX + iconSize + clamp(cardWidth * 0.04, 12, 18) - cardX) - clamp(cardWidth * 0.04, 12, 18)
+      );
+      const fittedLabel = fitLabelText(
+        drawCtx,
+        optionText,
+        textMaxWidth,
+        clamp(cardHeight * 0.27, 13, 19),
+        11,
+        600
+      );
+      drawCtx.font = `600 ${fittedLabel.fontSize}px ${FONT_STACK}`;
+      drawCtx.fillText(
+        fittedLabel.text,
+        iconX + iconSize + clamp(cardWidth * 0.04, 12, 18),
+        cardY + cardHeight * 0.52
+      );
+
+      registerRuntimeActionRect({
+        id: `weapon_select:${option.type}`,
+        x: cardX,
+        y: cardY,
+        width: cardWidth,
+        height: cardHeight,
+      });
+
+      cardY += cardHeight + cardGap;
+    }
+
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "alphabetic";
+  }
+
+  function drawHostToast() {
+    const hostToast = state.runtimeUi.hostToast;
+    const message = typeof hostToast.message === "string" ? hostToast.message.trim() : "";
+    const alpha = clamp(Number(hostToast.alpha) || 0, 0, 1);
+    if (hostToast.visible !== true || !message || alpha <= 0) {
+      return;
+    }
+
+    const paddingX = 12;
+    const paddingY = 8;
+    const fontSize = 12;
+    drawCtx.save();
+    drawCtx.globalAlpha = alpha;
+    drawCtx.font = `500 ${fontSize}px ${FONT_STACK}`;
+    const width = clamp(drawCtx.measureText(message).width + (paddingX * 2), 90, viewportWidth - 32);
+    const height = fontSize + (paddingY * 2);
+    const x = 16;
+    const y = 16;
+    drawPanel(
+      drawCtx,
+      x,
+      y,
+      width,
+      height,
+      height * 0.5,
+      "rgba(16, 16, 16, 0.82)",
+      "rgba(255, 255, 255, 0.18)",
+      1
+    );
+    drawCtx.fillStyle = "rgba(244, 244, 244, 0.95)";
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "top";
+    drawCtx.fillText(message, x + paddingX, y + paddingY);
+    drawCtx.restore();
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "alphabetic";
+  }
+
+  function drawRuntimeOverlay() {
+    runtimeActionRects = [];
+    shareLinkInputRect = null;
+
+    if (isRuntimeMainMenuVisible()) {
+      drawRuntimeMainMenu();
+    } else if (isRuntimePauseMenuVisible()) {
+      drawRuntimePauseMenu();
+    } else if (isRuntimeWeaponMenuVisible()) {
+      drawRuntimeWeaponMenu();
+    }
+
+    drawHostToast();
+  }
+
   function drawCardMenu() {
     menuOptionRects = [];
     if (!state.menuOpen) {
@@ -3294,6 +4061,8 @@ export function createUiOverlay({
     drawCtx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     drawCtx.clearRect(0, 0, viewportWidth, viewportHeight);
     touchBlockedRects = [];
+    runtimeActionRects = [];
+    shareLinkInputRect = null;
 
     if (state.hudVisible) {
       drawJetpackHud();
@@ -3309,6 +4078,7 @@ export function createUiOverlay({
       drawSellPrompt();
     }
     drawMenuOverlay();
+    drawRuntimeOverlay();
     touchControlLayout.blockedRects = touchBlockedRects.slice();
   }
 
@@ -3421,6 +4191,25 @@ export function createUiOverlay({
     return result == null ? null : result;
   }
 
+  function hitTestRuntimeUiAction(x, y) {
+    const result = hitTestRectList(runtimeActionRects, x, y, (rect) => rect);
+    if (!result) {
+      return null;
+    }
+    if (result.kind === "slider") {
+      const sliderWidth = Math.max(1, Number(result.trackWidth) || 0);
+      return {
+        id: result.id,
+        kind: "slider",
+        value: clamp((x - result.trackX) / sliderWidth, 0, 1),
+      };
+    }
+    return {
+      id: result.id,
+      kind: result.kind || "button",
+    };
+  }
+
   function getTouchControlLayout() {
     const blockedRects = touchBlockedRects.slice();
     for (const rect of towerSlotRects) {
@@ -3436,6 +4225,10 @@ export function createUiOverlay({
       lookZoneTop: touchControlLayout.lookZoneTop,
       blockedRects,
     };
+  }
+
+  function getShareLinkInputRect() {
+    return shareLinkInputRect ? { ...shareLinkInputRect } : null;
   }
 
   resize(width, height);
@@ -3454,6 +4247,8 @@ export function createUiOverlay({
     hitTestTowerSlot,
     hitTestTouchAction,
     hitTestHudButton,
+    hitTestRuntimeUiAction,
     getTouchControlLayout,
+    getShareLinkInputRect,
   };
 }

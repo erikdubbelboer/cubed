@@ -7,7 +7,8 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Stack: npm + Vite + native ES modules.
 - Entry flow: `index.html` -> `src/main.js`.
 - `src/main.js` is the orchestrator and state owner for wave/menu/economy and system wiring (`grid`, `player`, `enemies`, `towers`, `uiOverlay`, `multiplayer`).
-- Boot flow enters a DOM main menu (`sessionScreen` / `overlayScreen` in `main.js`); the canvas overlay is reserved for HUD, touch controls, and the tech tree.
+- Boot flow enters a canvas-rendered main menu (`sessionScreen` / `overlayScreen` in `main.js`); `src/uiOverlay.js` owns all player-facing runtime UI rendering.
+- Very important: never introduce HTML runtime/player-facing UI again; every runtime UI surface must render on the canvas, except for the single readonly co-op share-link input.
 - Menu settings persist in `localStorage` via `webgame.masterVolume` and `webgame.difficulty`.
 - `GAME_CONFIG.audio.baseMasterVolume` defines the midpoint of the menu volume slider: `50%` maps to that configured gain and `100%` maps to `2x` that gain; stored `webgame.masterVolume` remains the actual applied master gain.
 
@@ -29,7 +30,8 @@ Capture project decisions that are easy to regress but not always obvious from l
   - Guest leaves: host continues solo and scaling returns to `1x`.
   - Host leaves: guest session terminates (`host_ended`/disconnect).
 - Share UI contract:
-  - Share controls live in the DOM main menu and are host-only while in a lobby.
+  - Share controls render on the canvas main menu and are host-only while in a lobby.
+  - The share URL itself may use the single readonly DOM input overlay, positioned to match the canvas slot.
   - Host share controls are hidden while any peer is connected (`peerCount > 0`) and reappear when solo.
   - Host receives subtle, non-blocking join/leave toasts (`Player joined` / `Player left`).
 - If the host is waiting in the main menu and a peer joins, the host immediately starts a fresh run and both players open local weapon select.
