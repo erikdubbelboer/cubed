@@ -1,3 +1,5 @@
+import * as THREE from "three";
+
 const FONT_STACK = "\"Segoe UI\", sans-serif";
 const MOBILE_UI_DEFAULTS = {
   movePadRadiusPx: 45,
@@ -1452,19 +1454,32 @@ export function createUiOverlay({
   height,
   maxPixelRatio = 2,
   mobileConfig = {},
-  mount = null,
 } = {}) {
   const drawCanvas = document.createElement("canvas");
   const drawCtx = drawCanvas.getContext("2d");
-  drawCanvas.style.position = "absolute";
-  drawCanvas.style.inset = "0";
-  drawCanvas.style.width = "100%";
-  drawCanvas.style.height = "100%";
-  drawCanvas.style.pointerEvents = "none";
-  drawCanvas.style.zIndex = "10";
-  if (mount && typeof mount.appendChild === "function") {
-    mount.appendChild(drawCanvas);
-  }
+  const overlayTexture = new THREE.CanvasTexture(drawCanvas);
+  overlayTexture.generateMipmaps = false;
+  overlayTexture.minFilter = THREE.LinearFilter;
+  overlayTexture.magFilter = THREE.LinearFilter;
+  overlayTexture.colorSpace = THREE.SRGBColorSpace;
+  overlayTexture.needsUpdate = true;
+
+  const overlayScene = new THREE.Scene();
+  const overlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+  overlayCamera.position.z = 1;
+
+  const overlayQuad = new THREE.Mesh(
+    new THREE.PlaneGeometry(2, 2),
+    new THREE.MeshBasicMaterial({
+      map: overlayTexture,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    })
+  );
+  overlayQuad.frustumCulled = false;
+  overlayScene.add(overlayQuad);
   const mobileUiConfig = {
     ...MOBILE_UI_DEFAULTS,
     ...(mobileConfig && typeof mobileConfig === "object" ? mobileConfig : {}),
@@ -1605,6 +1620,7 @@ export function createUiOverlay({
     pixelRatio = clamp(window.devicePixelRatio || 1, 1, maxPixelRatio);
     drawCanvas.width = Math.max(1, Math.floor(viewportWidth * pixelRatio));
     drawCanvas.height = Math.max(1, Math.floor(viewportHeight * pixelRatio));
+    overlayTexture.needsUpdate = true;
     state.menuCursorX = clamp(state.menuCursorX, 0, viewportWidth);
     state.menuCursorY = clamp(state.menuCursorY, 0, viewportHeight);
   }
@@ -4058,8 +4074,9 @@ export function createUiOverlay({
       return;
     }
 
+    drawCtx.setTransform(1, 0, 0, 1, 0, 0);
+    drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
     drawCtx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-    drawCtx.clearRect(0, 0, viewportWidth, viewportHeight);
     touchBlockedRects = [];
     runtimeActionRects = [];
     shareLinkInputRect = null;
@@ -4080,6 +4097,7 @@ export function createUiOverlay({
     drawMenuOverlay();
     drawRuntimeOverlay();
     touchControlLayout.blockedRects = touchBlockedRects.slice();
+    overlayTexture.needsUpdate = true;
   }
 
   function hitTestRectList(rects, x, y, mapResult) {
@@ -4234,8 +4252,8 @@ export function createUiOverlay({
   resize(width, height);
 
   return {
-    scene: null,
-    camera: null,
+    scene: overlayScene,
+    camera: overlayCamera,
     domElement: drawCanvas,
     resize,
     setState,
