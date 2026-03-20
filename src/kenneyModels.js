@@ -27,6 +27,10 @@ const ENEMY_VISUAL_YAW_CORRECTION = 0;
 const REMOTE_PLAYER_VISUAL_YAW_CORRECTION = 0;
 const RAMP_VISUAL_YAW_CORRECTION = Math.PI;
 const RAMP_VISUAL_SURFACE_LIFT = 0.02;
+const WALL_VISUAL_SURFACE_LIFT = Number.isFinite(Number(GRID_CONFIG.kenneyWallVisualLift))
+  ? Math.max(0, Number(GRID_CONFIG.kenneyWallVisualLift))
+  : 0.02;
+const WALL_BOTTOM_CAP_Y_OFFSET = 0.0005;
 const REMOTE_PLAYER_BASE_COLOR = 0xffffff;
 const REMOTE_PLAYER_EMISSIVE = 0x000000;
 const RAMP_BASE_COLOR = 0xffffff;
@@ -55,6 +59,7 @@ const OBJ_LOADER = new OBJLoader();
 const TEXTURE_LOADER = new THREE.TextureLoader();
 const KENNEY_MANAGED_FLAG = "kenneyManaged";
 const KENNEY_SHARED_FLAG = "kenneyShared";
+const WALL_BOTTOM_CAP_GEOMETRY = markKenneyManaged(new THREE.PlaneGeometry(1, 1), { shared: true });
 const KENNEY_DEBUG_ENABLED = (() => {
   if (typeof window === "undefined" || typeof window.location?.search !== "string") {
     return false;
@@ -121,6 +126,7 @@ const assetDescriptors = new Map();
 let sharedAtlasTexture = null;
 let preloadPromise = null;
 let preloadFailed = false;
+const sharedWallBottomCapMaterials = new Map();
 
 function logKenneyDebug(message, details = null, { onceKey = null } = {}) {
   if (!KENNEY_DEBUG_ENABLED) {
@@ -206,6 +212,65 @@ function collectUniqueMaterials(root) {
     }
   });
   return materials;
+}
+
+function getSharedWallBottomCapMaterial(materialKey, style = {}) {
+  if (sharedWallBottomCapMaterials.has(materialKey)) {
+    return sharedWallBottomCapMaterials.get(materialKey);
+  }
+  const material = new THREE.MeshStandardMaterial({
+    color: cloneColor(style.color ?? 0xffffff),
+    emissive: cloneColor(style.emissive ?? 0x000000, 0x000000),
+    emissiveIntensity: hasFiniteNumber(style.emissiveIntensity)
+      ? Math.max(0, Number(style.emissiveIntensity))
+      : 0,
+    roughness: hasFiniteNumber(style.roughness)
+      ? THREE.MathUtils.clamp(Number(style.roughness), 0, 1)
+      : 0.82,
+    metalness: hasFiniteNumber(style.metalness)
+      ? THREE.MathUtils.clamp(Number(style.metalness), 0, 1)
+      : 0.04,
+    side: THREE.DoubleSide,
+  });
+  if (hasFiniteNumber(style.opacity)) {
+    const opacity = THREE.MathUtils.clamp(Number(style.opacity), 0, 1);
+    material.opacity = opacity;
+    material.transparent = opacity < 0.999;
+  }
+  markKenneyManaged(material, { shared: true });
+  sharedWallBottomCapMaterials.set(materialKey, material);
+  return material;
+}
+
+function addWallBottomCap(root, {
+  width,
+  depth,
+  materialKey,
+  color = 0xffffff,
+  emissive = 0x000000,
+  emissiveIntensity = 0,
+  roughness = 0.82,
+  metalness = 0.04,
+  opacity = 1,
+} = {}) {
+  if (!root) {
+    return;
+  }
+  const capMaterial = getSharedWallBottomCapMaterial(materialKey, {
+    color,
+    emissive,
+    emissiveIntensity,
+    roughness,
+    metalness,
+    opacity,
+  });
+  const cap = new THREE.Mesh(WALL_BOTTOM_CAP_GEOMETRY, capMaterial);
+  cap.rotation.x = Math.PI * 0.5;
+  cap.position.y = WALL_BOTTOM_CAP_Y_OFFSET;
+  cap.scale.set(Math.max(0.01, Number(width) || 1), Math.max(0.01, Number(depth) || 1), 1);
+  cap.castShadow = false;
+  cap.receiveShadow = true;
+  root.add(cap);
 }
 
 function applyMaterialStyle(material, {
@@ -618,7 +683,7 @@ export function createRampVisual(rotation = 0) {
   return root;
 }
 
-export function createTerrainWallVisual() {
+export function createTerrainWallVisual({ addBottomCap = false } = {}) {
   const descriptor = getDescriptor("block");
   if (!descriptor) {
     return null;
@@ -643,6 +708,26 @@ export function createTerrainWallVisual() {
       useMap: true,
     },
   });
+  if (root) {
+    const wallShell = root.children[0];
+    if (wallShell) {
+      wallShell.position.y += WALL_VISUAL_SURFACE_LIFT;
+    }
+    if (addBottomCap) {
+      addWallBottomCap(root, {
+        width: GRID_CELL_SIZE,
+        depth: GRID_CELL_SIZE,
+        materialKey: "terrainWall:bottomCap",
+        color: 0xd7d4e6,
+        emissive: 0x000000,
+        emissiveIntensity: 0,
+        roughness: Number.isFinite(Number(GRID_CONFIG.altitudeRoughness))
+          ? Number(GRID_CONFIG.altitudeRoughness)
+          : 0.82,
+        metalness: 0.02,
+      });
+    }
+  }
   logKenneyDebug("Created terrain wall visual", { ok: !!root }, { onceKey: "create-terrain-wall" });
   return root;
 }
@@ -709,6 +794,12 @@ export function createBlockVisual({ opacity = 1 } = {}) {
       transparent: blockOpacity < 0.999,
     },
   });
+  if (root) {
+    const blockShell = root.children[0];
+    if (blockShell) {
+      blockShell.position.y += WALL_VISUAL_SURFACE_LIFT;
+    }
+  }
   logKenneyDebug("Created block visual", {
     opacity: blockOpacity,
     ok: !!root,

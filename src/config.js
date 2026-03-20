@@ -469,6 +469,8 @@ export const GAME_CONFIG = {
     altitudeEmissiveIntensity: 0.18,
     altitudeRoughness: 0.72,
     altitudeMetalness: 0.12,
+    // Tiny upward offset for Kenney wall.obj shells to avoid floor z-fighting.
+    kenneyWallVisualLift: 0.025,
 
     // Path tile materials.
     pathTileColor: 0xe9d5ab,

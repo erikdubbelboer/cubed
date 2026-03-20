@@ -617,6 +617,10 @@ export function createGrid(scene, options = {}) {
 
   const ramps = Array.isArray(levelLayout.ramps) ? levelLayout.ramps : [];
   const wallVoxels = Array.isArray(levelLayout.wallVoxels) ? levelLayout.wallVoxels : [];
+  const wallVoxelKeySet = new Set(
+    wallVoxels
+      .map((voxel) => `${Number(voxel?.x)},${Number(voxel?.y)},${Number(voxel?.z)}`)
+  );
   const decorativeObjects = Array.isArray(levelLayout.decorativeObjects) ? levelLayout.decorativeObjects : [];
   const decorativeEntries = [];
 
@@ -683,7 +687,9 @@ export function createGrid(scene, options = {}) {
     cube.receiveShadow = true;
     cube.userData.editorObjectType = "wall";
     cube.userData.editorWall = { x: cellX, y: cellY, z: cellZ };
-    const terrainWallVisual = createTerrainWallVisual();
+    const terrainWallVisual = createTerrainWallVisual({
+      addBottomCap: !wallVoxelKeySet.has(`${cellX},${cellY - 1},${cellZ}`),
+    });
     if (terrainWallVisual) {
       terrainWallVisual.position.y = -(ALTITUDE_CUBE_SIZE * 0.5);
       cube.material.visible = false;
