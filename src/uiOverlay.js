@@ -1093,6 +1093,86 @@ function drawIconEditorPlayerSpawn(ctx, x, y, size) {
   ctx.fillRect(x + size * 0.47, y + size * 0.53, size * 0.06, size * 0.17);
 }
 
+function drawIconEditorChest(ctx, x, y, size) {
+  drawPanel(
+    ctx,
+    x + size * 0.22,
+    y + size * 0.34,
+    size * 0.56,
+    size * 0.32,
+    size * 0.06,
+    "rgba(190, 130, 72, 0.96)",
+    "rgba(244, 209, 165, 0.96)",
+    Math.max(1.2, size * 0.045)
+  );
+  drawPanel(
+    ctx,
+    x + size * 0.24,
+    y + size * 0.22,
+    size * 0.52,
+    size * 0.18,
+    size * 0.07,
+    "rgba(156, 101, 56, 0.96)",
+    "rgba(235, 196, 145, 0.92)",
+    Math.max(1.1, size * 0.04)
+  );
+  ctx.fillStyle = "rgba(255, 226, 121, 0.98)";
+  ctx.fillRect(x + size * 0.46, y + size * 0.38, size * 0.08, size * 0.16);
+}
+
+function drawIconEditorBarrel(ctx, x, y, size) {
+  ctx.fillStyle = "rgba(176, 110, 74, 0.96)";
+  ctx.strokeStyle = "rgba(241, 204, 180, 0.94)";
+  ctx.lineWidth = Math.max(1.2, size * 0.042);
+  ctx.beginPath();
+  ctx.ellipse(x + size * 0.5, y + size * 0.3, size * 0.18, size * 0.08, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  drawPanel(
+    ctx,
+    x + size * 0.32,
+    y + size * 0.3,
+    size * 0.36,
+    size * 0.34,
+    size * 0.12,
+    "rgba(183, 119, 82, 0.96)",
+    "rgba(241, 204, 180, 0.9)",
+    Math.max(1.2, size * 0.042)
+  );
+  ctx.beginPath();
+  ctx.ellipse(x + size * 0.5, y + size * 0.64, size * 0.18, size * 0.08, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(112, 164, 216, 0.9)";
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.34, y + size * 0.41);
+  ctx.lineTo(x + size * 0.66, y + size * 0.41);
+  ctx.moveTo(x + size * 0.34, y + size * 0.54);
+  ctx.lineTo(x + size * 0.66, y + size * 0.54);
+  ctx.stroke();
+}
+
+function drawIconEditorStones(ctx, x, y, size) {
+  const stones = [
+    { x: 0.3, y: 0.58, w: 0.18, h: 0.16 },
+    { x: 0.48, y: 0.48, w: 0.22, h: 0.2 },
+    { x: 0.62, y: 0.6, w: 0.16, h: 0.14 },
+  ];
+  for (const stone of stones) {
+    drawPanel(
+      ctx,
+      x + size * stone.x,
+      y + size * stone.y,
+      size * stone.w,
+      size * stone.h,
+      size * 0.08,
+      "rgba(151, 166, 184, 0.95)",
+      "rgba(220, 229, 240, 0.92)",
+      Math.max(1.1, size * 0.038)
+    );
+  }
+}
+
 function drawIconWeaponMachineGun(ctx, x, y, size) {
   drawPanel(
     ctx,
@@ -1422,6 +1502,15 @@ export function drawIconById(ctx, iconId, x, y, size) {
     case "editor_player_spawn":
       drawIconEditorPlayerSpawn(ctx, x, y, size);
       return;
+    case "editor_chest":
+      drawIconEditorChest(ctx, x, y, size);
+      return;
+    case "editor_barrel":
+      drawIconEditorBarrel(ctx, x, y, size);
+      return;
+    case "editor_stones":
+      drawIconEditorStones(ctx, x, y, size);
+      return;
     default:
       drawIconDefault(ctx, x, y, size);
   }
@@ -1543,6 +1632,8 @@ export function createUiOverlay({
       sessionScreen: "in_run",
       overlayScreen: "none",
       masterVolume: 1,
+      mouseSensitivity: 0.5,
+      mouseSensitivityVisible: false,
       mainMenu: {
         title: "Cube Command",
         subtitle: "",
@@ -1769,6 +1860,12 @@ export function createUiOverlay({
         : "none";
       if (typeof runtimeUi.masterVolume === "number" && Number.isFinite(runtimeUi.masterVolume)) {
         state.runtimeUi.masterVolume = clamp(runtimeUi.masterVolume, 0, 1);
+      }
+      if (typeof runtimeUi.mouseSensitivity === "number" && Number.isFinite(runtimeUi.mouseSensitivity)) {
+        state.runtimeUi.mouseSensitivity = clamp(runtimeUi.mouseSensitivity, 0, 1);
+      }
+      if (typeof runtimeUi.mouseSensitivityVisible === "boolean") {
+        state.runtimeUi.mouseSensitivityVisible = runtimeUi.mouseSensitivityVisible;
       }
 
       if (runtimeUi.mainMenu && typeof runtimeUi.mainMenu === "object") {
@@ -3166,12 +3263,16 @@ export function createUiOverlay({
       )
       : 0;
     const sliderBlockHeight = 52;
-    const volumeBlockHeight = sliderBlockHeight + 10 + buttonHeight;
+    const mouseSensitivityVisible = state.runtimeUi.mouseSensitivityVisible === true;
+    const settingsBlockHeight = sliderBlockHeight
+      + (mouseSensitivityVisible ? sliderBlockHeight + 10 : 0)
+      + 10
+      + buttonHeight;
     const panelHeight = (pad * 2)
       + titleBlockHeight
       + buttonHeight
       + difficultyBlockHeight
-      + volumeBlockHeight
+      + settingsBlockHeight
       + (mainMenu.shareVisible ? shareBlockHeight : 0)
       + (sectionGap * (mainMenu.shareVisible ? 3 : 2));
     const panelX = (viewportWidth - panelWidth) * 0.5;
@@ -3276,6 +3377,19 @@ export function createUiOverlay({
     });
     cursorY += sliderLayout.height + 10;
 
+    if (mouseSensitivityVisible) {
+      const sensitivitySliderLayout = drawRuntimeSlider({
+        x: panelX + pad,
+        y: cursorY,
+        width: sliderWidth,
+        label: "Mouse Sensitivity",
+        value: state.runtimeUi.mouseSensitivity,
+        actionId: "main_mouse_sensitivity",
+        disabled: false,
+      });
+      cursorY += sensitivitySliderLayout.height + 10;
+    }
+
     drawRuntimeButton({
       x: panelX + pad,
       y: cursorY,
@@ -3300,10 +3414,12 @@ export function createUiOverlay({
     const buttonHeight = compact ? 44 : 48;
     const sectionGap = compact ? 12 : 14;
     const sliderBlockHeight = 52;
+    const mouseSensitivityVisible = state.runtimeUi.mouseSensitivityVisible === true;
+    const settingsBlockHeight = sliderBlockHeight + (mouseSensitivityVisible ? sliderBlockHeight + 10 : 0);
     const panelHeight = (pad * 2) + 6
       + buttonHeight
       + buttonHeight
-      + sliderBlockHeight
+      + settingsBlockHeight
       + buttonHeight
       + (sectionGap * 3);
     const panelX = (viewportWidth - panelWidth) * 0.5;
@@ -3357,7 +3473,20 @@ export function createUiOverlay({
       actionId: "pause_volume",
       disabled: false,
     });
-    cursorY += sliderLayout.height + sectionGap;
+    cursorY += sliderLayout.height + (mouseSensitivityVisible ? 10 : sectionGap);
+
+    if (mouseSensitivityVisible) {
+      const sensitivitySliderLayout = drawRuntimeSlider({
+        x: panelX + pad,
+        y: cursorY,
+        width: panelWidth - (pad * 2),
+        label: "Mouse Sensitivity",
+        value: state.runtimeUi.mouseSensitivity,
+        actionId: "pause_mouse_sensitivity",
+        disabled: false,
+      });
+      cursorY += sensitivitySliderLayout.height + sectionGap;
+    }
 
     drawRuntimeButton({
       x: panelX + pad,

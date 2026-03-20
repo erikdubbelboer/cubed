@@ -11,6 +11,18 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Very important: never introduce HTML runtime/player-facing UI again; every runtime UI surface must render on the canvas, except for the single readonly co-op share-link input.
 - Menu settings persist in `localStorage` via `webgame.masterVolume` and `webgame.difficulty`.
 - `GAME_CONFIG.audio.baseMasterVolume` defines the midpoint of the menu volume slider: `50%` maps to that configured gain and `100%` maps to `2x` that gain; stored `webgame.masterVolume` remains the actual applied master gain.
+- Mouse sensitivity for desktop pointer-lock look persists in `localStorage` via `webgame.mouseSensitivity`; `PLAYER_CONFIG.controls.pointerSpeed` is the slider midpoint (`50%`), `100%` maps to `2x`, and the stored value remains the actual applied pointer speed.
+
+## Kenney Visual Asset Contract
+- `src/kenneyModels.js` owns the shared preloaded Kenney OBJ-based visual factories for enemies, remote co-op players, money drops, ramps, terrain wall voxels, and placed block towers.
+- These imported models are visual-only. Gameplay/pathing/collision/hitboxes remain numeric in `grid`, `player`, `enemies`, and `towers`; do not move gameplay authority onto imported mesh geometry.
+- Enemy visuals use the Kenney orc model, but they still keep explicit hidden BoxGeometry hit proxies for sniper/headshot raycasts and preserve the existing collision-box contract.
+- Co-op uses the Kenney human model for the remote peer only; the local player remains first-person.
+- Money drops use the Kenney coin model, ramp visuals use Kenney stairs attached to the existing ramp helper mesh, and both terrain wall voxels and placed block towers use the Kenney wall model.
+- Terrain wall voxels must keep their hidden cube helper meshes authoritative for collision, build surfaces, LOS, and editor raycasts; the Kenney wall model is a visual child only.
+- Decorative editor props (`chest`, `barrel`, `stones`) use Kenney OBJ models, are visual-only, and must never be added to collision/pathing/LOS obstacle sets.
+- Decorative props are culled automatically when a placed tower's world bounds overlap them; they are dressing, not protected gameplay geometry.
+- Block build preview stays procedural/abstract on purpose; do not replace the green/red preview validity mesh with the imported wall art unless the preview readability problem is solved first.
 
 ## Multiplayer Contracts (Co-op)
 - Transport: `@poki/netlib` via `src/multiplayer.js`.
@@ -116,10 +128,11 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Enemy hit geometry assumptions must stay aligned across `player.js`, `towers.js`, and `enemies.js`.
 
 ## Grid, Pathfinding, and Blocking Contracts
-- Level source is sparse object data: `GAME_CONFIG.grid.levelObjects`.
+- Level source is sparse object data in [`src/level.json`](/Users/erik/Desktop/webgame/src/level.json), imported into `GAME_CONFIG.grid.levelObjects`.
 - Object schema: `{ type, position: { x, y, z }, rotation }`.
-- Supported marker/object types: `wall`, `spawn`, `end`, `playerSpawn`, `ramp` (`path` allowed as legacy visual marker).
+- Supported marker/object types: `wall`, `spawn`, `end`, `playerSpawn`, `ramp`, `chest`, `barrel`, `stones` (`path` allowed as legacy visual marker).
 - Ramp rotation mapping (low -> high): `0:+Z`, `90:+X`, `180:-Z`, `270:-X`; ramp anchor is low-end cell.
+- Grid-snapped gameplay objects continue to use integer cell coordinates in `position`; decorative props use world-space `position` coordinates and arbitrary numeric yaw in `rotation`.
 - Grid exposes marker-centric/runtime helpers (spawn/end/player spawn, buildability, ramp data, world<->cell mapping).
 - Endpoint collision contract:
   - Spawn/end cubes are movement/projectile obstacles.
@@ -158,6 +171,8 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Editor mode toggles with `N` (`waveState === "EDITOR"`) and rebuilds grid in editor mode.
 - Editor mutates level object model (`src/levelEditor.js`) and rebuilds preview/pathing after edits.
 - `end` and `playerSpawn` are unique markers; `spawn` is multi-place.
+- Decorative editor props place freely on world surfaces via editor raycasts rather than voxel snapping, but remain serialized into `levelObjects` alongside the snapped gameplay objects.
+- Decorative editor props support arbitrary yaw rotation via the editor scroll-wheel tool rotation path rather than cardinal-only ramp/player-start rotation.
 - Marker `y` values are authoritative and must match traversable surface; invalid markers fail path system validation.
 - Player spawn facing uses `playerSpawn.rotation` cardinal mapping (same mapping as ramp cardinal conventions).
 - Exiting editor validates playability before returning to gameplay.

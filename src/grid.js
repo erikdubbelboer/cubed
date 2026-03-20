@@ -1,5 +1,11 @@
 import * as THREE from "three";
 import { GAME_CONFIG } from "./config.js";
+import {
+  createDecorationVisual,
+  createRampVisual,
+  createTerrainWallVisual,
+  isKenneyAssetManagedResource,
+} from "./kenneyModels.js";
 
 const GRID_CONFIG = GAME_CONFIG.grid;
 
@@ -16,7 +22,8 @@ const OUTER_EMPTY_SPACE_RINGS = Math.max(
   Math.floor(Number(GRID_CONFIG.outerEmptySpaceRings ?? GRID_CONFIG.outerEmptyTerrainRings) || 0)
 );
 const LEGACY_PATH_MARKERS = new Set(["P"]);
-const LEVEL_OBJECT_TYPES = new Set(["wall", "spawn", "end", "playerspawn", "ramp", "path"]);
+const DECORATIVE_OBJECT_TYPES = new Set(["chest", "barrel", "stones"]);
+const LEVEL_OBJECT_TYPES = new Set(["wall", "spawn", "end", "playerspawn", "ramp", "path", ...DECORATIVE_OBJECT_TYPES]);
 const LEVEL_MARKER_TYPES = new Set(["spawn", "end", "playerspawn", "path"]);
 const RAMP_ROTATION_TO_DIRECTION = new Map([
   [0, { x: 0, z: 1 }],
@@ -26,6 +33,10 @@ const RAMP_ROTATION_TO_DIRECTION = new Map([
 ]);
 const RAMP_ROLE_LOW = "low";
 const RAMP_ROLE_HIGH = "high";
+
+function shouldDisposeGridResource(resource) {
+  return !isKenneyAssetManagedResource(resource);
+}
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -75,11 +86,24 @@ function isIntegerCell(value) {
   return Number.isInteger(value) && Number.isFinite(value);
 }
 
-function parseGridPosition(rawPosition, entryIndex) {
+function parseGridPosition(rawPosition, entryIndex, type) {
   const position = rawPosition ?? {};
   const x = Number(position.x);
   const y = Number(position.y);
   const z = Number(position.z);
+  if (isDecorativeObjectType(type)) {
+    const worldHalfSpan = (GRID_SIZE * CELL_SIZE) * 0.5;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      throw new Error(`grid.levelObjects[${entryIndex}] decorative position must use numeric x/y/z.`);
+    }
+    if (x < -worldHalfSpan || x >= worldHalfSpan || z < -worldHalfSpan || z >= worldHalfSpan) {
+      throw new Error(`grid.levelObjects[${entryIndex}] decorative position (${x},${z}) is outside the level bounds.`);
+    }
+    if (y < FLOOR_Y) {
+      throw new Error(`grid.levelObjects[${entryIndex}] decorative y must be >= floorY.`);
+    }
+    return { x, y, z };
+  }
   if (!isIntegerCell(x) || !isIntegerCell(y) || !isIntegerCell(z)) {
     throw new Error(`grid.levelObjects[${entryIndex}] position must use integer x/y/z.`);
   }
@@ -92,10 +116,13 @@ function parseGridPosition(rawPosition, entryIndex) {
   return { x, y, z };
 }
 
-function parseRotation(rawRotation, entryIndex) {
+function parseRotation(rawRotation, entryIndex, type) {
   const numericRotation = Number(rawRotation ?? 0);
   if (!Number.isFinite(numericRotation)) {
     throw new Error(`grid.levelObjects[${entryIndex}] rotation must be numeric.`);
+  }
+  if (isDecorativeObjectType(type)) {
+    return ((numericRotation % 360) + 360) % 360;
   }
   const quantized = Math.round(numericRotation / 90) * 90;
   if (Math.abs(numericRotation - quantized) > 1e-6) {
@@ -118,6 +145,23 @@ function createMarkerMatrix() {
 
 function cloneDirection(direction) {
   return { x: direction.x, z: direction.z };
+}
+
+function isDecorativeObjectType(type) {
+  return DECORATIVE_OBJECT_TYPES.has(type);
+}
+
+function decorativeObjectMatchesLevelEntry(entry, decoration) {
+  if (!entry || !decoration) {
+    return false;
+  }
+  if (entry.type !== decoration.type) {
+    return false;
+  }
+  return Math.abs(Number(entry.position?.x) - Number(decoration.position?.x)) <= 1e-4
+    && Math.abs(Number(entry.position?.y) - Number(decoration.position?.y)) <= 1e-4
+    && Math.abs(Number(entry.position?.z) - Number(decoration.position?.z)) <= 1e-4
+    && Math.abs(Number(entry.rotation) - Number(decoration.rotation)) <= 1e-4;
 }
 
 function createRampCellData({
@@ -183,8 +227,8 @@ function parseLevelLayout(levelObjects, options = {}) {
 
     return {
       type: normalizedType,
-      position: parseGridPosition(entry.position, index),
-      rotation: parseRotation(entry.rotation ?? 0, index),
+      position: parseGridPosition(entry.position, index, normalizedType),
+      rotation: parseRotation(entry.rotation ?? 0, index, normalizedType),
       index,
     };
   });
@@ -199,6 +243,7 @@ function parseLevelLayout(levelObjects, options = {}) {
   let playerSpawnCell = null;
   let playerSpawnRotation = 0;
   const ramps = [];
+  const decorativeObjects = [];
   const rampCellsByKey = new Map();
 
   for (const entry of parsedEntries) {
@@ -216,6 +261,14 @@ function parseLevelLayout(levelObjects, options = {}) {
   }
 
   for (const entry of parsedEntries) {
+    if (isDecorativeObjectType(entry.type)) {
+      decorativeObjects.push({
+        type: entry.type,
+        position: clonePosition(entry.position),
+        rotation: entry.rotation,
+      });
+      continue;
+    }
     if (!LEVEL_MARKER_TYPES.has(entry.type)) {
       continue;
     }
@@ -358,6 +411,7 @@ function parseLevelLayout(levelObjects, options = {}) {
     playerSpawnCell,
     playerSpawnRotation,
     ramps,
+    decorativeObjects,
     rampCellsByKey,
     levelObjects: parsedEntries.map((entry) => ({
       type: normalizeLevelObjectTypeForExport(entry.type),
@@ -558,9 +612,13 @@ export function createGrid(scene, options = {}) {
   const buildRaycastRampHitPoint = new THREE.Vector3();
   const wallAnchorRaycastBestPoint = new THREE.Vector3();
   const wallAnchorRaycastBestNormal = new THREE.Vector3();
+  const tempDecorationBounds = new THREE.Box3();
+  const tempDecorationRemovalBounds = new THREE.Box3();
 
   const ramps = Array.isArray(levelLayout.ramps) ? levelLayout.ramps : [];
   const wallVoxels = Array.isArray(levelLayout.wallVoxels) ? levelLayout.wallVoxels : [];
+  const decorativeObjects = Array.isArray(levelLayout.decorativeObjects) ? levelLayout.decorativeObjects : [];
+  const decorativeEntries = [];
 
   const altitudeCubeGeo = new THREE.BoxGeometry(
     ALTITUDE_CUBE_SIZE,
@@ -625,8 +683,47 @@ export function createGrid(scene, options = {}) {
     cube.receiveShadow = true;
     cube.userData.editorObjectType = "wall";
     cube.userData.editorWall = { x: cellX, y: cellY, z: cellZ };
+    const terrainWallVisual = createTerrainWallVisual();
+    if (terrainWallVisual) {
+      terrainWallVisual.position.y = -(ALTITUDE_CUBE_SIZE * 0.5);
+      cube.material.visible = false;
+      cube.castShadow = false;
+      cube.receiveShadow = false;
+      cube.add(terrainWallVisual);
+    }
     editorRaycastTargets.push(cube);
     gridRoot.add(cube);
+  }
+
+  for (const decoration of decorativeObjects) {
+    const worldX = Number(decoration?.position?.x);
+    const worldY = Number(decoration?.position?.y);
+    const worldZ = Number(decoration?.position?.z);
+    if (!Number.isFinite(worldX) || !Number.isFinite(worldY) || !Number.isFinite(worldZ)) {
+      continue;
+    }
+    const decorationVisual = createDecorationVisual(decoration.type);
+    if (!decorationVisual) {
+      continue;
+    }
+    decorationVisual.position.set(worldX, worldY, worldZ);
+    decorationVisual.rotation.y = THREE.MathUtils.degToRad(Number(decoration.rotation) || 0);
+    decorationVisual.userData.editorObjectType = decoration.type;
+    decorationVisual.userData.editorDecoration = {
+      type: decoration.type,
+      position: clonePosition(decoration.position),
+      rotation: Number(decoration.rotation) || 0,
+    };
+    tempDecorationBounds.setFromObject(decorationVisual);
+    decorativeEntries.push({
+      type: decoration.type,
+      position: clonePosition(decoration.position),
+      rotation: Number(decoration.rotation) || 0,
+      mesh: decorationVisual,
+      bounds: tempDecorationBounds.clone(),
+    });
+    editorRaycastTargets.push(decorationVisual);
+    gridRoot.add(decorationVisual);
   }
 
   const rampHighEdgeCounts = new Map();
@@ -682,6 +779,13 @@ export function createGrid(scene, options = {}) {
       z: ramp.lowCell.z,
       rotation: ramp.rotation,
     };
+    const rampVisual = createRampVisual(ramp.rotation);
+    if (rampVisual) {
+      rampMesh.material.visible = false;
+      rampMesh.castShadow = false;
+      rampMesh.receiveShadow = false;
+      rampMesh.add(rampVisual);
+    }
     editorRaycastTargets.push(rampMesh);
     gridRoot.add(rampMesh);
 
@@ -1646,7 +1750,12 @@ export function createGrid(scene, options = {}) {
     const disposedGeometries = new Set();
     const disposedMaterials = new Set();
     gridRoot.traverse((child) => {
-      if (child?.geometry && typeof child.geometry.dispose === "function" && !disposedGeometries.has(child.geometry)) {
+      if (
+        child?.geometry
+        && typeof child.geometry.dispose === "function"
+        && !disposedGeometries.has(child.geometry)
+        && shouldDisposeGridResource(child.geometry)
+      ) {
         disposedGeometries.add(child.geometry);
         child.geometry.dispose();
       }
@@ -1655,7 +1764,12 @@ export function createGrid(scene, options = {}) {
       }
       const materials = Array.isArray(child.material) ? child.material : [child.material];
       for (const material of materials) {
-        if (!material || disposedMaterials.has(material) || typeof material.dispose !== "function") {
+        if (
+          !material
+          || disposedMaterials.has(material)
+          || typeof material.dispose !== "function"
+          || !shouldDisposeGridResource(material)
+        ) {
           continue;
         }
         disposedMaterials.add(material);
@@ -1673,6 +1787,49 @@ export function createGrid(scene, options = {}) {
       position: clonePosition(entry.position),
       rotation: entry.rotation,
     }));
+  }
+
+  function removeDecorationsOverlappingBounds(bounds = {}) {
+    const minX = Number(bounds.minX);
+    const minY = Number(bounds.minY);
+    const minZ = Number(bounds.minZ);
+    const maxX = Number(bounds.maxX);
+    const maxY = Number(bounds.maxY);
+    const maxZ = Number(bounds.maxZ);
+    if (
+      !Number.isFinite(minX)
+      || !Number.isFinite(minY)
+      || !Number.isFinite(minZ)
+      || !Number.isFinite(maxX)
+      || !Number.isFinite(maxY)
+      || !Number.isFinite(maxZ)
+    ) {
+      return 0;
+    }
+    tempDecorationRemovalBounds.min.set(minX, minY, minZ);
+    tempDecorationRemovalBounds.max.set(maxX, maxY, maxZ);
+    let removedCount = 0;
+    for (let i = decorativeEntries.length - 1; i >= 0; i -= 1) {
+      const entry = decorativeEntries[i];
+      if (!entry?.mesh || !entry?.bounds || !entry.mesh.parent) {
+        continue;
+      }
+      if (!entry.bounds.intersectsBox(tempDecorationRemovalBounds)) {
+        continue;
+      }
+      if (entry.mesh.parent) {
+        entry.mesh.parent.remove(entry.mesh);
+      }
+      decorativeEntries.splice(i, 1);
+      const levelObjectIndex = normalizedLevelObjects.findIndex((levelEntry) => (
+        decorativeObjectMatchesLevelEntry(levelEntry, entry)
+      ));
+      if (levelObjectIndex >= 0) {
+        normalizedLevelObjects.splice(levelObjectIndex, 1);
+      }
+      removedCount += 1;
+    }
+    return removedCount;
   }
 
   function getEditorRaycastTargets() {
@@ -1716,6 +1873,7 @@ export function createGrid(scene, options = {}) {
     updateBoundaryWallVisual,
     getLevelObjects,
     getEditorRaycastTargets,
+    removeDecorationsOverlappingBounds,
     dispose,
     isSameCell,
   };

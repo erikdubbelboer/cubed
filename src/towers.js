@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GAME_CONFIG } from "./config.js";
+import { createBlockVisual, isKenneyAssetManagedResource } from "./kenneyModels.js";
 
 const TOWER_CONFIG = GAME_CONFIG.towers;
 const TOWER_TYPES = TOWER_CONFIG.types;
@@ -1100,6 +1101,33 @@ export function createTowerSystem({
     };
   }
 
+  function getTowerWorldBounds(tower) {
+    if (!tower?.mesh?.position) {
+      return null;
+    }
+    const centerX = Number(tower.mesh.position.x);
+    const centerZ = Number(tower.mesh.position.z);
+    const baseY = Number(tower.baseY);
+    const halfSizeX = Number.isFinite(Number(tower?.halfSizeX))
+      ? Math.max(0.01, Number(tower.halfSizeX))
+      : Math.max(0.01, Number(tower?.halfSize) || gridCubeHalfSize);
+    const halfSizeZ = Number.isFinite(Number(tower?.halfSizeZ))
+      ? Math.max(0.01, Number(tower.halfSizeZ))
+      : Math.max(0.01, Number(tower?.halfSize) || gridCubeHalfSize);
+    const height = Math.max(0.01, Number(tower?.height) || gridCellSize);
+    if (!Number.isFinite(centerX) || !Number.isFinite(centerZ) || !Number.isFinite(baseY)) {
+      return null;
+    }
+    return {
+      minX: centerX - halfSizeX,
+      maxX: centerX + halfSizeX,
+      minY: baseY,
+      maxY: baseY + height,
+      minZ: centerZ - halfSizeZ,
+      maxZ: centerZ + halfSizeZ,
+    };
+  }
+
   function doVerticalBoundsOverlap(boundsA, boundsB, epsilon = 1e-4) {
     if (!boundsA || !boundsB) {
       return true;
@@ -2037,12 +2065,53 @@ export function createTowerSystem({
     opacity = 1,
     transparent = false,
     footprintOutlineColor = edgeColor,
+    useKenneyVisual = true,
   }) {
     const root = new THREE.Group();
     const safeOpacity = THREE.MathUtils.clamp(Number(opacity) || 1, 0.05, 1);
     const safeTransparent = transparent || safeOpacity < 0.999;
     const halfSize = Math.max(0.05, BLOCK_TOWER_HALF_SIZE);
     const height = Math.max(0.05, BLOCK_TOWER_HEIGHT);
+
+    if (useKenneyVisual) {
+      const blockShell = createBlockVisual({ opacity: safeOpacity });
+      if (blockShell) {
+        root.add(blockShell);
+
+        const outline = createFootprintOutlineMesh({
+          halfSizeX: halfSize,
+          halfSizeZ: halfSize,
+          height,
+          inset: Math.min(halfSize * 0.08, 0.08),
+          color: footprintOutlineColor,
+          opacity: 0.46,
+        });
+        root.add(outline);
+
+        const shellMaterials = Array.isArray(blockShell.userData?.materials)
+          ? blockShell.userData.materials.slice()
+          : [];
+        for (const material of shellMaterials) {
+          material.userData = {
+            ...(material.userData || {}),
+            baseEmissiveIntensity: Number.isFinite(Number(material.emissiveIntensity))
+              ? Number(material.emissiveIntensity)
+              : 0,
+          };
+        }
+
+        root.userData.materials = shellMaterials;
+        root.userData.footprintOutlineMaterial = outline.userData.footprintOutlineMaterial;
+        if (outline.userData?.footprintOutlineMaterial) {
+          outline.userData.footprintOutlineMaterial.userData = {
+            ...(outline.userData.footprintOutlineMaterial.userData || {}),
+            baseOpacity: 0.46,
+          };
+        }
+        applyShadowSettings(root);
+        return root;
+      }
+    }
 
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: bodyColor,
@@ -2376,6 +2445,7 @@ export function createTowerSystem({
         opacity: BLOCK_TOWER_CONFIG.previewOpacity,
         transparent: true,
         footprintOutlineColor: BLOCK_TOWER_CONFIG.previewGlow,
+        useKenneyVisual: false,
       });
     }
 
@@ -3626,6 +3696,13 @@ export function createTowerSystem({
         refundTowerCost(normalizedType, ownerId);
       }
       return { success: false, reason: "path_blocking_rejected" };
+    }
+
+    if (typeof grid?.removeDecorationsOverlappingBounds === "function") {
+      const towerBounds = getTowerWorldBounds(towerEntry);
+      if (towerBounds) {
+        grid.removeDecorationsOverlappingBounds(towerBounds);
+      }
     }
 
     const placementPayload = serializePlacementPayload(normalizedType, resolvedPlacement);
@@ -6280,7 +6357,13 @@ export function createTowerSystem({
     const disposedMaterials = new Set();
     const disposedGeometries = new Set();
     root.traverse((child) => {
-      if (disposeGeometry && child?.geometry && typeof child.geometry.dispose === "function" && !disposedGeometries.has(child.geometry)) {
+      if (
+        disposeGeometry
+        && child?.geometry
+        && typeof child.geometry.dispose === "function"
+        && !disposedGeometries.has(child.geometry)
+        && !isKenneyAssetManagedResource(child.geometry)
+      ) {
         disposedGeometries.add(child.geometry);
         child.geometry.dispose();
       }
@@ -6289,7 +6372,12 @@ export function createTowerSystem({
       }
       const materials = Array.isArray(child.material) ? child.material : [child.material];
       for (const material of materials) {
-        if (!material || disposedMaterials.has(material) || typeof material.dispose !== "function") {
+        if (
+          !material
+          || disposedMaterials.has(material)
+          || typeof material.dispose !== "function"
+          || isKenneyAssetManagedResource(material)
+        ) {
           continue;
         }
         disposedMaterials.add(material);

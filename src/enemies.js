@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GAME_CONFIG } from "./config.js";
+import { createEnemyVisual, isKenneyAssetManagedResource } from "./kenneyModels.js";
 
 const ENEMY_CONFIG = GAME_CONFIG.enemies;
 const GRID_CONFIG = GAME_CONFIG.grid;
@@ -50,6 +51,12 @@ const ENEMY_DEATH_EXPLOSION_VISUAL_DURATION = Math.max(
 );
 const NETWORK_ENEMY_POSITION_DAMPING = Math.max(1, Number(ENEMY_CONFIG.networkPositionDamping) || 18);
 const NETWORK_ENEMY_STALE_REMOVE_MS = Math.max(150, Number(ENEMY_CONFIG.networkStaleRemoveMs) || 350);
+const ENEMY_WALK_CYCLE_RADIANS_PER_WORLD_UNIT = 2.7;
+const ENEMY_WALK_MOTION_BLEND_DAMPING = 12;
+const ENEMY_WALK_BOB_HEIGHT_FACTOR = 0.11;
+const ENEMY_WALK_SWAY_OFFSET_FACTOR = 0.08;
+const ENEMY_WALK_ROLL_RADIANS = 0.14;
+const ENEMY_WALK_YAW_RADIANS = 0.08;
 const ENEMY_MODEL_BASE_BODY_WIDTH = 1.693;
 const ENEMY_MODEL_PARTS = [
   { name: "body", hitPart: "body", dimensions: { width: 1.693, height: 0.699, depth: 1.377 }, position: { x: 0, y: 0, z: 0 } },
@@ -90,6 +97,10 @@ const ENEMY_COLLISION_BOXES = [
   { hitPart: "body", center: { x: 0, y: -0.06, z: 0 }, halfExtents: { x: 0.9, y: 0.6, z: 0.72 } },
   { hitPart: "head", center: { x: 0, y: 0.76, z: 0 }, halfExtents: { x: 0.58, y: 0.42, z: 0.55 } },
 ];
+
+function shouldDisposeEnemyResource(resource) {
+  return !isKenneyAssetManagedResource(resource);
+}
 
 function getDirectionOnPlane(from, to) {
   const direction = to.clone().sub(from);
@@ -1251,12 +1262,21 @@ export function createEnemySystem(scene, grid, options = {}) {
       return;
     }
 
+    const visualHoverHeight = Number.isFinite(Number(enemy.mesh.userData?.visualHoverHeight))
+      ? Number(enemy.mesh.userData.visualHoverHeight)
+      : ENEMY_SURFACE_HOVER_HEIGHT;
+
     const bodyHalfSize = Number(enemy.mesh.userData?.bodyHalfSize);
     const pathForwardLengthSq = enemy.pathForward?.lengthSq?.() ?? 0;
     if (!Number.isFinite(bodyHalfSize) || bodyHalfSize <= 0 || pathForwardLengthSq < ENEMY_CONFIG.directionEpsilon) {
       enemy.pathSlopePitch = 0;
       enemy.visualRoot.rotation.x = 0;
-      enemy.visualRoot.position.y = ENEMY_SURFACE_HOVER_HEIGHT;
+      enemy.visualRoot.rotation.y = 0;
+      enemy.visualRoot.rotation.z = 0;
+      enemy.visualRoot.position.x = 0;
+      enemy.visualRoot.position.z = 0;
+      enemy.visualRoot.position.y = visualHoverHeight;
+      enemy.visualRootBaseOffsetY = enemy.visualRoot.position.y;
       enemy.mesh.userData.visualRootOffsetY = enemy.visualRoot.position.y;
       return;
     }
@@ -1268,7 +1288,12 @@ export function createEnemySystem(scene, grid, options = {}) {
     if (halfDepth <= ENEMY_CONFIG.directionEpsilon) {
       enemy.pathSlopePitch = 0;
       enemy.visualRoot.rotation.x = 0;
-      enemy.visualRoot.position.y = ENEMY_SURFACE_HOVER_HEIGHT;
+      enemy.visualRoot.rotation.y = 0;
+      enemy.visualRoot.rotation.z = 0;
+      enemy.visualRoot.position.x = 0;
+      enemy.visualRoot.position.z = 0;
+      enemy.visualRoot.position.y = visualHoverHeight;
+      enemy.visualRootBaseOffsetY = enemy.visualRoot.position.y;
       enemy.mesh.userData.visualRootOffsetY = enemy.visualRoot.position.y;
       return;
     }
@@ -1296,15 +1321,73 @@ export function createEnemySystem(scene, grid, options = {}) {
 
     enemy.pathSlopePitch = -visualPitch;
     enemy.visualRoot.rotation.x = visualPitch;
+    enemy.visualRoot.rotation.y = 0;
+    enemy.visualRoot.rotation.z = 0;
+    enemy.visualRoot.position.x = 0;
+    enemy.visualRoot.position.z = 0;
 
     const bodyCenterOffsetY = Number(enemy.mesh.userData?.bodyCenterOffsetY) || 0;
-    const localBottomY = bodyCenterOffsetY - halfHeight;
+    const visualBottomOffsetY = Number(enemy.mesh.userData?.visualBottomOffsetY);
+    const localBottomY = Number.isFinite(visualBottomOffsetY)
+      ? visualBottomOffsetY
+      : (bodyCenterOffsetY - halfHeight);
     const cosPitch = Math.cos(visualPitch);
     const targetAverageY = hasRampContact
       ? ((frontSurfaceY + backSurfaceY) * 0.5)
       : centerSurfaceY;
     const predictedAverageY = enemy.mesh.position.y + (localBottomY * cosPitch);
-    enemy.visualRoot.position.y = (targetAverageY - predictedAverageY) + ENEMY_SURFACE_HOVER_HEIGHT;
+    enemy.visualRoot.position.y = (targetAverageY - predictedAverageY) + visualHoverHeight;
+    enemy.visualRootBaseOffsetY = enemy.visualRoot.position.y;
+    enemy.mesh.userData.visualRootOffsetY = enemy.visualRoot.position.y;
+  }
+
+  function updateEnemyWalkAnimation(enemy, deltaSeconds) {
+    if (!enemy?.visualRoot || !enemy?.mesh) {
+      return;
+    }
+
+    const currentX = Number.isFinite(enemy.pathCenter?.x) ? enemy.pathCenter.x : enemy.mesh.position.x;
+    const currentZ = Number.isFinite(enemy.pathCenter?.z) ? enemy.pathCenter.z : enemy.mesh.position.z;
+    const previousX = Number(enemy.walkCycleLastX);
+    const previousZ = Number(enemy.walkCycleLastZ);
+    let movedDistance = 0;
+    if (Number.isFinite(previousX) && Number.isFinite(previousZ)) {
+      const dx = currentX - previousX;
+      const dz = currentZ - previousZ;
+      movedDistance = Math.hypot(dx, dz);
+    }
+    enemy.walkCycleLastX = currentX;
+    enemy.walkCycleLastZ = currentZ;
+
+    const targetMotion = movedDistance > 0.0001 ? 1 : 0;
+    const blendT = 1 - Math.exp(-ENEMY_WALK_MOTION_BLEND_DAMPING * Math.max(0, deltaSeconds));
+    enemy.walkCycleMotion = THREE.MathUtils.lerp(
+      Number(enemy.walkCycleMotion) || 0,
+      targetMotion,
+      blendT
+    );
+
+    if (movedDistance > 0) {
+      enemy.walkCyclePhase = (Number(enemy.walkCyclePhase) || 0)
+        + (movedDistance * ENEMY_WALK_CYCLE_RADIANS_PER_WORLD_UNIT);
+    }
+
+    const motion = THREE.MathUtils.clamp(Number(enemy.walkCycleMotion) || 0, 0, 1);
+    const phase = Number(enemy.walkCyclePhase) || 0;
+    const bodyHalfSize = Math.max(
+      0.05,
+      Number(enemy.mesh.userData?.bodyHalfSize) || Number(enemy.radius) || 0.5
+    );
+    const baseOffsetY = Number.isFinite(Number(enemy.visualRootBaseOffsetY))
+      ? Number(enemy.visualRootBaseOffsetY)
+      : enemy.visualRoot.position.y;
+    const bobWave = (1 - Math.cos(phase * 2)) * 0.5;
+    const swayWave = Math.sin(phase);
+
+    enemy.visualRoot.position.x = swayWave * bodyHalfSize * ENEMY_WALK_SWAY_OFFSET_FACTOR * motion;
+    enemy.visualRoot.position.y = baseOffsetY + (bobWave * bodyHalfSize * ENEMY_WALK_BOB_HEIGHT_FACTOR * motion);
+    enemy.visualRoot.rotation.z = swayWave * ENEMY_WALK_ROLL_RADIANS * motion;
+    enemy.visualRoot.rotation.y = swayWave * ENEMY_WALK_YAW_RADIANS * motion;
     enemy.mesh.userData.visualRootOffsetY = enemy.visualRoot.position.y;
   }
 
@@ -1750,6 +1833,93 @@ export function createEnemySystem(scene, grid, options = {}) {
     return activeEnemies.length === 0 && spawnEventCursor >= scheduledSpawns.length;
   }
 
+  function collectEnemyVisualMaterialStates(materials = []) {
+    const states = [];
+    const seen = new Set();
+    for (const material of Array.isArray(materials) ? materials : []) {
+      if (!material || seen.has(material)) {
+        continue;
+      }
+      seen.add(material);
+      states.push({
+        material,
+        color: material.color?.clone?.() ?? new THREE.Color(0xffffff),
+        emissiveIntensity: Number.isFinite(Number(material.emissiveIntensity))
+          ? Number(material.emissiveIntensity)
+          : 0,
+      });
+    }
+    return states;
+  }
+
+  function createEnemyRaycastProxyMesh(box) {
+    const proxyGeometry = new THREE.BoxGeometry(
+      Math.max(0.01, box.halfExtents.x * 2),
+      Math.max(0.01, box.halfExtents.y * 2),
+      Math.max(0.01, box.halfExtents.z * 2)
+    );
+    const proxyMaterial = new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      depthTest: false,
+    });
+    proxyMaterial.colorWrite = false;
+    const proxyMesh = new THREE.Mesh(proxyGeometry, proxyMaterial);
+    proxyMesh.position.set(
+      box.center.x,
+      box.center.y,
+      box.center.z
+    );
+    proxyMesh.castShadow = false;
+    proxyMesh.receiveShadow = false;
+    proxyMesh.userData.enemyRaycastProxy = true;
+    proxyMesh.userData.enemyHitPart = box.hitPart === "head" ? "head" : "body";
+    proxyMesh.userData.enemyPartName = `hit_proxy_${proxyMesh.userData.enemyHitPart}`;
+    return proxyMesh;
+  }
+
+  function buildImportedEnemyCollisionBoxes(importedVisual) {
+    if (!importedVisual) {
+      return null;
+    }
+    const partDefinitions = [
+      { meshName: "body-mesh", hitPart: "body" },
+      { meshName: "head-mesh", hitPart: "head" },
+    ];
+    importedVisual.updateMatrixWorld(true, true);
+    const boxes = [];
+    for (const { meshName, hitPart } of partDefinitions) {
+      let targetMesh = null;
+      importedVisual.traverse((child) => {
+        if (targetMesh || !child?.isMesh || child.name !== meshName) {
+          return;
+        }
+        targetMesh = child;
+      });
+      if (!targetMesh) {
+        continue;
+      }
+      const bounds = new THREE.Box3().setFromObject(targetMesh);
+      const center = bounds.getCenter(new THREE.Vector3());
+      const size = bounds.getSize(new THREE.Vector3());
+      boxes.push({
+        hitPart,
+        center: {
+          x: center.x,
+          y: center.y,
+          z: center.z,
+        },
+        halfExtents: {
+          x: Math.max(0.01, size.x * 0.5),
+          y: Math.max(0.01, size.y * 0.5),
+          z: Math.max(0.01, size.z * 0.5),
+        },
+      });
+    }
+    return boxes.length > 0 ? boxes : null;
+  }
+
   function createEnemyMesh(type, spawnIndex = 0, spawnOptions = {}) {
     const normalizedType = normalizeEnemyType(type);
     const enemyType = normalizedType ? ENEMY_TYPES[normalizedType] : null;
@@ -1772,109 +1942,153 @@ export function createEnemySystem(scene, grid, options = {}) {
     enemyMesh.add(visualRoot);
 
     const enemyScale = enemyType.size / ENEMY_MODEL_BASE_BODY_WIDTH;
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: enemyType.color,
-      emissive: enemyType.emissive,
-      emissiveIntensity: ENEMY_CONFIG.bodyEmissiveIntensity,
-      roughness: ENEMY_CONFIG.bodyRoughness,
-      metalness: ENEMY_CONFIG.bodyMetalness,
-    });
-    const headMaterial = new THREE.MeshStandardMaterial({
-      color: ENEMY_HEAD_COLOR,
-      emissive: ENEMY_HEAD_EMISSIVE,
-      emissiveIntensity: ENEMY_CONFIG.bodyEmissiveIntensity,
-      roughness: ENEMY_CONFIG.bodyRoughness,
-      metalness: ENEMY_CONFIG.bodyMetalness,
-    });
-    const eyeMaterial = new THREE.MeshStandardMaterial({
-      color: ENEMY_EYE_COLOR,
-      emissive: ENEMY_EYE_COLOR,
-      emissiveIntensity: 0.5,
-      roughness: 0.25,
-      metalness: 0.05,
-    });
-    const browMaterial = new THREE.MeshStandardMaterial({
-      color: ENEMY_BROW_COLOR,
-      emissive: ENEMY_BROW_COLOR,
-      emissiveIntensity: 0.55,
-      roughness: 0.25,
-      metalness: 0.02,
-    });
+    let bodyMaterial = null;
+    let headMaterial = null;
+    let eyeMaterial = null;
     let bodyMesh = null;
     let modelTopY = Number.NEGATIVE_INFINITY;
-    for (const part of ENEMY_MODEL_PARTS) {
-      const width = Math.max(0.01, part.dimensions.width * enemyScale);
-      const height = Math.max(0.01, part.dimensions.height * enemyScale);
-      const depth = Math.max(0.01, part.dimensions.depth * enemyScale);
-      const partMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(width, height, depth),
-        part.hitPart === "head" ? headMaterial : bodyMaterial
-      );
-      partMesh.castShadow = true;
-      partMesh.receiveShadow = true;
-      partMesh.position.set(
-        part.position.x * enemyScale,
-        (part.position.y * enemyScale) + ENEMY_CONFIG.bodyYOffset,
-        part.position.z * enemyScale
-      );
-      const partTopY = partMesh.position.y + (height * 0.5);
-      if (partTopY > modelTopY) {
-        modelTopY = partTopY;
-      }
-      partMesh.userData.enemyHitPart = part.hitPart;
-      partMesh.userData.enemyPartName = part.name;
-      if (part.name === "head") {
-        const eyeSize = Math.max(0.02, ENEMY_EYE_SIZE * enemyScale);
-        const eyeOffsetX = ENEMY_EYE_OFFSET_X * enemyScale;
-        const eyeOffsetY = ENEMY_EYE_OFFSET_Y * enemyScale;
-        const eyeInset = ENEMY_EYE_INSET * enemyScale;
-        const eyeDepth = Math.max(0.01, eyeSize * 0.45);
-        const eyeZ = (depth * 0.5) - (eyeDepth * 0.5) - eyeInset + Math.max(0.01, enemyScale * 0.035);
-        for (const eyeSide of [-1, 1]) {
-          const eyeMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(eyeSize, eyeSize * 0.9, eyeDepth),
-            eyeMaterial
-          );
-          eyeMesh.position.set(eyeOffsetX * eyeSide, eyeOffsetY, eyeZ);
-          eyeMesh.rotation.z = eyeSide < 0 ? ENEMY_EYE_SLANT_RADIANS : -ENEMY_EYE_SLANT_RADIANS;
-          const eyeTopY = partMesh.position.y + eyeMesh.position.y + (eyeSize * 0.45);
-          if (eyeTopY > modelTopY) {
-            modelTopY = eyeTopY;
-          }
-          eyeMesh.userData.enemyHitPart = "head";
-          eyeMesh.userData.enemyPartName = `head_eye_${eyeSide < 0 ? "left" : "right"}`;
-          eyeMesh.castShadow = true;
-          eyeMesh.receiveShadow = true;
-          partMesh.add(eyeMesh);
+    let visualMaterials = [];
+    let visualBottomOffsetY = null;
+    let visualHoverHeight = ENEMY_SURFACE_HOVER_HEIGHT;
+    let collisionBoxesData = null;
 
-          const browWidth = Math.max(0.03, ENEMY_BROW_WIDTH * enemyScale);
-          const browHeight = Math.max(0.02, ENEMY_BROW_HEIGHT * enemyScale);
-          const browDepth = Math.max(0.02, ENEMY_BROW_DEPTH * enemyScale);
-          const browMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(browWidth, browHeight, browDepth),
-            browMaterial
-          );
-          browMesh.position.set(
-            ENEMY_BROW_OFFSET_X * enemyScale * eyeSide,
-            ENEMY_BROW_OFFSET_Y * enemyScale,
-            eyeZ + Math.max(0.012, enemyScale * 0.04)
-          );
-          browMesh.rotation.z = eyeSide < 0 ? -ENEMY_BROW_SLANT_RADIANS : ENEMY_BROW_SLANT_RADIANS;
-          const browTopY = partMesh.position.y + browMesh.position.y + (browHeight * 0.5);
-          if (browTopY > modelTopY) {
-            modelTopY = browTopY;
-          }
-          browMesh.userData.enemyHitPart = "head";
-          browMesh.userData.enemyPartName = `head_brow_${eyeSide < 0 ? "left" : "right"}`;
-          browMesh.castShadow = true;
-          browMesh.receiveShadow = true;
-          partMesh.add(browMesh);
+    const importedVisual = createEnemyVisual(enemyType);
+    if (importedVisual) {
+      importedVisual.position.y = 0;
+      visualRoot.add(importedVisual);
+      visualMaterials = Array.isArray(importedVisual.userData?.materials)
+        ? importedVisual.userData.materials.slice()
+        : [];
+      bodyMaterial = visualMaterials[0] ?? null;
+      const importedBounds = new THREE.Box3().setFromObject(importedVisual);
+      modelTopY = importedBounds.max.y;
+      visualBottomOffsetY = importedBounds.min.y;
+      visualHoverHeight = 0;
+      collisionBoxesData = buildImportedEnemyCollisionBoxes(importedVisual);
+      for (const collisionBox of collisionBoxesData ?? []) {
+        const proxyMesh = createEnemyRaycastProxyMesh(collisionBox);
+        visualRoot.add(proxyMesh);
+        if (collisionBox.hitPart === "body" && !bodyMesh) {
+          bodyMesh = proxyMesh;
         }
       }
-      visualRoot.add(partMesh);
-      if (part.name === "body") {
-        bodyMesh = partMesh;
+    } else {
+      bodyMaterial = new THREE.MeshStandardMaterial({
+        color: enemyType.color,
+        emissive: enemyType.emissive,
+        emissiveIntensity: ENEMY_CONFIG.bodyEmissiveIntensity,
+        roughness: ENEMY_CONFIG.bodyRoughness,
+        metalness: ENEMY_CONFIG.bodyMetalness,
+      });
+      headMaterial = new THREE.MeshStandardMaterial({
+        color: ENEMY_HEAD_COLOR,
+        emissive: ENEMY_HEAD_EMISSIVE,
+        emissiveIntensity: ENEMY_CONFIG.bodyEmissiveIntensity,
+        roughness: ENEMY_CONFIG.bodyRoughness,
+        metalness: ENEMY_CONFIG.bodyMetalness,
+      });
+      eyeMaterial = new THREE.MeshStandardMaterial({
+        color: ENEMY_EYE_COLOR,
+        emissive: ENEMY_EYE_COLOR,
+        emissiveIntensity: 0.5,
+        roughness: 0.25,
+        metalness: 0.05,
+      });
+      const browMaterial = new THREE.MeshStandardMaterial({
+        color: ENEMY_BROW_COLOR,
+        emissive: ENEMY_BROW_COLOR,
+        emissiveIntensity: 0.55,
+        roughness: 0.25,
+        metalness: 0.02,
+      });
+      for (const part of ENEMY_MODEL_PARTS) {
+        const width = Math.max(0.01, part.dimensions.width * enemyScale);
+        const height = Math.max(0.01, part.dimensions.height * enemyScale);
+        const depth = Math.max(0.01, part.dimensions.depth * enemyScale);
+        const partMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(width, height, depth),
+          part.hitPart === "head" ? headMaterial : bodyMaterial
+        );
+        partMesh.castShadow = true;
+        partMesh.receiveShadow = true;
+        partMesh.position.set(
+          part.position.x * enemyScale,
+          (part.position.y * enemyScale) + ENEMY_CONFIG.bodyYOffset,
+          part.position.z * enemyScale
+        );
+        const partTopY = partMesh.position.y + (height * 0.5);
+        if (partTopY > modelTopY) {
+          modelTopY = partTopY;
+        }
+        partMesh.userData.enemyHitPart = part.hitPart;
+        partMesh.userData.enemyPartName = part.name;
+        if (part.name === "head") {
+          const eyeSize = Math.max(0.02, ENEMY_EYE_SIZE * enemyScale);
+          const eyeOffsetX = ENEMY_EYE_OFFSET_X * enemyScale;
+          const eyeOffsetY = ENEMY_EYE_OFFSET_Y * enemyScale;
+          const eyeInset = ENEMY_EYE_INSET * enemyScale;
+          const eyeDepth = Math.max(0.01, eyeSize * 0.45);
+          const eyeZ = (depth * 0.5) - (eyeDepth * 0.5) - eyeInset + Math.max(0.01, enemyScale * 0.035);
+          for (const eyeSide of [-1, 1]) {
+            const eyeMesh = new THREE.Mesh(
+              new THREE.BoxGeometry(eyeSize, eyeSize * 0.9, eyeDepth),
+              eyeMaterial
+            );
+            eyeMesh.position.set(eyeOffsetX * eyeSide, eyeOffsetY, eyeZ);
+            eyeMesh.rotation.z = eyeSide < 0 ? ENEMY_EYE_SLANT_RADIANS : -ENEMY_EYE_SLANT_RADIANS;
+            const eyeTopY = partMesh.position.y + eyeMesh.position.y + (eyeSize * 0.45);
+            if (eyeTopY > modelTopY) {
+              modelTopY = eyeTopY;
+            }
+            eyeMesh.userData.enemyHitPart = "head";
+            eyeMesh.userData.enemyPartName = `head_eye_${eyeSide < 0 ? "left" : "right"}`;
+            eyeMesh.castShadow = true;
+            eyeMesh.receiveShadow = true;
+            partMesh.add(eyeMesh);
+
+            const browWidth = Math.max(0.03, ENEMY_BROW_WIDTH * enemyScale);
+            const browHeight = Math.max(0.02, ENEMY_BROW_HEIGHT * enemyScale);
+            const browDepth = Math.max(0.02, ENEMY_BROW_DEPTH * enemyScale);
+            const browMesh = new THREE.Mesh(
+              new THREE.BoxGeometry(browWidth, browHeight, browDepth),
+              browMaterial
+            );
+            browMesh.position.set(
+              ENEMY_BROW_OFFSET_X * enemyScale * eyeSide,
+              ENEMY_BROW_OFFSET_Y * enemyScale,
+              eyeZ + Math.max(0.012, enemyScale * 0.04)
+            );
+            browMesh.rotation.z = eyeSide < 0 ? -ENEMY_BROW_SLANT_RADIANS : ENEMY_BROW_SLANT_RADIANS;
+            const browTopY = partMesh.position.y + browMesh.position.y + (browHeight * 0.5);
+            if (browTopY > modelTopY) {
+              modelTopY = browTopY;
+            }
+            browMesh.userData.enemyHitPart = "head";
+            browMesh.userData.enemyPartName = `head_brow_${eyeSide < 0 ? "left" : "right"}`;
+            browMesh.castShadow = true;
+            browMesh.receiveShadow = true;
+            partMesh.add(browMesh);
+          }
+        }
+        visualRoot.add(partMesh);
+        if (part.name === "body") {
+          bodyMesh = partMesh;
+        }
       }
+      visualMaterials = bodyMaterial ? [bodyMaterial] : [];
+      collisionBoxesData = ENEMY_COLLISION_BOXES.map((box) => ({
+        hitPart: box.hitPart,
+        center: {
+          x: box.center.x * enemyScale,
+          y: (box.center.y * enemyScale) + ENEMY_CONFIG.bodyYOffset,
+          z: box.center.z * enemyScale,
+        },
+        halfExtents: {
+          x: box.halfExtents.x * enemyScale,
+          y: box.halfExtents.y * enemyScale,
+          z: box.halfExtents.z * enemyScale,
+        },
+      }));
     }
 
     if (!bodyMesh) {
@@ -1935,8 +2149,12 @@ export function createEnemySystem(scene, grid, options = {}) {
       bodyMaterial,
       headMaterial,
       eyeMaterial,
-      baseBodyColor: bodyMaterial.color.clone(),
-      baseEmissiveIntensity: bodyMaterial.emissiveIntensity,
+      visualMaterials,
+      visualMaterialStates: collectEnemyVisualMaterialStates(visualMaterials),
+      baseBodyColor: bodyMaterial?.color?.clone?.() ?? new THREE.Color(0xffffff),
+      baseEmissiveIntensity: Number.isFinite(Number(bodyMaterial?.emissiveIntensity))
+        ? Number(bodyMaterial.emissiveIntensity)
+        : 0,
       hitPulseTimer: 0,
       hitPulseClock: 0,
       healthBarRoot,
@@ -1957,6 +2175,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       deathDuration: DISSOLVE_DEATH_DURATION,
       dissolveUniforms: [],
       dissolveMaterials: [],
+      replacedVisualMaterials: [],
       type: normalizedType,
       tempSlowMultiplier: 1,
       tempSlowRemaining: 0,
@@ -1971,6 +2190,11 @@ export function createEnemySystem(scene, grid, options = {}) {
       networkId: 0,
       networkLastSeenAtMs: 0,
       networkTargetPosition: travelWaypoints[0].clone(),
+      visualRootBaseOffsetY: 0,
+      walkCyclePhase: pseudoRandom01(spawnIndex + enemySpawnSerial + 17.31) * Math.PI * 2,
+      walkCycleMotion: 0,
+      walkCycleLastX: travelWaypoints[0].x,
+      walkCycleLastZ: travelWaypoints[0].z,
     };
 
     const baseHealth = Math.max(0.01, Number(enemyType.health) || 0.01);
@@ -2000,20 +2224,18 @@ export function createEnemySystem(scene, grid, options = {}) {
     enemyMesh.userData.bodyCenterOffsetY = bodyMesh.position.y;
     enemyMesh.userData.visualRootOffsetY = visualRoot.position.y;
     enemyMesh.userData.bodyHalfSize = enemyType.size * 0.5;
+    enemyMesh.userData.visualBottomOffsetY = Number.isFinite(Number(visualBottomOffsetY))
+      ? Number(visualBottomOffsetY)
+      : null;
+    enemyMesh.userData.visualHoverHeight = visualHoverHeight;
     enemyMesh.userData.hitSphereRadius = enemyType.radius;
-    enemyMesh.userData.collisionBoxes = ENEMY_COLLISION_BOXES.map((box) => ({
-      hitPart: box.hitPart,
-      center: {
-        x: box.center.x * enemyScale,
-        y: (box.center.y * enemyScale) + ENEMY_CONFIG.bodyYOffset,
-        z: box.center.z * enemyScale,
-      },
-      halfExtents: {
-        x: box.halfExtents.x * enemyScale,
-        y: box.halfExtents.y * enemyScale,
-        z: box.halfExtents.z * enemyScale,
-      },
-    }));
+    enemyMesh.userData.collisionBoxes = Array.isArray(collisionBoxesData)
+      ? collisionBoxesData.map((box) => ({
+        hitPart: box.hitPart,
+        center: { ...box.center },
+        halfExtents: { ...box.halfExtents },
+      }))
+      : [];
     enemyMesh.userData.networkId = enemy.networkId;
 
     if (spawnOptions?.position && typeof spawnOptions.position === "object") {
@@ -2034,6 +2256,9 @@ export function createEnemySystem(scene, grid, options = {}) {
       applyEnemyOrientation(enemy);
     }
 
+    enemy.walkCycleLastX = enemy.pathCenter.x;
+    enemy.walkCycleLastZ = enemy.pathCenter.z;
+    updateEnemyWalkAnimation(enemy, 0);
     updateHealthBar(enemy);
 
     return enemy;
@@ -2156,18 +2381,27 @@ export function createEnemySystem(scene, grid, options = {}) {
   }
 
   function resetHitPulse(enemy) {
-    if (!enemy.bodyMaterial || !enemy.visualRoot) {
+    if (!enemy.visualRoot) {
       return;
     }
-    enemy.bodyMaterial.emissiveIntensity = enemy.baseEmissiveIntensity;
-    enemy.bodyMaterial.color.copy(enemy.baseBodyColor);
+    for (const state of Array.isArray(enemy.visualMaterialStates) ? enemy.visualMaterialStates : []) {
+      if (!state?.material) {
+        continue;
+      }
+      if ("emissiveIntensity" in state.material) {
+        state.material.emissiveIntensity = state.emissiveIntensity;
+      }
+      if (state.material.color && state.color) {
+        state.material.color.copy(state.color);
+      }
+    }
     enemy.visualRoot.scale.set(1, 1, 1);
     enemy.hitPulseTimer = 0;
     enemy.hitPulseClock = 0;
   }
 
   function triggerHitPulse(enemy) {
-    if (!enemy.bodyMaterial) {
+    if (!Array.isArray(enemy.visualMaterialStates) || enemy.visualMaterialStates.length === 0) {
       return;
     }
     enemy.hitPulseTimer = Math.min(
@@ -2177,7 +2411,7 @@ export function createEnemySystem(scene, grid, options = {}) {
   }
 
   function updateHitPulse(enemy, deltaSeconds) {
-    if (!enemy.bodyMaterial || !enemy.visualRoot || enemy.hitPulseTimer <= 0) {
+    if (!enemy.visualRoot || enemy.hitPulseTimer <= 0) {
       return;
     }
 
@@ -2189,8 +2423,17 @@ export function createEnemySystem(scene, grid, options = {}) {
     const oscillation = 0.65 + (0.35 * Math.sin(enemy.hitPulseClock * HIT_PULSE_FREQUENCY));
     const pulse = envelope * oscillation;
 
-    enemy.bodyMaterial.emissiveIntensity = enemy.baseEmissiveIntensity + (pulse * HIT_PULSE_EMISSIVE_BOOST);
-    enemy.bodyMaterial.color.copy(enemy.baseBodyColor);
+    for (const state of Array.isArray(enemy.visualMaterialStates) ? enemy.visualMaterialStates : []) {
+      if (!state?.material) {
+        continue;
+      }
+      if ("emissiveIntensity" in state.material) {
+        state.material.emissiveIntensity = state.emissiveIntensity + (pulse * HIT_PULSE_EMISSIVE_BOOST);
+      }
+      if (state.material.color && state.color) {
+        state.material.color.copy(state.color);
+      }
+    }
 
     const scaleXZ = 1 + (pulse * HIT_PULSE_SCALE_BOOST);
     const scaleY = 1 + (pulse * HIT_PULSE_SCALE_BOOST * 0.55);
@@ -2213,16 +2456,21 @@ export function createEnemySystem(scene, grid, options = {}) {
       enemy.healthBarRoot.visible = false;
     }
     resetHitPulse(enemy);
+    enemy.replacedVisualMaterials.length = 0;
 
     if (!enemy.visualRoot) return;
 
+    const replacedSourceMaterials = new Set();
     enemy.visualRoot.traverse((child) => {
-      if (!child.isMesh || !child.material) {
+      if (!child.isMesh || !child.material || child.userData?.enemyRaycastProxy === true) {
         return;
       }
       const hadArrayMaterial = Array.isArray(child.material);
       const sourceMaterials = hadArrayMaterial ? child.material : [child.material];
       const dissolveMaterials = sourceMaterials.map((sourceMaterial) => {
+        if (sourceMaterial && shouldDisposeEnemyResource(sourceMaterial)) {
+          replacedSourceMaterials.add(sourceMaterial);
+        }
         const { material, dissolveUniform } = createDissolveMaterial(sourceMaterial);
         enemy.dissolveMaterials.push(material);
         enemy.dissolveUniforms.push(dissolveUniform);
@@ -2230,6 +2478,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       });
       child.material = hadArrayMaterial ? dissolveMaterials : dissolveMaterials[0];
     });
+    enemy.replacedVisualMaterials.push(...replacedSourceMaterials);
   }
 
   function emitEnemyDamageEvent(enemy, damageAmount) {
@@ -2530,6 +2779,8 @@ export function createEnemySystem(scene, grid, options = {}) {
       } else {
         updateEnemyTravel(enemy, deltaSeconds);
       }
+
+      updateEnemyWalkAnimation(enemy, deltaSeconds);
 
       if (!networkViewMode && hasEnemyReachedEndCenter(enemy)) {
         enemy.alive = false;
@@ -2857,8 +3108,16 @@ export function createEnemySystem(scene, grid, options = {}) {
       return;
     }
     scene.remove(enemy.mesh);
+    const disposedGeometries = new Set();
+    const disposedMaterials = new Set();
     enemy.mesh.traverse((child) => {
-      if (child?.geometry && typeof child.geometry.dispose === "function") {
+      if (
+        child?.geometry
+        && typeof child.geometry.dispose === "function"
+        && !disposedGeometries.has(child.geometry)
+        && shouldDisposeEnemyResource(child.geometry)
+      ) {
+        disposedGeometries.add(child.geometry);
         child.geometry.dispose();
       }
       if (!child?.material) {
@@ -2866,9 +3125,31 @@ export function createEnemySystem(scene, grid, options = {}) {
       }
       const materials = Array.isArray(child.material) ? child.material : [child.material];
       for (const material of materials) {
-        material?.dispose?.();
+        if (
+          !material
+          || disposedMaterials.has(material)
+          || typeof material.dispose !== "function"
+          || !shouldDisposeEnemyResource(material)
+        ) {
+          continue;
+        }
+        disposedMaterials.add(material);
+        material.dispose();
       }
     });
+    for (const material of Array.isArray(enemy.replacedVisualMaterials) ? enemy.replacedVisualMaterials : []) {
+      if (
+        !material
+        || disposedMaterials.has(material)
+        || typeof material.dispose !== "function"
+        || !shouldDisposeEnemyResource(material)
+      ) {
+        continue;
+      }
+      disposedMaterials.add(material);
+      material.dispose();
+    }
+    enemy.replacedVisualMaterials = [];
   }
 
   function clearAll() {

@@ -28,7 +28,10 @@ export function createPlayer({
 }) {
   const isTouchDevice = window.matchMedia("(hover: none), (pointer: coarse)").matches;
   const controls = new PointerLockControls(camera, domElement);
-  controls.pointerSpeed = PLAYER_CONFIG.controls.pointerSpeed;
+  const defaultPointerSpeed = Number.isFinite(Number(PLAYER_CONFIG.controls?.pointerSpeed))
+    ? Math.max(0, Number(PLAYER_CONFIG.controls.pointerSpeed))
+    : 0.75;
+  controls.pointerSpeed = defaultPointerSpeed;
   let lockRequestPending = false;
   let lockRetryPending = false;
   let lastUnlockTime = -Infinity;
@@ -2518,6 +2521,13 @@ export function createPlayer({
     upgradePlayerFireRate,
     upgradeJetpackFuelEfficiency,
     setMenuMode,
+    setPointerSpeed(nextPointerSpeed) {
+      const numeric = Number(nextPointerSpeed);
+      controls.pointerSpeed = Number.isFinite(numeric)
+        ? Math.max(0, numeric)
+        : defaultPointerSpeed;
+      return controls.pointerSpeed;
+    },
     disableJetpackFuelConsumption,
   };
 }
