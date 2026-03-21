@@ -8,6 +8,16 @@ import { createUiOverlay } from "./uiOverlay.js";
 import { createMultiplayerController } from "./multiplayer.js";
 import { GAME_CONFIG } from "./config.js";
 import { createSoundSystem } from "./soundSystem.js";
+import {
+  preloadKenneyModels,
+  createEnemyVisual,
+  createRampVisual,
+  createBlockVisual,
+  createRemotePlayerVisual,
+  createMoneyDropVisual,
+  getPreparedMoneyDropBatchParts,
+  getKenneyDebugSnapshot,
+} from "./kenneyModels.js";
 
 const SCENE_CONFIG = GAME_CONFIG.scene;
 const LIGHT_CONFIG = GAME_CONFIG.lights;
@@ -60,12 +70,18 @@ const OVERLAY_SCREEN_NONE = "none";
 const OVERLAY_SCREEN_PAUSE_MENU = "pause_menu";
 const OVERLAY_SCREEN_WEAPON_SELECT = "weapon_select";
 const STORAGE_KEY_MASTER_VOLUME = "webgame.masterVolume";
+const STORAGE_KEY_MOUSE_SENSITIVITY = "webgame.mouseSensitivity";
 const STORAGE_KEY_DIFFICULTY = "webgame.difficulty";
 const MASTER_VOLUME_SLIDER_BASE_GAIN = Number.isFinite(Number(AUDIO_CONFIG.baseMasterVolume))
   ? Math.max(0.01, Number(AUDIO_CONFIG.baseMasterVolume))
   : 0.18;
 const MASTER_VOLUME_SLIDER_MAX_GAIN = Math.max(0.01, MASTER_VOLUME_SLIDER_BASE_GAIN * 2);
 const DEFAULT_MASTER_VOLUME = MASTER_VOLUME_SLIDER_BASE_GAIN;
+const MOUSE_SENSITIVITY_SLIDER_BASE_SPEED = Number.isFinite(Number(PLAYER_CONFIG.controls?.pointerSpeed))
+  ? Math.max(0.01, Number(PLAYER_CONFIG.controls.pointerSpeed))
+  : 0.75;
+const MOUSE_SENSITIVITY_SLIDER_MAX_SPEED = Math.max(0.01, MOUSE_SENSITIVITY_SLIDER_BASE_SPEED * 2);
+const DEFAULT_MOUSE_SENSITIVITY = MOUSE_SENSITIVITY_SLIDER_BASE_SPEED;
 const DIFFICULTY_PRESETS = [
   {
     id: "easy",
@@ -272,6 +288,33 @@ function masterVolumeGainToSliderUnit(value, fallback = DEFAULT_MASTER_VOLUME) {
 
 function masterVolumeSliderUnitToGain(value, fallback = 0.5) {
   return clampUnitInterval(value, fallback) * MASTER_VOLUME_SLIDER_MAX_GAIN;
+}
+
+function clampMouseSensitivity(value, fallback = DEFAULT_MOUSE_SENSITIVITY) {
+  if (value == null) {
+    return clamp(Number(fallback) || 0, 0, MOUSE_SENSITIVITY_SLIDER_MAX_SPEED);
+  }
+  if (typeof value === "string" && value.trim().length <= 0) {
+    return clamp(Number(fallback) || 0, 0, MOUSE_SENSITIVITY_SLIDER_MAX_SPEED);
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return clamp(Number(fallback) || 0, 0, MOUSE_SENSITIVITY_SLIDER_MAX_SPEED);
+  }
+  return clamp(numeric, 0, MOUSE_SENSITIVITY_SLIDER_MAX_SPEED);
+}
+
+function mouseSensitivityToSliderUnit(value, fallback = DEFAULT_MOUSE_SENSITIVITY) {
+  if (MOUSE_SENSITIVITY_SLIDER_MAX_SPEED <= 0) {
+    return 0;
+  }
+  return clampUnitInterval(
+    clampMouseSensitivity(value, fallback) / MOUSE_SENSITIVITY_SLIDER_MAX_SPEED
+  );
+}
+
+function mouseSensitivitySliderUnitToSpeed(value, fallback = 0.5) {
+  return clampUnitInterval(value, fallback) * MOUSE_SENSITIVITY_SLIDER_MAX_SPEED;
 }
 
 function roundMultiplayerLogNumber(value, digits = 2) {
@@ -705,6 +748,24 @@ const EDITOR_TOOL_INVENTORY = [
     iconId: "editor_player_spawn",
     hotkey: "6",
   },
+  {
+    type: "chest",
+    label: "Chest",
+    iconId: "editor_chest",
+    hotkey: "7",
+  },
+  {
+    type: "barrel",
+    label: "Barrel",
+    iconId: "editor_barrel",
+    hotkey: "8",
+  },
+  {
+    type: "stones",
+    label: "Stones",
+    iconId: "editor_stones",
+    hotkey: "9",
+  },
 ];
 
 const app = document.getElementById("app");
@@ -807,6 +868,10 @@ let selectedDifficultyId = DIFFICULTY_PRESET_BY_ID.has(readStoredString(STORAGE_
 let masterVolumeSetting = clampMasterVolumeGain(
   readStoredString(STORAGE_KEY_MASTER_VOLUME),
   DEFAULT_MASTER_VOLUME
+);
+let mouseSensitivitySetting = clampMouseSensitivity(
+  readStoredString(STORAGE_KEY_MOUSE_SENSITIVITY),
+  DEFAULT_MOUSE_SENSITIVITY
 );
 const pendingMultiplayerReadyWaiters = [];
 let multiplayerTransformTimer = 0;
@@ -1173,6 +1238,8 @@ directionalLight.shadow.camera.bottom = LIGHT_CONFIG.directional.shadowBottom;
 directionalLight.shadow.normalBias = LIGHT_CONFIG.directional.shadowNormalBias;
 scene.add(directionalLight);
 
+await preloadKenneyModels();
+
 let grid = createGrid(scene);
 function placeCameraAtPlayerSpawn(targetGrid = grid) {
   const hasPlayerSpawnCell = !!(
@@ -1226,15 +1293,193 @@ const moneyDropMaterialsByValue = new Map(
     return [value, material];
   })
 );
+const MONEY_DROP_RENDER_MAX_INSTANCES = 4096;
 const activeMoneyDrops = [];
 const activeMoneyDropEntriesById = new Map();
 const activeMoneyDropMergeJobs = [];
 const moneyDropMergeScratch = [];
 const moneyDropTempFeetPosition = new THREE.Vector3();
 const moneyDropCollectorTempFeetPosition = new THREE.Vector3();
+const moneyDropRenderMatrix = new THREE.Matrix4();
+const moneyDropRenderBaseMatrix = new THREE.Matrix4();
+const moneyDropRenderQuaternion = new THREE.Quaternion();
+const moneyDropRenderScale = new THREE.Vector3(1, 1, 1);
+const moneyDropRenderPoolsByValue = new Map();
+const kenneyPreviewPosition = new THREE.Vector3();
+const kenneyPreviewForward = new THREE.Vector3();
+const kenneyPreviewLookTarget = new THREE.Vector3();
 let nextMoneyDropMergeJobId = 1;
 let nextMoneyDropId = 1;
 const moneyPickupRangeBonusByOwner = new Map();
+
+function getMoneyDropGeometryVertexCount(geometry) {
+  const positionAttribute = geometry?.attributes?.position;
+  return positionAttribute ? positionAttribute.count : 0;
+}
+
+function getMoneyDropGeometryIndexCount(geometry) {
+  if (geometry?.index?.count) {
+    return geometry.index.count;
+  }
+  return getMoneyDropGeometryVertexCount(geometry);
+}
+
+function createMoneyDropBatchedMesh(material, maxVertexCount, maxIndexCount) {
+  const mesh = new THREE.BatchedMesh(
+    MONEY_DROP_RENDER_MAX_INSTANCES,
+    Math.max(1, maxVertexCount),
+    Math.max(1, maxIndexCount),
+    material
+  );
+  mesh.name = "MoneyDropBatch";
+  mesh.perObjectFrustumCulled = true;
+  mesh.sortObjects = false;
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
+function initializeMoneyDropRenderBatches() {
+  moneyDropRenderPoolsByValue.clear();
+  for (const value of MONEY_DROP_DENOMINATIONS) {
+    const preparedVisual = getPreparedMoneyDropBatchParts(value);
+    if (!preparedVisual?.parts?.length) {
+      continue;
+    }
+    const renderPools = [];
+    for (const [partIndex, part] of preparedVisual.parts.entries()) {
+      if (!part?.geometry || !part?.material || !part?.matrix) {
+        continue;
+      }
+      const batch = createMoneyDropBatchedMesh(
+        part.material,
+        getMoneyDropGeometryVertexCount(part.geometry),
+        getMoneyDropGeometryIndexCount(part.geometry)
+      );
+      const geometryId = batch.addGeometry(part.geometry);
+      batch.userData.moneyDropValue = value;
+      batch.userData.moneyDropPartIndex = partIndex;
+      moneyDropGroup.add(batch);
+      renderPools.push({
+        batch,
+        geometryId,
+        partMatrix: part.matrix.clone(),
+      });
+    }
+    if (renderPools.length > 0) {
+      moneyDropRenderPoolsByValue.set(value, renderPools);
+    }
+  }
+}
+
+function syncMoneyDropRenderEntry(dropEntry) {
+  if (!dropEntry || dropEntry.removed) {
+    return;
+  }
+  if (dropEntry.renderState?.batched === true) {
+    moneyDropRenderQuaternion.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, dropEntry.rotationY || 0);
+    moneyDropRenderBaseMatrix.compose(dropEntry.position, moneyDropRenderQuaternion, moneyDropRenderScale);
+    for (const partState of dropEntry.renderState.parts) {
+      if (!partState?.batch || !Number.isInteger(partState.instanceId) || !partState.partMatrix) {
+        continue;
+      }
+      moneyDropRenderMatrix.multiplyMatrices(moneyDropRenderBaseMatrix, partState.partMatrix);
+      partState.batch.setMatrixAt(partState.instanceId, moneyDropRenderMatrix);
+    }
+    return;
+  }
+  if (dropEntry.mesh) {
+    dropEntry.mesh.position.copy(dropEntry.position);
+    dropEntry.mesh.rotation.y = dropEntry.rotationY || 0;
+  }
+}
+
+function detachMoneyDropRenderEntry(dropEntry) {
+  if (!dropEntry) {
+    return;
+  }
+  if (dropEntry.renderState?.batched === true) {
+    for (const partState of dropEntry.renderState.parts) {
+      if (!partState?.batch || !Number.isInteger(partState.instanceId)) {
+        continue;
+      }
+      partState.batch.deleteInstance(partState.instanceId);
+    }
+    dropEntry.renderState = null;
+  }
+  if (dropEntry.mesh?.parent) {
+    dropEntry.mesh.parent.remove(dropEntry.mesh);
+  }
+  dropEntry.mesh = null;
+}
+
+function attachMoneyDropRenderEntry(dropEntry) {
+  if (!dropEntry) {
+    return false;
+  }
+  detachMoneyDropRenderEntry(dropEntry);
+  const renderPools = moneyDropRenderPoolsByValue.get(dropEntry.value);
+  if (Array.isArray(renderPools) && renderPools.length > 0) {
+    const parts = [];
+    for (const renderPool of renderPools) {
+      const instanceId = renderPool.batch.addInstance(renderPool.geometryId);
+      parts.push({
+        batch: renderPool.batch,
+        instanceId,
+        partMatrix: renderPool.partMatrix,
+      });
+    }
+    dropEntry.renderState = {
+      batched: true,
+      parts,
+    };
+    syncMoneyDropRenderEntry(dropEntry);
+    return true;
+  }
+
+  const material = moneyDropMaterialsByValue.get(dropEntry.value);
+  const mesh = createMoneyDropVisual(dropEntry.value) ?? (material ? new THREE.Mesh(moneyDropGeometry, material) : null);
+  if (!mesh) {
+    return false;
+  }
+  if (!mesh.userData?.kenneyVisual) {
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+  }
+  moneyDropGroup.add(mesh);
+  dropEntry.mesh = mesh;
+  dropEntry.renderState = null;
+  syncMoneyDropRenderEntry(dropEntry);
+  return true;
+}
+
+function getMoneyDropRenderStats() {
+  let activeBatchedMoneyDropCount = 0;
+  let activeFallbackMoneyDropCount = 0;
+  for (const dropEntry of activeMoneyDrops) {
+    if (!dropEntry || dropEntry.removed) {
+      continue;
+    }
+    if (dropEntry.renderState?.batched === true) {
+      activeBatchedMoneyDropCount += 1;
+    } else if (dropEntry.mesh) {
+      activeFallbackMoneyDropCount += 1;
+    }
+  }
+  return {
+    activeMoneyDropCount: activeMoneyDrops.length,
+    activeBatchedMoneyDropCount,
+    activeFallbackMoneyDropCount,
+    batchCount: Array.from(moneyDropRenderPoolsByValue.values()).reduce((total, pools) => total + pools.length, 0),
+  };
+}
+
+initializeMoneyDropRenderBatches();
+
+const kenneyDebugPreviewGroup = new THREE.Group();
+kenneyDebugPreviewGroup.name = "KenneyDebugPreviewGroup";
+scene.add(kenneyDebugPreviewGroup);
 
 let player;
 let enemySystem;
@@ -1255,6 +1500,269 @@ function getSelectedDifficultyPreset() {
 function getStartingCashForSelectedDifficulty() {
   const preset = getSelectedDifficultyPreset();
   return Math.max(0, Math.floor(startingCashBase * preset.startingCashMultiplier));
+}
+
+function getKenneySceneSnapshot() {
+  const nodes = [];
+  const worldPosition = new THREE.Vector3();
+  const worldQuaternion = new THREE.Quaternion();
+  const worldScale = new THREE.Vector3();
+  scene.updateMatrixWorld(true);
+  scene.traverse((child) => {
+    if (child?.userData?.kenneyVisual !== true) {
+      return;
+    }
+    const bounds = new THREE.Box3().setFromObject(child);
+    child.matrixWorld.decompose(worldPosition, worldQuaternion, worldScale);
+    nodes.push({
+      type: child.parent?.userData?.isRamp === true
+        ? "ramp"
+        : child.parent?.userData?.enemyRaycastProxy === true
+          ? "enemyProxyParent"
+          : (child.parent?.userData?.editorObjectType === "ramp" ? "ramp" : "visual"),
+      parentType: child.parent?.userData?.editorObjectType ?? null,
+      childCount: child.children.length,
+      position: worldPosition.toArray(),
+      scale: worldScale.toArray(),
+      bounds: {
+        min: bounds.min.toArray(),
+        max: bounds.max.toArray(),
+        size: bounds.getSize(new THREE.Vector3()).toArray(),
+      },
+    });
+  });
+  return {
+    kenneyNodeCount: nodes.length,
+    nodes,
+  };
+}
+
+function clearKenneyDebugPreviews() {
+  while (kenneyDebugPreviewGroup.children.length > 0) {
+    kenneyDebugPreviewGroup.remove(kenneyDebugPreviewGroup.children[0]);
+  }
+}
+
+function applyKenneyDebugSolidOverride(root, color = 0xff00ff) {
+  if (!root) {
+    return root;
+  }
+  root.traverse((child) => {
+    if (!child?.isMesh || !child.material) {
+      return;
+    }
+    const buildMaterial = () => {
+      const material = new THREE.MeshBasicMaterial({
+        color,
+        side: THREE.DoubleSide,
+      });
+      material.toneMapped = false;
+      material.fog = false;
+      material.depthTest = false;
+      material.depthWrite = false;
+      return material;
+    };
+    if (Array.isArray(child.material)) {
+      child.material = child.material.map(() => buildMaterial());
+    } else {
+      child.material = buildMaterial();
+    }
+    child.renderOrder = 9999;
+  });
+  return root;
+}
+
+function applyKenneyDebugBasicOverride(root, {
+  color = 0xff00ff,
+  depthTest = true,
+  depthWrite = true,
+} = {}) {
+  if (!root) {
+    return root;
+  }
+  root.traverse((child) => {
+    if (!child?.isMesh || !child.material) {
+      return;
+    }
+    const buildMaterial = () => {
+      const material = new THREE.MeshBasicMaterial({
+        color,
+        side: THREE.DoubleSide,
+      });
+      material.toneMapped = false;
+      material.fog = false;
+      material.depthTest = depthTest;
+      material.depthWrite = depthWrite;
+      return material;
+    };
+    if (Array.isArray(child.material)) {
+      child.material = child.material.map(() => buildMaterial());
+    } else {
+      child.material = buildMaterial();
+    }
+    child.renderOrder = depthTest ? 0 : 9999;
+  });
+  return root;
+}
+
+function getKenneyPreviewVisual() {
+  return kenneyDebugPreviewGroup.children.find((child) => child?.userData?.kenneyVisual === true) ?? null;
+}
+
+function getKenneyPreviewMaterialSnapshot() {
+  const visual = getKenneyPreviewVisual();
+  if (!visual) {
+    return null;
+  }
+  const materials = [];
+  visual.traverse((child) => {
+    if (!child?.isMesh || !child.material) {
+      return;
+    }
+    const childMaterials = Array.isArray(child.material) ? child.material : [child.material];
+    for (const material of childMaterials) {
+      if (!material) {
+        continue;
+      }
+      materials.push({
+        objectName: child.name || null,
+        objectVisible: child.visible !== false,
+        materialType: material.type ?? null,
+        transparent: material.transparent === true,
+        opacity: typeof material.opacity === "number" ? material.opacity : null,
+        visible: material.visible !== false,
+        depthTest: material.depthTest !== false,
+        depthWrite: material.depthWrite !== false,
+        colorWrite: material.colorWrite !== false,
+        fog: material.fog !== false,
+        toneMapped: material.toneMapped === true,
+        vertexColors: material.vertexColors === true,
+        side: material.side ?? null,
+        map: material.map ? {
+          uuid: material.map.uuid,
+          isTexture: material.map.isTexture === true,
+          flipY: material.map.flipY === true,
+          colorSpace: material.map.colorSpace ?? null,
+        } : null,
+        color: material.color?.getHexString?.() ?? null,
+        emissive: material.emissive?.getHexString?.() ?? null,
+        emissiveIntensity: typeof material.emissiveIntensity === "number" ? material.emissiveIntensity : null,
+      });
+    }
+  });
+  return {
+    visualPosition: visual.position.toArray(),
+    materialCount: materials.length,
+    materials,
+  };
+}
+
+function createKenneyDebugPreview(kind = "enemy") {
+  const normalizedKind = typeof kind === "string" ? kind.trim().toLowerCase() : "";
+  let visual = null;
+  if (normalizedKind === "enemy") {
+    visual = createEnemyVisual(ENEMY_TYPES.red ?? Object.values(ENEMY_TYPES)[0] ?? null);
+  } else if (normalizedKind === "coin" || normalizedKind === "money" || normalizedKind === "moneydrop") {
+    visual = createMoneyDropVisual(100);
+  } else if (normalizedKind === "ramp" || normalizedKind === "stairs") {
+    visual = createRampVisual(0);
+  } else if (normalizedKind === "block" || normalizedKind === "wall") {
+    visual = createBlockVisual({ opacity: 1 });
+  } else if (normalizedKind === "human" || normalizedKind === "player" || normalizedKind === "remoteplayer") {
+    visual = createRemotePlayerVisual();
+  }
+
+  if (!visual) {
+    return null;
+  }
+
+  clearKenneyDebugPreviews();
+
+  camera.getWorldPosition(kenneyPreviewPosition);
+  camera.getWorldDirection(kenneyPreviewForward);
+  kenneyPreviewForward.y = 0;
+  if (kenneyPreviewForward.lengthSq() <= 1e-6) {
+    kenneyPreviewForward.set(0, 0, -1);
+  } else {
+    kenneyPreviewForward.normalize();
+  }
+
+  const previewDistance = normalizedKind === "ramp" || normalizedKind === "block" ? 8 : 4;
+  kenneyPreviewPosition.addScaledVector(kenneyPreviewForward, previewDistance);
+  const surfaceY = typeof grid?.getBuildSurfaceYAtWorld === "function"
+    ? grid.getBuildSurfaceYAtWorld(kenneyPreviewPosition.x, kenneyPreviewPosition.z)
+    : 0;
+  visual.position.set(kenneyPreviewPosition.x, surfaceY, kenneyPreviewPosition.z);
+
+  if (normalizedKind === "enemy" || normalizedKind === "human") {
+    kenneyPreviewLookTarget.copy(visual.position).sub(kenneyPreviewForward);
+    kenneyPreviewLookTarget.y = visual.position.y;
+    visual.lookAt(kenneyPreviewLookTarget);
+  } else if (normalizedKind === "coin" || normalizedKind === "money" || normalizedKind === "moneydrop") {
+    visual.position.y = surfaceY + 1.2;
+  }
+
+  visual.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(visual);
+  const helper = new THREE.Box3Helper(bounds, 0x00ffff);
+  kenneyDebugPreviewGroup.add(visual);
+  kenneyDebugPreviewGroup.add(helper);
+  return {
+    kind: normalizedKind,
+    position: visual.position.clone(),
+    bounds: {
+      min: bounds.min.clone(),
+      max: bounds.max.clone(),
+      size: bounds.getSize(new THREE.Vector3()),
+    },
+  };
+}
+
+function createKenneyDebugSolidPreview(kind = "enemy") {
+  const preview = createKenneyDebugPreview(kind);
+  if (!preview) {
+    return null;
+  }
+  const visual = getKenneyPreviewVisual();
+  if (!visual) {
+    return preview;
+  }
+  applyKenneyDebugSolidOverride(visual);
+  return preview;
+}
+
+function createKenneyDebugBasicDepthPreview(kind = "enemy") {
+  const preview = createKenneyDebugPreview(kind);
+  if (!preview) {
+    return null;
+  }
+  const visual = getKenneyPreviewVisual();
+  if (!visual) {
+    return preview;
+  }
+  applyKenneyDebugBasicOverride(visual, {
+    color: 0xff00ff,
+    depthTest: true,
+    depthWrite: true,
+  });
+  return preview;
+}
+
+function createKenneyDebugBasicColorPreview(kind = "enemy", color = 0xff00ff) {
+  const preview = createKenneyDebugPreview(kind);
+  if (!preview) {
+    return null;
+  }
+  const visual = getKenneyPreviewVisual();
+  if (!visual) {
+    return preview;
+  }
+  applyKenneyDebugBasicOverride(visual, {
+    color,
+    depthTest: true,
+    depthWrite: true,
+  });
+  return preview;
 }
 
 function setSelectedDifficulty(nextDifficultyId, { persist = true, broadcast = true } = {}) {
@@ -1281,6 +1789,15 @@ function setMasterVolumeSetting(nextVolume, { persist = true } = {}) {
     writeStoredString(STORAGE_KEY_MASTER_VOLUME, masterVolumeSetting);
   }
   return masterVolumeSetting;
+}
+
+function setMouseSensitivitySetting(nextSensitivity, { persist = true } = {}) {
+  mouseSensitivitySetting = clampMouseSensitivity(nextSensitivity, mouseSensitivitySetting);
+  player?.setPointerSpeed?.(mouseSensitivitySetting);
+  if (persist) {
+    writeStoredString(STORAGE_KEY_MOUSE_SENSITIVITY, mouseSensitivitySetting);
+  }
+  return mouseSensitivitySetting;
 }
 
 function getMultiplayerState() {
@@ -1382,9 +1899,11 @@ function ensureRemotePlayerEntry(peerId) {
   if (entry?.mesh) {
     return entry;
   }
-  const mesh = new THREE.Mesh(remotePlayerGeometry, remotePlayerMaterial);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
+  const mesh = createRemotePlayerVisual() ?? new THREE.Mesh(remotePlayerGeometry, remotePlayerMaterial);
+  if (!mesh.userData?.kenneyVisual) {
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+  }
   mesh.visible = true;
   scene.add(mesh);
   entry = {
@@ -1410,7 +1929,13 @@ function applyRemotePlayerTransform(peerId, transform = {}) {
   }
   const eyeHeight = Math.max(0.4, Number(grid?.eyeHeight) || 1.7);
   entry.worldPosition.set(px, py, pz);
-  entry.mesh.position.set(px, py - eyeHeight + (REMOTE_PLAYER_HEIGHT * 0.5), pz);
+  entry.mesh.position.set(
+    px,
+    entry.mesh.userData?.kenneyVisual === true
+      ? py - eyeHeight
+      : py - eyeHeight + (REMOTE_PLAYER_HEIGHT * 0.5),
+    pz
+  );
   const yaw = Number(transform?.yaw);
   if (Number.isFinite(yaw)) {
     entry.mesh.rotation.y = yaw;
@@ -1995,6 +2520,10 @@ function applyRuntimeUiAction(action) {
       setMasterVolumeSetting(masterVolumeSliderUnitToGain(clamp(Number(action.value) || 0, 0, 1)));
       return true;
     }
+    if (action.id === "main_mouse_sensitivity" || action.id === "pause_mouse_sensitivity") {
+      setMouseSensitivitySetting(mouseSensitivitySliderUnitToSpeed(clamp(Number(action.value) || 0, 0, 1)));
+      return true;
+    }
     return false;
   }
 
@@ -2079,11 +2608,14 @@ function refreshMenuUi() {
   const fullscreenLabel = isGameFullscreen() ? "Exit Fullscreen" : "Enter Fullscreen";
   const fullscreenDisabled = fullscreenRequestPending || !canToggleGameFullscreen();
   const hostToast = getHostLobbyToastViewState();
+  const mouseSensitivityVisible = !isTouchDevice;
 
   return {
     sessionScreen,
     overlayScreen,
     masterVolume: masterVolumeGainToSliderUnit(masterVolumeSetting),
+    mouseSensitivity: mouseSensitivityToSliderUnit(mouseSensitivitySetting),
+    mouseSensitivityVisible,
     mainMenu: {
       title: "Cube Command",
       subtitle: "Start a run, stage co-op, or tune your settings.",
@@ -2849,9 +3381,7 @@ function removeMoneyDropEntry(dropEntry) {
     activeMoneyDropEntriesById.delete(dropEntry.id);
   }
   dropEntry.mergeJobId = null;
-  if (dropEntry.mesh?.parent) {
-    dropEntry.mesh.parent.remove(dropEntry.mesh);
-  }
+  detachMoneyDropRenderEntry(dropEntry);
   const dropIndex = activeMoneyDrops.indexOf(dropEntry);
   if (dropIndex >= 0) {
     activeMoneyDrops.splice(dropIndex, 1);
@@ -2860,23 +3390,15 @@ function removeMoneyDropEntry(dropEntry) {
 
 function createMoneyDropEntry(value, x, y, z, options = {}) {
   const normalizedValue = Math.max(1, Math.floor(Number(value) || 1));
-  const material = moneyDropMaterialsByValue.get(normalizedValue);
-  if (!material) {
-    return null;
-  }
-
-  const mesh = new THREE.Mesh(moneyDropGeometry, material);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  mesh.position.set(x, y, z);
-  moneyDropGroup.add(mesh);
-
   const entry = {
     id: typeof options.id === "string" && options.id.length > 0
       ? options.id
       : `drop_${nextMoneyDropId++}`,
     value: normalizedValue,
-    mesh,
+    mesh: null,
+    renderState: null,
+    position: new THREE.Vector3(x, y, z),
+    rotationY: 0,
     velocity: new THREE.Vector3(0, 0, 0),
     settled: options.settled === true,
     homing: options.homing === true,
@@ -2888,6 +3410,7 @@ function createMoneyDropEntry(value, x, y, z, options = {}) {
       : 0,
     mergeJobId: null,
     removed: false,
+    spinSpeed: randomBetween(1.5, 3.6),
   };
 
   if (options.fromNetwork === true) {
@@ -2898,13 +3421,16 @@ function createMoneyDropEntry(value, x, y, z, options = {}) {
     entry.velocity.set(0, 0, 0);
   } else if (entry.settled) {
     const surfaceY = getMoneyDropSurfaceYAtWorld(x, z);
-    entry.mesh.position.y = surfaceY + MONEY_DROP_HALF_SIZE;
+    entry.position.y = surfaceY + MONEY_DROP_HALF_SIZE;
   } else {
     const launchAngle = Math.random() * Math.PI * 2;
     const launchSpeed = randomBetween(MONEY_DROP_RANDOM_HORIZONTAL_SPEED * 0.4, MONEY_DROP_RANDOM_HORIZONTAL_SPEED);
     entry.velocity.x = Math.cos(launchAngle) * launchSpeed;
     entry.velocity.z = Math.sin(launchAngle) * launchSpeed;
     entry.velocity.y = MONEY_DROP_INITIAL_UPWARD_SPEED + randomBetween(0, MONEY_DROP_INITIAL_UPWARD_SPEED * 0.55);
+  }
+  if (!attachMoneyDropRenderEntry(entry)) {
+    return null;
   }
 
   activeMoneyDrops.push(entry);
@@ -2917,9 +3443,7 @@ function clearMoneyDrops() {
     const dropEntry = activeMoneyDrops[i];
     dropEntry.removed = true;
     dropEntry.mergeJobId = null;
-    if (dropEntry.mesh?.parent) {
-      dropEntry.mesh.parent.remove(dropEntry.mesh);
-    }
+    detachMoneyDropRenderEntry(dropEntry);
   }
   activeMoneyDrops.length = 0;
   activeMoneyDropEntriesById.clear();
@@ -2969,15 +3493,15 @@ function spawnMoneyDrops(cashReward, dropPosition) {
 }
 
 function buildMoneyDropSnapshot(dropEntry) {
-  if (!dropEntry || dropEntry.removed || !dropEntry.mesh) {
+  if (!dropEntry || dropEntry.removed || !dropEntry.position) {
     return null;
   }
   return {
     id: dropEntry.id,
     value: dropEntry.value,
-    x: dropEntry.mesh.position.x,
-    y: dropEntry.mesh.position.y,
-    z: dropEntry.mesh.position.z,
+    x: dropEntry.position.x,
+    y: dropEntry.position.y,
+    z: dropEntry.position.z,
     claimable: dropEntry.mergeJobId === null && !dropEntry.homing,
     collectorId: dropEntry.collectorId,
   };
@@ -3055,7 +3579,8 @@ function applyAuthoritativeMoneyDropSnapshots(snapshotDrops = [], { seq = 0 } = 
     dropEntry.mergeJobId = null;
     dropEntry.lastHostSeq = safeSeq;
     dropEntry.velocity.set(0, 0, 0);
-    dropEntry.mesh.position.set(px, py, pz);
+    dropEntry.position.set(px, py, pz);
+    syncMoneyDropRenderEntry(dropEntry);
   }
 
   for (let i = activeMoneyDrops.length - 1; i >= 0; i -= 1) {
@@ -3155,8 +3680,8 @@ function findSettledMergeCandidateNear(worldX, worldZ, value, maxDistance = MONE
     ) {
       continue;
     }
-    const dx = candidate.mesh.position.x - worldX;
-    const dz = candidate.mesh.position.z - worldZ;
+    const dx = candidate.position.x - worldX;
+    const dz = candidate.position.z - worldZ;
     const distSq = (dx * dx) + (dz * dz);
     if (distSq > maxDistanceSq || distSq >= bestDistanceSq) {
       continue;
@@ -3216,8 +3741,8 @@ function tryMergeFromSettledMoneyDrop(seedDrop) {
     ) {
       continue;
     }
-    const dx = candidate.mesh.position.x - seedDrop.mesh.position.x;
-    const dz = candidate.mesh.position.z - seedDrop.mesh.position.z;
+    const dx = candidate.position.x - seedDrop.position.x;
+    const dz = candidate.position.z - seedDrop.position.z;
     const distSq = (dx * dx) + (dz * dz);
     if (distSq <= MONEY_DROP_MERGE_RADIUS_SQ) {
       moneyDropMergeScratch.push({ drop: candidate, distSq });
@@ -3235,9 +3760,9 @@ function tryMergeFromSettledMoneyDrop(seedDrop) {
   for (let i = 0; i < 10; i += 1) {
     const sourceDrop = moneyDropMergeScratch[i].drop;
     sourceDrops.push(sourceDrop);
-    sumX += sourceDrop.mesh.position.x;
-    sumY += sourceDrop.mesh.position.y;
-    sumZ += sourceDrop.mesh.position.z;
+    sumX += sourceDrop.position.x;
+    sumY += sourceDrop.position.y;
+    sumZ += sourceDrop.position.z;
   }
 
   queueMoneyDropMergeJob(
@@ -3270,12 +3795,13 @@ function updateMoneyDropMergeJobs(deltaSeconds) {
         continue;
       }
 
-      const dx = mergeJob.center.x - sourceDrop.mesh.position.x;
-      const dy = mergeJob.center.y - sourceDrop.mesh.position.y;
-      const dz = mergeJob.center.z - sourceDrop.mesh.position.z;
+      const dx = mergeJob.center.x - sourceDrop.position.x;
+      const dy = mergeJob.center.y - sourceDrop.position.y;
+      const dz = mergeJob.center.z - sourceDrop.position.z;
       const distSq = (dx * dx) + (dy * dy) + (dz * dz);
       if (distSq <= MONEY_DROP_MERGE_CONVERGE_ARRIVAL_DISTANCE_SQ) {
-        sourceDrop.mesh.position.copy(mergeJob.center);
+        sourceDrop.position.copy(mergeJob.center);
+        syncMoneyDropRenderEntry(sourceDrop);
         continue;
       }
       allArrived = false;
@@ -3285,14 +3811,16 @@ function updateMoneyDropMergeJobs(deltaSeconds) {
 
       const dist = Math.sqrt(distSq);
       if (dist <= 1e-6) {
-        sourceDrop.mesh.position.copy(mergeJob.center);
+        sourceDrop.position.copy(mergeJob.center);
+        syncMoneyDropRenderEntry(sourceDrop);
         continue;
       }
       const moveAmount = Math.min(dist, moveStep);
       const moveScale = moveAmount / dist;
-      sourceDrop.mesh.position.x += dx * moveScale;
-      sourceDrop.mesh.position.y += dy * moveScale;
-      sourceDrop.mesh.position.z += dz * moveScale;
+      sourceDrop.position.x += dx * moveScale;
+      sourceDrop.position.y += dy * moveScale;
+      sourceDrop.position.z += dz * moveScale;
+      syncMoneyDropRenderEntry(sourceDrop);
     }
 
     if (!allArrived) {
@@ -3375,7 +3903,7 @@ function getMoneyDropCollectorFeetPosition(collectorId, outPosition) {
 }
 
 function selectMoneyDropCollector(dropEntry) {
-  if (!dropEntry?.mesh) {
+  if (!dropEntry?.position) {
     return null;
   }
   let bestCollectorId = null;
@@ -3384,9 +3912,9 @@ function selectMoneyDropCollector(dropEntry) {
   if (getPlayerFeetPosition(moneyDropTempFeetPosition)) {
     const localPickupRange = getEffectiveMoneyPickupRange(localMultiplayerPeerId);
     const localPickupRangeSq = localPickupRange * localPickupRange;
-    const localDx = moneyDropTempFeetPosition.x - dropEntry.mesh.position.x;
-    const localDy = moneyDropTempFeetPosition.y - dropEntry.mesh.position.y;
-    const localDz = moneyDropTempFeetPosition.z - dropEntry.mesh.position.z;
+    const localDx = moneyDropTempFeetPosition.x - dropEntry.position.x;
+    const localDy = moneyDropTempFeetPosition.y - dropEntry.position.y;
+    const localDz = moneyDropTempFeetPosition.z - dropEntry.position.z;
     const localDistanceSq = (localDx * localDx) + (localDy * localDy) + (localDz * localDz);
     if (localDistanceSq <= localPickupRangeSq) {
       bestCollectorId = localMultiplayerPeerId;
@@ -3401,9 +3929,9 @@ function selectMoneyDropCollector(dropEntry) {
       }
       const pickupRange = getEffectiveMoneyPickupRange(peerId);
       const pickupRangeSq = pickupRange * pickupRange;
-      const dx = moneyDropCollectorTempFeetPosition.x - dropEntry.mesh.position.x;
-      const dy = moneyDropCollectorTempFeetPosition.y - dropEntry.mesh.position.y;
-      const dz = moneyDropCollectorTempFeetPosition.z - dropEntry.mesh.position.z;
+      const dx = moneyDropCollectorTempFeetPosition.x - dropEntry.position.x;
+      const dy = moneyDropCollectorTempFeetPosition.y - dropEntry.position.y;
+      const dz = moneyDropCollectorTempFeetPosition.z - dropEntry.position.z;
       const distanceSq = (dx * dx) + (dy * dy) + (dz * dz);
       if (distanceSq > pickupRangeSq || distanceSq >= bestDistanceSq) {
         continue;
@@ -3454,9 +3982,9 @@ function updateMoneyDropHomingAndCollection(deltaSeconds) {
       continue;
     }
 
-    const toFeetX = moneyDropCollectorTempFeetPosition.x - dropEntry.mesh.position.x;
-    const toFeetY = moneyDropCollectorTempFeetPosition.y - dropEntry.mesh.position.y;
-    const toFeetZ = moneyDropCollectorTempFeetPosition.z - dropEntry.mesh.position.z;
+    const toFeetX = moneyDropCollectorTempFeetPosition.x - dropEntry.position.x;
+    const toFeetY = moneyDropCollectorTempFeetPosition.y - dropEntry.position.y;
+    const toFeetZ = moneyDropCollectorTempFeetPosition.z - dropEntry.position.z;
     const distanceSq = (toFeetX * toFeetX) + (toFeetY * toFeetY) + (toFeetZ * toFeetZ);
     if (distanceSq <= MONEY_DROP_PICKUP_ARRIVAL_DISTANCE_SQ) {
       const batchOwnerId = normalizeMoneyPickupOwnerId(dropEntry.collectorId);
@@ -3504,9 +4032,10 @@ function updateMoneyDropHomingAndCollection(deltaSeconds) {
     }
     const moveAmount = Math.min(distance, homingStep);
     const moveScale = moveAmount / distance;
-    dropEntry.mesh.position.x += toFeetX * moveScale;
-    dropEntry.mesh.position.y += toFeetY * moveScale;
-    dropEntry.mesh.position.z += toFeetZ * moveScale;
+    dropEntry.position.x += toFeetX * moveScale;
+    dropEntry.position.y += toFeetY * moveScale;
+    dropEntry.position.z += toFeetZ * moveScale;
+    syncMoneyDropRenderEntry(dropEntry);
   }
 
   for (const batch of collectedBatchesByOwner.values()) {
@@ -3518,11 +4047,19 @@ function updateMoneyDrops(deltaSeconds) {
   if (activeMoneyDrops.length === 0) {
     return;
   }
+  const safeDelta = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
+  if (safeDelta > 0) {
+    for (const dropEntry of activeMoneyDrops) {
+      if (!dropEntry?.position) {
+        continue;
+      }
+      dropEntry.rotationY += (dropEntry.spinSpeed || 0) * safeDelta;
+      syncMoneyDropRenderEntry(dropEntry);
+    }
+  }
   if (isMultiplayerGuest()) {
     return;
   }
-
-  const safeDelta = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
   const newlySettled = [];
 
   if (safeDelta > 0) {
@@ -3542,18 +4079,19 @@ function updateMoneyDrops(deltaSeconds) {
       dropEntry.velocity.x *= damping;
       dropEntry.velocity.z *= damping;
 
-      dropEntry.mesh.position.x += dropEntry.velocity.x * safeDelta;
-      dropEntry.mesh.position.y += dropEntry.velocity.y * safeDelta;
-      dropEntry.mesh.position.z += dropEntry.velocity.z * safeDelta;
+      dropEntry.position.x += dropEntry.velocity.x * safeDelta;
+      dropEntry.position.y += dropEntry.velocity.y * safeDelta;
+      dropEntry.position.z += dropEntry.velocity.z * safeDelta;
 
-      const surfaceY = getMoneyDropSurfaceYAtWorld(dropEntry.mesh.position.x, dropEntry.mesh.position.z);
+      const surfaceY = getMoneyDropSurfaceYAtWorld(dropEntry.position.x, dropEntry.position.z);
       const minCenterY = surfaceY + MONEY_DROP_HALF_SIZE;
-      if (dropEntry.mesh.position.y <= minCenterY) {
-        dropEntry.mesh.position.y = minCenterY;
+      if (dropEntry.position.y <= minCenterY) {
+        dropEntry.position.y = minCenterY;
         dropEntry.velocity.set(0, 0, 0);
         dropEntry.settled = true;
         newlySettled.push(dropEntry);
       }
+      syncMoneyDropRenderEntry(dropEntry);
     }
   }
 
@@ -5296,7 +5834,13 @@ if (!isTouchDevice) {
       return;
     }
     const selectedTool = levelEditor.getSelectedTool?.();
-    if (selectedTool !== "ramp" && selectedTool !== "playerSpawn") {
+    if (
+      selectedTool !== "ramp"
+      && selectedTool !== "playerSpawn"
+      && selectedTool !== "chest"
+      && selectedTool !== "barrel"
+      && selectedTool !== "stones"
+    ) {
       return;
     }
     if (event.deltaY === 0) {
@@ -8156,6 +8700,7 @@ function initGame() {
       return [...staticObstacles, ...towerObstacles];
     },
   });
+  setMouseSensitivitySetting(mouseSensitivitySetting, { persist: false });
   recreateGameplaySystems();
   syncPlayerMenuMode();
 
@@ -8172,13 +8717,86 @@ function initGame() {
     syncPlayerMenuMode();
   });
 
+  function getRenderStats() {
+    const renderInfo = renderer.info?.render ?? {};
+    const gridRenderStats = typeof grid?.getRenderBatchStats === "function"
+      ? grid.getRenderBatchStats()
+      : {};
+    const enemyRenderStats = typeof enemySystem?.getRenderBatchStats === "function"
+      ? enemySystem.getRenderBatchStats()
+      : {};
+    const moneyDropRenderStats = getMoneyDropRenderStats();
+    return {
+      calls: Number(renderInfo.calls) || 0,
+      triangles: Number(renderInfo.triangles) || 0,
+      lines: Number(renderInfo.lines) || 0,
+      points: Number(renderInfo.points) || 0,
+      activeEnemyCount: Number(enemyRenderStats.activeEnemyCount) || 0,
+      activeDamagedHealthBarCount: Number(enemyRenderStats.damagedHealthBarCount) || 0,
+      staticChunkBatchCount: Number(gridRenderStats.staticChunkCount) || 0,
+      staticMergedMeshCount: Number(gridRenderStats.mergedMeshCount) || 0,
+      dynamicBatchCounts: {
+        enemy: Number(enemyRenderStats.batchCount) || 0,
+        moneyDrop: Number(moneyDropRenderStats.batchCount) || 0,
+      },
+      activeLiveEnemyCount: Number(enemyRenderStats.activeLiveEnemyCount) || 0,
+      activeMoneyDropCount: Number(moneyDropRenderStats.activeMoneyDropCount) || 0,
+      activeBatchedMoneyDropCount: Number(moneyDropRenderStats.activeBatchedMoneyDropCount) || 0,
+      activeFallbackMoneyDropCount: Number(moneyDropRenderStats.activeFallbackMoneyDropCount) || 0,
+    };
+  }
+
   // Debug API to let browser scripts skip UI
   window.gameDebug = {
     setPlayerPos: (x, z) => {
-      if (player) player.controls.getObject().position.set(x, grid.eyeHeight, z);
+      const targetX = Number(x);
+      const targetZ = Number(z);
+      if (!Number.isFinite(targetX) || !Number.isFinite(targetZ)) {
+        return false;
+      }
+      const targetPosition = player?.getPosition?.() ?? camera.position;
+      if (!targetPosition) {
+        return false;
+      }
+      const surfaceY = typeof grid?.getBuildSurfaceYAtWorld === "function"
+        ? grid.getBuildSurfaceYAtWorld(targetX, targetZ)
+        : 0;
+      const eyeHeight = Number.isFinite(Number(grid?.eyeHeight))
+        ? Number(grid.eyeHeight)
+        : 1.7;
+      targetPosition.set(targetX, surfaceY + eyeHeight, targetZ);
+      return true;
+    },
+    spawnMoneyDrop: (value = 1, x = null, z = null) => {
+      const dropValue = Math.max(1, Math.floor(Number(value) || 1));
+      const feetPosition = new THREE.Vector3();
+      let dropX = Number(x);
+      let dropZ = Number(z);
+      if (!Number.isFinite(dropX) || !Number.isFinite(dropZ)) {
+        if (!getPlayerFeetPosition(feetPosition)) {
+          return null;
+        }
+        dropX = feetPosition.x;
+        dropZ = feetPosition.z;
+      }
+      const dropY = getMoneyDropSurfaceYAtWorld(dropX, dropZ) + MONEY_DROP_HALF_SIZE;
+      return createMoneyDropEntry(dropValue, dropX, dropY, dropZ, { settled: true });
+    },
+    previewKenneyModel: (kind = "enemy") => createKenneyDebugPreview(kind),
+    previewKenneySolid: (kind = "enemy") => createKenneyDebugSolidPreview(kind),
+    previewKenneyBasicDepth: (kind = "enemy") => createKenneyDebugBasicDepthPreview(kind),
+    previewKenneyBasicColor: (kind = "enemy", color = 0xff00ff) => createKenneyDebugBasicColorPreview(kind, color),
+    getKenneyPreviewMaterialSnapshot,
+    clearKenneyPreviews: () => {
+      clearKenneyDebugPreviews();
+      return true;
     },
     placeBasicTower: (x, z) => {
       if (towerSystem) return towerSystem.forcePlaceTower(x, z, "gun");
+      return false;
+    },
+    placeBlockTower: (x, z) => {
+      if (towerSystem) return towerSystem.forcePlaceTower(x, z, "block");
       return false;
     },
     spawnEnemy: (type = "red") => {
@@ -8197,6 +8815,7 @@ function initGame() {
       }
       return enemySystem.getPathfindingPerfStats();
     },
+    getRenderStats,
     unlockTower: (type) => {
       if (towerSystem) {
         return towerSystem.unlockTowerType(type);
@@ -8213,6 +8832,8 @@ function initGame() {
     researchNode: (nodeId) => applyTechTreeNodeChoice(nodeId),
     getResearchedNodeIds: () => Array.from(localResearchedNodeIds.values()),
     getSharedResearchedNodeIds: () => Array.from(sharedResearchedNodeIds.values()),
+    getKenneyDebugSnapshot,
+    getKenneySceneSnapshot,
     lockControls: () => {
       player?.requestPointerLock?.();
     },

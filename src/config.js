@@ -1,3 +1,4 @@
+import LEVEL_DATA from "./level.json";
 import TECH_TREE_DATA from "./techtree.json";
 
 export const GAME_CONFIG = {
@@ -468,6 +469,8 @@ export const GAME_CONFIG = {
     altitudeEmissiveIntensity: 0.18,
     altitudeRoughness: 0.72,
     altitudeMetalness: 0.12,
+    // Tiny upward offset for Kenney wall.obj shells to avoid floor z-fighting.
+    kenneyWallVisualLift: 0.025,
 
     // Path tile materials.
     pathTileColor: 0xe9d5ab,
@@ -485,82 +488,12 @@ export const GAME_CONFIG = {
 
     // Sparse level layout entries.
     // Schema: { type, position: { x, y, z }, rotation }
-    // type: wall | spawn | end | playerSpawn | ramp
+    // type: wall | spawn | end | playerSpawn | ramp | chest | barrel | stones
+    // Grid-snapped types use integer cell coordinates in position.
+    // Decorative props use world-space position coordinates and do not affect gameplay collisions/pathing.
     // rotation for ramps is low->high direction:
     // 0 => +Z, 90 => +X, 180 => -Z, 270 => -X.
-    levelObjects: [
-      {"type":"wall","position":{"x":16,"y":0,"z":12},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":12},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":13},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":13},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":14},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":14},"rotation":0},
-      {"type":"wall","position":{"x":14,"y":0,"z":15},"rotation":0},
-      {"type":"wall","position":{"x":15,"y":0,"z":15},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":15},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":15},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":18},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":19},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":22},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":22},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":23},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":23},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":11},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":10},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":9},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":8},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":7},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":5},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":6},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":4},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":3},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":2},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":1},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":0},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":20},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":24},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":25},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":26},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":27},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":28},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":29},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":30},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":31},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":32},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":33},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":34},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":35},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":1,"z":19},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":1,"z":22},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":1,"z":22},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":1,"z":23},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":1,"z":23},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":3,"z":22},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":3,"z":22},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":3,"z":23},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":3,"z":23},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":4,"z":22},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":4,"z":23},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":4,"z":22},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":4,"z":23},"rotation":0},
-      {"type":"wall","position":{"x":17,"y":0,"z":17},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":0,"z":19},"rotation":0},
-      {"type":"wall","position":{"x":15,"y":0,"z":19},"rotation":0},
-      {"type":"wall","position":{"x":18,"y":0,"z":19},"rotation":0},
-      {"type":"wall","position":{"x":19,"y":0,"z":19},"rotation":0},
-      {"type":"wall","position":{"x":16,"y":1,"z":19},"rotation":0},
-      {"type":"wall","position":{"x":18,"y":1,"z":19},"rotation":0},
-      {"type":"playerSpawn","position":{"x":12,"y":0,"z":17},"rotation":90},
-      {"type":"end","position":{"x":15,"y":0,"z":13},"rotation":0},
-      {"type":"spawn","position":{"x":21,"y":0,"z":15},"rotation":0},
-      {"type":"spawn","position":{"x":21,"y":0,"z":21},"rotation":0},
-      {"type":"ramp","position":{"x":15,"y":0,"z":18},"rotation":90},
-      {"type":"ramp","position":{"x":19,"y":0,"z":18},"rotation":270},
-      {"type":"ramp","position":{"x":15,"y":0,"z":20},"rotation":90},
-      {"type":"ramp","position":{"x":19,"y":0,"z":20},"rotation":270},
-      {"type":"ramp","position":{"x":19,"y":0,"z":17},"rotation":270},
-      {"type":"ramp","position":{"x":15,"y":0,"z":17},"rotation":90},
-    ],
+    levelObjects: LEVEL_DATA.levelObjects,
   },
 
   towers: {
@@ -1170,7 +1103,9 @@ export const GAME_CONFIG = {
     },
 
     controls: {
-      // Pointer-lock turn speed multiplier. Typical range: 0.2-1.5.
+      // Pointer-lock turn speed multiplier.
+      // Runtime slider mapping: 50% => pointerSpeed, 100% => pointerSpeed * 2.
+      // Typical range: 0.2-1.5.
       pointerSpeed: 0.75,
       // Retry pointer-lock for this long after unlock (ms). Typical range: 0-500.
       lockRetryWindowMs: 250,
