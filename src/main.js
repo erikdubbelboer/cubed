@@ -206,6 +206,9 @@ const BACKGROUND_KEEPALIVE_FREQUENCY_HZ = 20000;
 const BACKGROUND_KEEPALIVE_GAIN = 0.001;
 const HOST_LOBBY_TOAST_VISIBLE_MS = 2200;
 const HOST_LOBBY_TOAST_FADE_MS = 180;
+const WAKE_LOCK_SUPPORTED = typeof navigator !== "undefined"
+  && !!navigator.wakeLock
+  && typeof navigator.wakeLock.request === "function";
 
 function mpLog(message, details) {
   if (!MULTIPLAYER_DEBUG) {
@@ -857,6 +860,12 @@ let multiplayerAutoJoinInFlight = false;
 let shareButtonActionInFlight = false;
 let sessionScreen = SESSION_SCREEN_MAIN_MENU;
 let overlayScreen = OVERLAY_SCREEN_NONE;
+let waveState = "PLAYING";
+let wakeLockSentinel = null;
+let wakeLockDesiredActive = false;
+let wakeLockRequestInFlight = false;
+let wakeLockReleaseInFlight = false;
+let wakeLockRequestErrorLogged = false;
 let runId = 0;
 let localWeaponChosenForRunId = -1;
 let pendingStartAfterWeaponChoiceRunId = null;
@@ -2891,6 +2900,66 @@ function refreshBackgroundKeepAlive() {
   startBackgroundKeepAliveOscillators(audioContext);
 }
 
+function shouldKeepScreenAwake() {
+  return WAKE_LOCK_SUPPORTED
+    && document.visibilityState === "visible"
+    && isInRunSession()
+    && waveState === "PLAYING"
+    && !isPaused
+    && overlayScreen === OVERLAY_SCREEN_NONE;
+}
+
+async function requestScreenWakeLock() {
+  if (!WAKE_LOCK_SUPPORTED || wakeLockSentinel || wakeLockRequestInFlight) {
+    return;
+  }
+  wakeLockRequestInFlight = true;
+  try {
+    const sentinel = await navigator.wakeLock.request("screen");
+    wakeLockSentinel = sentinel;
+    wakeLockRequestErrorLogged = false;
+    sentinel.addEventListener("release", () => {
+      wakeLockSentinel = null;
+      if (wakeLockDesiredActive) {
+        void syncScreenWakeLockState();
+      }
+    });
+  } catch (error) {
+    if (!wakeLockRequestErrorLogged) {
+      console.warn("Wake lock request failed:", error);
+      wakeLockRequestErrorLogged = true;
+    }
+    wakeLockSentinel = null;
+  } finally {
+    wakeLockRequestInFlight = false;
+  }
+}
+
+async function releaseScreenWakeLock() {
+  if (!wakeLockSentinel || wakeLockReleaseInFlight) {
+    return;
+  }
+  wakeLockReleaseInFlight = true;
+  try {
+    await wakeLockSentinel.release();
+  } catch {
+    // Ignore release races when browser already dropped the lock.
+  } finally {
+    wakeLockSentinel = null;
+    wakeLockReleaseInFlight = false;
+  }
+}
+
+async function syncScreenWakeLockState() {
+  const shouldBeActive = shouldKeepScreenAwake();
+  wakeLockDesiredActive = shouldBeActive;
+  if (shouldBeActive) {
+    await requestScreenWakeLock();
+    return;
+  }
+  await releaseScreenWakeLock();
+}
+
 function unlockBackgroundAudioContextFromGesture() {
   hasGlobalUserGesture = true;
   const audioContext = ensureBackgroundAudioContext();
@@ -3215,10 +3284,12 @@ function applyPausedState(nextPaused) {
       clearDesktopHeld: true,
       clearAwaitRelease: true,
     });
+    void syncScreenWakeLockState();
     return;
   }
 
   clock.getDelta();
+  void syncScreenWakeLockState();
 }
 
 function refreshPauseState() {
@@ -4171,6 +4242,7 @@ function handleVisibilityOrFocusChange() {
   }
   refreshBackgroundKeepAlive();
   refreshMainLoopMode();
+  void syncScreenWakeLockState();
 }
 
 document.addEventListener("visibilitychange", handleVisibilityOrFocusChange);
@@ -6498,7 +6570,7 @@ window.addEventListener("keyup", (event) => {
   }
 });
 
-let waveState = "PLAYING";
+waveState = "PLAYING";
 let currentWave = WAVE_CONFIG.initialWave;
 let waveDelay = 0;
 let queuedWaveNumber = null;
@@ -8490,6 +8562,7 @@ function runGameFrame({ renderFrame = true } = {}) {
   const rawDeltaSeconds = clock.getDelta();
   const simulationDeltaSeconds = rawDeltaSeconds * gameSpeedMultiplier;
   syncPlayerMenuMode();
+  void syncScreenWakeLockState();
   if (rawDeltaSeconds > 0 && Number.isFinite(rawDeltaSeconds)) {
     fpsSampleTime += rawDeltaSeconds;
     fpsSampleFrames += 1;
