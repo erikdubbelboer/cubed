@@ -405,6 +405,9 @@ export function createPlayer({
   const projectileImpactRay = new THREE.Ray();
   const projectileImpactBox = new THREE.Box3();
   const projectileImpactBoxHitPoint = new THREE.Vector3();
+  const freeFlyForward = new THREE.Vector3();
+  const freeFlyRight = new THREE.Vector3();
+  const freeFlyDelta = new THREE.Vector3();
   const sniperRayOrigin = new THREE.Vector3();
   const sniperRayDirection = new THREE.Vector3();
   const sniperRayPoint = new THREE.Vector3();
@@ -444,6 +447,7 @@ export function createPlayer({
   let primaryHeld = false;
   let weaponCooldownRemaining = 0;
   let sniperZoomProgress = 0;
+  let editorFlyMode = false;
 
   let playerDamageMultiplier = 1;
   let playerFireRateMultiplier = 1;
@@ -872,6 +876,20 @@ export function createPlayer({
   function disableJetpackFuelConsumption() {
     hasInfiniteJetpackFuel = true;
     jetpackFuel = jetpackMaxFuel;
+  }
+
+  function setEditorFlyMode(enabled) {
+    const nextEnabled = !!enabled;
+    if (editorFlyMode === nextEnabled) {
+      return editorFlyMode;
+    }
+    editorFlyMode = nextEnabled;
+    verticalVelocity = 0;
+    jumpQueued = false;
+    setJumpHeld(false);
+    setPrimaryHeld(false);
+    resetMovementAudioState();
+    return editorFlyMode;
   }
 
   function applyWeaponHudLayout() {
@@ -2038,6 +2056,33 @@ export function createPlayer({
       || Math.abs(virtualState.strafe) > PLAYER_CONFIG.movement.virtualDeadzone;
     const canMove = controls.isLocked || usingVirtual;
 
+    if (editorFlyMode) {
+      if (canMove) {
+        const forwardAxis = (controls.isLocked ? keyboardForward : 0) + virtualState.forward;
+        const strafeAxis = (controls.isLocked ? keyboardStrafe : 0) + virtualState.strafe;
+        const length = Math.hypot(forwardAxis, strafeAxis);
+        const activeMoveSpeed = moveSpeed
+          * playerMovementSpeedMultiplier
+          * (controls.isLocked && moveState.sprint ? sprintMultiplier : 1);
+
+        if (length > 0) {
+          camera.getWorldDirection(freeFlyForward);
+          if (freeFlyForward.lengthSq() > 0) {
+            freeFlyForward.normalize();
+            freeFlyRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+            freeFlyDelta.copy(freeFlyForward).multiplyScalar(forwardAxis / length);
+            freeFlyDelta.addScaledVector(freeFlyRight, strafeAxis / length);
+            if (freeFlyDelta.lengthSq() > 0) {
+              freeFlyDelta.normalize().multiplyScalar(activeMoveSpeed * deltaSeconds);
+              camera.position.add(freeFlyDelta);
+            }
+          }
+        }
+      }
+      verticalVelocity = 0;
+      return;
+    }
+
     if (canMove) {
       const forwardAxis = (controls.isLocked ? keyboardForward : 0) + virtualState.forward;
       const strafeAxis = (controls.isLocked ? keyboardStrafe : 0) + virtualState.strafe;
@@ -2514,6 +2559,7 @@ export function createPlayer({
     addLookInput,
     setVirtualMove,
     setJumpHeld,
+    setEditorFlyMode,
     resetMovement,
     resetRunState,
     getPosition,

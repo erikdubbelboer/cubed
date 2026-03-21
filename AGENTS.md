@@ -169,6 +169,7 @@ Capture project decisions that are easy to regress but not always obvious from l
 
 ## Level Editor Contracts
 - Editor mode toggles with `N` (`waveState === "EDITOR"`) and rebuilds grid in editor mode.
+- Editor camera movement is free-fly while in editor mode: gravity/collision walking are disabled there, and forward movement follows the current look direction instead of ground-plane walking.
 - Editor mutates level object model (`src/levelEditor.js`) and rebuilds preview/pathing after edits.
 - `end` and `playerSpawn` are unique markers; `spawn` is multi-place.
 - Decorative editor props place freely on world surfaces via editor raycasts rather than voxel snapping, but remain serialized into `levelObjects` alongside the snapped gameplay objects.

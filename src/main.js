@@ -8121,6 +8121,8 @@ function enterEditorMode() {
   waveState = "EDITOR";
   queuedWaveNumber = null;
   buildPhaseRemainingSeconds = 0;
+  player?.resetMovement?.();
+  player?.setEditorFlyMode?.(true);
   resetMobileInputState();
   clearBuildPhasePathPreview();
   rebuildEditorPathPreview();
@@ -8164,6 +8166,7 @@ function exitEditorMode() {
   });
   recreateGameplaySystems();
 
+  player?.setEditorFlyMode?.(false);
   resetRunStateForNewLevel();
   placeCameraAtPlayerSpawn(grid);
   enterMainMenuState();
