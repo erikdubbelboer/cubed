@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import { GAME_CONFIG } from "./config.js";
-import { createEnemyVisual, isKenneyAssetManagedResource } from "./kenneyModels.js";
+import {
+  createEnemyVisual,
+  getPreparedEnemyBatchParts,
+  isKenneyAssetManagedResource,
+} from "./kenneyModels.js";
 
 const ENEMY_CONFIG = GAME_CONFIG.enemies;
 const GRID_CONFIG = GAME_CONFIG.grid;
@@ -97,6 +101,12 @@ const ENEMY_COLLISION_BOXES = [
   { hitPart: "body", center: { x: 0, y: -0.06, z: 0 }, halfExtents: { x: 0.9, y: 0.6, z: 0.72 } },
   { hitPart: "head", center: { x: 0, y: 0.76, z: 0 }, halfExtents: { x: 0.58, y: 0.42, z: 0.55 } },
 ];
+const ENEMY_RENDER_MAX_INSTANCES = 1024;
+const ENEMY_RENDER_HIT_TINT = new THREE.Color(0xffb8b8);
+const ENEMY_RENDER_BASE_TINT = new THREE.Color(0xffffff);
+const ENEMY_RENDER_PART_BODY = "body-mesh";
+const ENEMY_RENDER_PART_HEAD = "head-mesh";
+export const ENEMY_RAYCAST_LAYER = 1;
 
 function shouldDisposeEnemyResource(resource) {
   return !isKenneyAssetManagedResource(resource);
@@ -283,12 +293,18 @@ export function createEnemySystem(scene, grid, options = {}) {
   const tempCollisionCenterA = new THREE.Vector3();
   const tempLocalPointA = new THREE.Vector3();
   const tempQuatA = new THREE.Quaternion();
+  const tempQuatB = new THREE.Quaternion();
   const tempSegmentStart = new THREE.Vector3();
   const tempSegmentEnd = new THREE.Vector3();
   const tempFrontRampContact = new THREE.Vector3();
   const tempBackRampContact = new THREE.Vector3();
   const tempDefeatDropPosition = new THREE.Vector3();
   const tempCollisionLocalPoint = new THREE.Vector3();
+  const tempRenderScale = new THREE.Vector3(1, 1, 1);
+  const tempRenderPosition = new THREE.Vector3();
+  const tempRenderMatrix = new THREE.Matrix4();
+  const tempRenderParentMatrix = new THREE.Matrix4();
+  const tempRenderColor = new THREE.Color();
   const deathExplosionEffects = [];
   const deathExplosionGeometry = new THREE.SphereGeometry(1, 14, 10);
   const deathExplosionMaterial = new THREE.MeshBasicMaterial({
@@ -320,6 +336,114 @@ export function createEnemySystem(scene, grid, options = {}) {
     gridCellSize * 0.05
   );
   const networkSnapDistance = gridCellSize;
+  const liveEnemyRenderBatches = {
+    body: null,
+    head: null,
+    variantByKey: new Map(),
+  };
+
+  function findPreparedEnemyRenderPart(preparedVisual, partName) {
+    if (!preparedVisual?.parts || !partName) {
+      return null;
+    }
+    return preparedVisual.parts.find((part) => part?.name === partName) ?? null;
+  }
+
+  function getGeometryVertexCount(geometry) {
+    const positionAttribute = geometry?.attributes?.position;
+    return positionAttribute ? positionAttribute.count : 0;
+  }
+
+  function getGeometryIndexCount(geometry) {
+    if (geometry?.index?.count) {
+      return geometry.index.count;
+    }
+    return getGeometryVertexCount(geometry);
+  }
+
+function createEnemyBatchedMesh(material, maxVertexCount, maxIndexCount) {
+    const batchMaterial = typeof material?.clone === "function"
+      ? material.clone()
+      : material;
+    if (batchMaterial && "vertexColors" in batchMaterial) {
+      batchMaterial.vertexColors = false;
+      batchMaterial.needsUpdate = true;
+    }
+    const mesh = new THREE.BatchedMesh(
+      ENEMY_RENDER_MAX_INSTANCES,
+      Math.max(1, maxVertexCount),
+      Math.max(1, maxIndexCount),
+      batchMaterial
+    );
+    mesh.perObjectFrustumCulled = true;
+    mesh.sortObjects = false;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+    return mesh;
+  }
+
+  function initializeEnemyRenderBatches() {
+    const preparedVariants = [];
+    const seenVariantKeys = new Set();
+    for (const enemyType of Object.values(ENEMY_TYPES)) {
+      const preparedVisual = getPreparedEnemyBatchParts(enemyType);
+      if (!preparedVisual?.variantKey || seenVariantKeys.has(preparedVisual.variantKey)) {
+        continue;
+      }
+      seenVariantKeys.add(preparedVisual.variantKey);
+      preparedVariants.push(preparedVisual);
+    }
+    if (preparedVariants.length === 0) {
+      return;
+    }
+    let bodyMaterial = null;
+    let headMaterial = null;
+    let bodyVertexCount = 0;
+    let headVertexCount = 0;
+    let bodyIndexCount = 0;
+    let headIndexCount = 0;
+    for (const preparedVisual of preparedVariants) {
+      const bodyPart = findPreparedEnemyRenderPart(preparedVisual, ENEMY_RENDER_PART_BODY);
+      const headPart = findPreparedEnemyRenderPart(preparedVisual, ENEMY_RENDER_PART_HEAD);
+      if (bodyPart) {
+        bodyMaterial ??= bodyPart.material;
+        bodyVertexCount += getGeometryVertexCount(bodyPart.geometry);
+        bodyIndexCount += getGeometryIndexCount(bodyPart.geometry);
+      }
+      if (headPart) {
+        headMaterial ??= headPart.material;
+        headVertexCount += getGeometryVertexCount(headPart.geometry);
+        headIndexCount += getGeometryIndexCount(headPart.geometry);
+      }
+    }
+    liveEnemyRenderBatches.body = bodyMaterial
+      ? createEnemyBatchedMesh(bodyMaterial, bodyVertexCount, bodyIndexCount)
+      : null;
+    liveEnemyRenderBatches.head = headMaterial
+      ? createEnemyBatchedMesh(headMaterial, headVertexCount, headIndexCount)
+      : null;
+    if (liveEnemyRenderBatches.body) {
+      scene.add(liveEnemyRenderBatches.body);
+    }
+    if (liveEnemyRenderBatches.head) {
+      scene.add(liveEnemyRenderBatches.head);
+    }
+    for (const preparedVisual of preparedVariants) {
+      const bodyPart = findPreparedEnemyRenderPart(preparedVisual, ENEMY_RENDER_PART_BODY);
+      const headPart = findPreparedEnemyRenderPart(preparedVisual, ENEMY_RENDER_PART_HEAD);
+      liveEnemyRenderBatches.variantByKey.set(preparedVisual.variantKey, {
+        bodyPart,
+        headPart,
+        bodyGeometryId: bodyPart && liveEnemyRenderBatches.body
+          ? liveEnemyRenderBatches.body.addGeometry(bodyPart.geometry)
+          : null,
+        headGeometryId: headPart && liveEnemyRenderBatches.head
+          ? liveEnemyRenderBatches.head.addGeometry(headPart.geometry)
+          : null,
+      });
+    }
+  }
 
   function isCellInsideLevel(cellX, cellZ) {
     if (typeof grid?.isCellInsideLevel === "function") {
@@ -1278,6 +1402,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       enemy.visualRoot.position.y = visualHoverHeight;
       enemy.visualRootBaseOffsetY = enemy.visualRoot.position.y;
       enemy.mesh.userData.visualRootOffsetY = enemy.visualRoot.position.y;
+      updateEnemyLiveRenderMatrices(enemy);
       return;
     }
 
@@ -1295,6 +1420,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       enemy.visualRoot.position.y = visualHoverHeight;
       enemy.visualRootBaseOffsetY = enemy.visualRoot.position.y;
       enemy.mesh.userData.visualRootOffsetY = enemy.visualRoot.position.y;
+      updateEnemyLiveRenderMatrices(enemy);
       return;
     }
 
@@ -1339,6 +1465,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     enemy.visualRoot.position.y = (targetAverageY - predictedAverageY) + visualHoverHeight;
     enemy.visualRootBaseOffsetY = enemy.visualRoot.position.y;
     enemy.mesh.userData.visualRootOffsetY = enemy.visualRoot.position.y;
+    updateEnemyLiveRenderMatrices(enemy);
   }
 
   function updateEnemyWalkAnimation(enemy, deltaSeconds) {
@@ -1389,6 +1516,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     enemy.visualRoot.rotation.z = swayWave * ENEMY_WALK_ROLL_RADIANS * motion;
     enemy.visualRoot.rotation.y = swayWave * ENEMY_WALK_YAW_RADIANS * motion;
     enemy.mesh.userData.visualRootOffsetY = enemy.visualRoot.position.y;
+    updateEnemyLiveRenderMatrices(enemy);
   }
 
   function getEnemyCollisionCenter(enemy, out) {
@@ -1873,10 +2001,51 @@ export function createEnemySystem(scene, grid, options = {}) {
     );
     proxyMesh.castShadow = false;
     proxyMesh.receiveShadow = false;
+    proxyMesh.layers.set(ENEMY_RAYCAST_LAYER);
     proxyMesh.userData.enemyRaycastProxy = true;
     proxyMesh.userData.enemyHitPart = box.hitPart === "head" ? "head" : "body";
     proxyMesh.userData.enemyPartName = `hit_proxy_${proxyMesh.userData.enemyHitPart}`;
     return proxyMesh;
+  }
+
+  function buildPreparedEnemyCollisionBoxes(preparedVisual) {
+    if (!preparedVisual?.parts) {
+      return null;
+    }
+    const partDefinitions = [
+      { meshName: ENEMY_RENDER_PART_BODY, hitPart: "body" },
+      { meshName: ENEMY_RENDER_PART_HEAD, hitPart: "head" },
+    ];
+    const boxes = [];
+    for (const { meshName, hitPart } of partDefinitions) {
+      const targetPart = findPreparedEnemyRenderPart(preparedVisual, meshName);
+      if (!targetPart?.geometry) {
+        continue;
+      }
+      if (targetPart.geometry.boundingBox == null && typeof targetPart.geometry.computeBoundingBox === "function") {
+        targetPart.geometry.computeBoundingBox();
+      }
+      if (!targetPart.geometry.boundingBox) {
+        continue;
+      }
+      const bounds = targetPart.geometry.boundingBox.clone().applyMatrix4(targetPart.matrix);
+      const center = bounds.getCenter(new THREE.Vector3());
+      const size = bounds.getSize(new THREE.Vector3());
+      boxes.push({
+        hitPart,
+        center: {
+          x: center.x,
+          y: center.y,
+          z: center.z,
+        },
+        halfExtents: {
+          x: Math.max(0.01, size.x * 0.5),
+          y: Math.max(0.01, size.y * 0.5),
+          z: Math.max(0.01, size.z * 0.5),
+        },
+      });
+    }
+    return boxes.length > 0 ? boxes : null;
   }
 
   function buildImportedEnemyCollisionBoxes(importedVisual) {
@@ -1920,6 +2089,110 @@ export function createEnemySystem(scene, grid, options = {}) {
     return boxes.length > 0 ? boxes : null;
   }
 
+  function updateEnemyBatchColor(enemy) {
+    void enemy;
+  }
+
+  function updateEnemyLiveRenderMatrices(enemy) {
+    const liveRenderState = enemy?.liveRenderState;
+    const variantState = liveRenderState?.variantKey
+      ? liveEnemyRenderBatches.variantByKey.get(liveRenderState.variantKey)
+      : null;
+    if (!enemy?.visualRoot || !variantState || liveRenderState.active !== true) {
+      return;
+    }
+    enemy.visualRoot.updateWorldMatrix(true, false);
+    tempRenderScale.copy(enemy.visualRoot.scale);
+    tempRenderParentMatrix.compose(
+      enemy.visualRoot.getWorldPosition(tempRenderPosition),
+      enemy.visualRoot.getWorldQuaternion(tempQuatA),
+      tempRenderScale
+    );
+    if (
+      liveEnemyRenderBatches.body
+      && Number.isInteger(liveRenderState.bodyInstanceId)
+      && Number.isInteger(variantState.bodyGeometryId)
+      && variantState.bodyPart?.matrix
+    ) {
+      tempRenderMatrix.multiplyMatrices(tempRenderParentMatrix, variantState.bodyPart.matrix);
+      liveEnemyRenderBatches.body.setMatrixAt(liveRenderState.bodyInstanceId, tempRenderMatrix);
+    }
+    if (
+      liveEnemyRenderBatches.head
+      && Number.isInteger(liveRenderState.headInstanceId)
+      && Number.isInteger(variantState.headGeometryId)
+      && variantState.headPart?.matrix
+    ) {
+      tempRenderMatrix.multiplyMatrices(tempRenderParentMatrix, variantState.headPart.matrix);
+      liveEnemyRenderBatches.head.setMatrixAt(liveRenderState.headInstanceId, tempRenderMatrix);
+    }
+    updateEnemyBatchColor(enemy);
+  }
+
+  function detachEnemyFromLiveBatches(enemy) {
+    const liveRenderState = enemy?.liveRenderState;
+    if (!liveRenderState || liveRenderState.active !== true) {
+      return;
+    }
+    if (liveEnemyRenderBatches.body && Number.isInteger(liveRenderState.bodyInstanceId)) {
+      liveEnemyRenderBatches.body.deleteInstance(liveRenderState.bodyInstanceId);
+      liveRenderState.bodyInstanceId = null;
+    }
+    if (liveEnemyRenderBatches.head && Number.isInteger(liveRenderState.headInstanceId)) {
+      liveEnemyRenderBatches.head.deleteInstance(liveRenderState.headInstanceId);
+      liveRenderState.headInstanceId = null;
+    }
+    liveRenderState.active = false;
+  }
+
+  function attachEnemyToLiveBatches(enemy, enemyType, preparedVisual) {
+    if (!enemy || !preparedVisual?.variantKey) {
+      return false;
+    }
+    const variantState = liveEnemyRenderBatches.variantByKey.get(preparedVisual.variantKey);
+    if (!variantState) {
+      return false;
+    }
+    const liveRenderState = {
+      variantKey: preparedVisual.variantKey,
+      bodyInstanceId: null,
+      headInstanceId: null,
+      active: true,
+    };
+    if (liveEnemyRenderBatches.body && Number.isInteger(variantState.bodyGeometryId)) {
+      liveRenderState.bodyInstanceId = liveEnemyRenderBatches.body.addInstance(variantState.bodyGeometryId);
+    }
+    if (liveEnemyRenderBatches.head && Number.isInteger(variantState.headGeometryId)) {
+      liveRenderState.headInstanceId = liveEnemyRenderBatches.head.addInstance(variantState.headGeometryId);
+    }
+    enemy.liveRenderState = liveRenderState;
+    updateEnemyLiveRenderMatrices(enemy);
+    return true;
+  }
+
+  function buildEnemyRenderStats() {
+    let activeLiveEnemyCount = 0;
+    let damagedHealthBarCount = 0;
+    for (const enemy of activeEnemies) {
+      if (enemy?.liveRenderState?.active === true) {
+        activeLiveEnemyCount += 1;
+      }
+      if (enemy?.healthBarRoot?.visible === true) {
+        damagedHealthBarCount += 1;
+      }
+    }
+    return {
+      activeEnemyCount: activeEnemies.length,
+      activeLiveEnemyCount,
+      damagedHealthBarCount,
+      batchCount:
+        (liveEnemyRenderBatches.body ? 1 : 0)
+        + (liveEnemyRenderBatches.head ? 1 : 0),
+    };
+  }
+
+  initializeEnemyRenderBatches();
+
   function createEnemyMesh(type, spawnIndex = 0, spawnOptions = {}) {
     const normalizedType = normalizeEnemyType(type);
     const enemyType = normalizedType ? ENEMY_TYPES[normalizedType] : null;
@@ -1951,20 +2224,14 @@ export function createEnemySystem(scene, grid, options = {}) {
     let visualBottomOffsetY = null;
     let visualHoverHeight = ENEMY_SURFACE_HOVER_HEIGHT;
     let collisionBoxesData = null;
+    const preparedEnemyVisual = getPreparedEnemyBatchParts(enemyType);
 
-    const importedVisual = createEnemyVisual(enemyType);
-    if (importedVisual) {
-      importedVisual.position.y = 0;
-      visualRoot.add(importedVisual);
-      visualMaterials = Array.isArray(importedVisual.userData?.materials)
-        ? importedVisual.userData.materials.slice()
-        : [];
-      bodyMaterial = visualMaterials[0] ?? null;
-      const importedBounds = new THREE.Box3().setFromObject(importedVisual);
+    if (preparedEnemyVisual && liveEnemyRenderBatches.variantByKey.has(preparedEnemyVisual.variantKey)) {
+      const importedBounds = preparedEnemyVisual.bounds;
       modelTopY = importedBounds.max.y;
       visualBottomOffsetY = importedBounds.min.y;
       visualHoverHeight = 0;
-      collisionBoxesData = buildImportedEnemyCollisionBoxes(importedVisual);
+      collisionBoxesData = buildPreparedEnemyCollisionBoxes(preparedEnemyVisual);
       for (const collisionBox of collisionBoxesData ?? []) {
         const proxyMesh = createEnemyRaycastProxyMesh(collisionBox);
         visualRoot.add(proxyMesh);
@@ -1973,6 +2240,27 @@ export function createEnemySystem(scene, grid, options = {}) {
         }
       }
     } else {
+      const importedVisual = createEnemyVisual(enemyType);
+      if (importedVisual) {
+        importedVisual.position.y = 0;
+        visualRoot.add(importedVisual);
+        visualMaterials = Array.isArray(importedVisual.userData?.materials)
+          ? importedVisual.userData.materials.slice()
+          : [];
+        bodyMaterial = visualMaterials[0] ?? null;
+        const importedBounds = new THREE.Box3().setFromObject(importedVisual);
+        modelTopY = importedBounds.max.y;
+        visualBottomOffsetY = importedBounds.min.y;
+        visualHoverHeight = 0;
+        collisionBoxesData = buildImportedEnemyCollisionBoxes(importedVisual);
+        for (const collisionBox of collisionBoxesData ?? []) {
+          const proxyMesh = createEnemyRaycastProxyMesh(collisionBox);
+          visualRoot.add(proxyMesh);
+          if (collisionBox.hitPart === "body" && !bodyMesh) {
+            bodyMesh = proxyMesh;
+          }
+        }
+      } else {
       bodyMaterial = new THREE.MeshStandardMaterial({
         color: enemyType.color,
         emissive: enemyType.emissive,
@@ -2089,6 +2377,7 @@ export function createEnemySystem(scene, grid, options = {}) {
           z: box.halfExtents.z * enemyScale,
         },
       }));
+      }
     }
 
     if (!bodyMesh) {
@@ -2128,6 +2417,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     healthBarFg.position.z = ENEMY_CONFIG.healthBarFgOffsetZ;
     healthBarRoot.add(healthBarBg);
     healthBarRoot.add(healthBarFg);
+    healthBarRoot.visible = false;
     const healthBarBaseOffsetY = (
       (Number.isFinite(modelTopY) ? modelTopY : bodyMesh.position.y)
       + enemyType.size * ENEMY_CONFIG.healthBarYOffsetFromEnemySize
@@ -2195,6 +2485,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       walkCycleMotion: 0,
       walkCycleLastX: travelWaypoints[0].x,
       walkCycleLastZ: travelWaypoints[0].z,
+      liveRenderState: null,
     };
 
     const baseHealth = Math.max(0.01, Number(enemyType.health) || 0.01);
@@ -2259,6 +2550,9 @@ export function createEnemySystem(scene, grid, options = {}) {
     enemy.walkCycleLastX = enemy.pathCenter.x;
     enemy.walkCycleLastZ = enemy.pathCenter.z;
     updateEnemyWalkAnimation(enemy, 0);
+    if (preparedEnemyVisual && visualMaterials.length === 0) {
+      attachEnemyToLiveBatches(enemy, enemyType, preparedEnemyVisual);
+    }
     updateHealthBar(enemy);
 
     return enemy;
@@ -2273,6 +2567,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       ENEMY_CONFIG.healthBarSaturation,
       ENEMY_CONFIG.healthBarLightness
     );
+    enemy.healthBarRoot.visible = ratio < (1 - 1e-4);
   }
 
   function addEnemyToActiveList(enemy, { emitSpawn = true } = {}) {
@@ -2305,6 +2600,7 @@ export function createEnemySystem(scene, grid, options = {}) {
       return;
     }
     const enemy = activeEnemies[index];
+    disposeEnemyVisual(enemy);
     if (enemy && Number.isInteger(enemy.networkId)) {
       enemyByNetworkId.delete(enemy.networkId);
     }
@@ -2398,10 +2694,11 @@ export function createEnemySystem(scene, grid, options = {}) {
     enemy.visualRoot.scale.set(1, 1, 1);
     enemy.hitPulseTimer = 0;
     enemy.hitPulseClock = 0;
+    updateEnemyLiveRenderMatrices(enemy);
   }
 
   function triggerHitPulse(enemy) {
-    if (!Array.isArray(enemy.visualMaterialStates) || enemy.visualMaterialStates.length === 0) {
+    if (!enemy?.visualRoot) {
       return;
     }
     enemy.hitPulseTimer = Math.min(
@@ -2438,6 +2735,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     const scaleXZ = 1 + (pulse * HIT_PULSE_SCALE_BOOST);
     const scaleY = 1 + (pulse * HIT_PULSE_SCALE_BOOST * 0.55);
     enemy.visualRoot.scale.set(scaleXZ, scaleY, scaleXZ);
+    updateEnemyLiveRenderMatrices(enemy);
 
     if (enemy.hitPulseTimer <= 0) {
       resetHitPulse(enemy);
@@ -2459,6 +2757,15 @@ export function createEnemySystem(scene, grid, options = {}) {
     enemy.replacedVisualMaterials.length = 0;
 
     if (!enemy.visualRoot) return;
+
+    if (enemy.liveRenderState?.active === true) {
+      detachEnemyFromLiveBatches(enemy);
+      const dissolveVisual = createEnemyVisual(ENEMY_TYPES[enemy.type] ?? null);
+      if (dissolveVisual) {
+        dissolveVisual.position.y = 0;
+        enemy.visualRoot.add(dissolveVisual);
+      }
+    }
 
     const replacedSourceMaterials = new Set();
     enemy.visualRoot.traverse((child) => {
@@ -2765,10 +3072,6 @@ export function createEnemySystem(scene, grid, options = {}) {
         }
 
         if (dissolveValue >= 1) {
-          scene.remove(enemy.mesh);
-          for (const dissolveMaterial of enemy.dissolveMaterials) {
-            dissolveMaterial.dispose();
-          }
           removeEnemyAtIndex(i);
         }
         continue;
@@ -2784,7 +3087,6 @@ export function createEnemySystem(scene, grid, options = {}) {
 
       if (!networkViewMode && hasEnemyReachedEndCenter(enemy)) {
         enemy.alive = false;
-        scene.remove(enemy.mesh);
         removeEnemyAtIndex(i);
         continue;
       }
@@ -2806,9 +3108,6 @@ export function createEnemySystem(scene, grid, options = {}) {
         }
         if ((nowMs - (enemy.networkLastSeenAtMs || 0)) < NETWORK_ENEMY_STALE_REMOVE_MS) {
           continue;
-        }
-        if (enemy.mesh?.parent) {
-          enemy.mesh.parent.remove(enemy.mesh);
         }
         removeEnemyAtIndex(i);
       }
@@ -3107,6 +3406,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     if (!enemy?.mesh) {
       return;
     }
+    detachEnemyFromLiveBatches(enemy);
     scene.remove(enemy.mesh);
     const disposedGeometries = new Set();
     const disposedMaterials = new Set();
@@ -3137,6 +3437,17 @@ export function createEnemySystem(scene, grid, options = {}) {
         material.dispose();
       }
     });
+    for (const dissolveMaterial of Array.isArray(enemy.dissolveMaterials) ? enemy.dissolveMaterials : []) {
+      if (
+        !dissolveMaterial
+        || disposedMaterials.has(dissolveMaterial)
+        || typeof dissolveMaterial.dispose !== "function"
+      ) {
+        continue;
+      }
+      disposedMaterials.add(dissolveMaterial);
+      dissolveMaterial.dispose();
+    }
     for (const material of Array.isArray(enemy.replacedVisualMaterials) ? enemy.replacedVisualMaterials : []) {
       if (
         !material
@@ -3149,6 +3460,8 @@ export function createEnemySystem(scene, grid, options = {}) {
       disposedMaterials.add(material);
       material.dispose();
     }
+    enemy.dissolveUniforms = [];
+    enemy.dissolveMaterials = [];
     enemy.replacedVisualMaterials = [];
   }
 
@@ -3196,8 +3509,27 @@ export function createEnemySystem(scene, grid, options = {}) {
     return networkViewMode;
   }
 
+  function disposeEnemyBatchMesh(mesh) {
+    if (!mesh) {
+      return;
+    }
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
+    }
+    mesh.geometry?.dispose?.();
+    if (Array.isArray(mesh.material)) {
+      for (const material of mesh.material) {
+        material?.dispose?.();
+      }
+      return;
+    }
+    mesh.material?.dispose?.();
+  }
+
   function dispose() {
     clearAll();
+    disposeEnemyBatchMesh(liveEnemyRenderBatches.body);
+    disposeEnemyBatchMesh(liveEnemyRenderBatches.head);
     deathExplosionGeometry.dispose();
     deathExplosionMaterial.dispose();
   }
@@ -3266,6 +3598,7 @@ export function createEnemySystem(scene, grid, options = {}) {
     getBlockedCells,
     getBlockedRevision,
     getPathfindingPerfStats,
+    getRenderBatchStats: buildEnemyRenderStats,
     getRoutePreviewPaths,
     clearAll,
     dispose,

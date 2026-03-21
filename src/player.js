@@ -1,6 +1,7 @@
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import * as THREE from "three";
 import { GAME_CONFIG } from "./config.js";
+import { ENEMY_RAYCAST_LAYER } from "./enemies.js";
 
 const PLAYER_CONFIG = GAME_CONFIG.player;
 const MAX_PITCH = PLAYER_CONFIG.look.maxPitch;
@@ -408,6 +409,7 @@ export function createPlayer({
   const sniperRayDirection = new THREE.Vector3();
   const sniperRayPoint = new THREE.Vector3();
   const sniperRaycaster = new THREE.Raycaster();
+  sniperRaycaster.layers.set(ENEMY_RAYCAST_LAYER);
   const sniperBeamStart = new THREE.Vector3();
   const sniperBeamVector = new THREE.Vector3();
   const yAxis = new THREE.Vector3(0, 1, 0);
@@ -1353,6 +1355,7 @@ export function createPlayer({
   function findSniperRaycastTarget(enemies, maxDistance, enemySystem = null) {
     sniperRaycaster.near = 0;
     sniperRaycaster.far = Math.max(0.01, maxDistance);
+    sniperRaycaster.layers.set(ENEMY_RAYCAST_LAYER);
     sniperRaycaster.set(sniperRayOrigin, sniperRayDirection);
 
     let bestEnemyMesh = null;

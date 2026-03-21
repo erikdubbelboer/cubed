@@ -1,9 +1,11 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { GAME_CONFIG } from "./config.js";
 import {
   createDecorationVisual,
-  createRampVisual,
-  createTerrainWallVisual,
+  getPreparedDecorationBatchParts,
+  getPreparedRampBatchParts,
+  getPreparedTerrainWallBatchParts,
   isKenneyAssetManagedResource,
 } from "./kenneyModels.js";
 
@@ -33,6 +35,7 @@ const RAMP_ROTATION_TO_DIRECTION = new Map([
 ]);
 const RAMP_ROLE_LOW = "low";
 const RAMP_ROLE_HIGH = "high";
+const STATIC_VISUAL_CHUNK_SIZE = 6;
 
 function shouldDisposeGridResource(resource) {
   return !isKenneyAssetManagedResource(resource);
@@ -49,6 +52,41 @@ function saturate(value) {
 function smoothstep01(value) {
   const t = saturate(value);
   return t * t * (3 - (2 * t));
+}
+
+function disposeMeshGroupResources(root, shouldDisposeResource) {
+  if (!root) {
+    return;
+  }
+  const disposedGeometries = new Set();
+  const disposedMaterials = new Set();
+  root.traverse((child) => {
+    if (
+      child?.geometry
+      && typeof child.geometry.dispose === "function"
+      && !disposedGeometries.has(child.geometry)
+      && shouldDisposeResource(child.geometry)
+    ) {
+      disposedGeometries.add(child.geometry);
+      child.geometry.dispose();
+    }
+    if (!child?.material) {
+      return;
+    }
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    for (const material of materials) {
+      if (
+        !material
+        || disposedMaterials.has(material)
+        || typeof material.dispose !== "function"
+        || !shouldDisposeResource(material)
+      ) {
+        continue;
+      }
+      disposedMaterials.add(material);
+      material.dispose();
+    }
+  });
 }
 
 function finiteOrFallback(value, fallback) {
@@ -614,6 +652,14 @@ export function createGrid(scene, options = {}) {
   const wallAnchorRaycastBestNormal = new THREE.Vector3();
   const tempDecorationBounds = new THREE.Box3();
   const tempDecorationRemovalBounds = new THREE.Box3();
+  const staticBatchInstanceMatrix = new THREE.Matrix4();
+  const staticBatchPartMatrix = new THREE.Matrix4();
+  const staticBatchQuaternion = new THREE.Quaternion();
+  const staticBatchScale = new THREE.Vector3(1, 1, 1);
+  const staticBatchPosition = new THREE.Vector3();
+  const staticVisualRoot = new THREE.Group();
+  staticVisualRoot.name = "GridStaticVisualRoot";
+  gridRoot.add(staticVisualRoot);
 
   const ramps = Array.isArray(levelLayout.ramps) ? levelLayout.ramps : [];
   const wallVoxels = Array.isArray(levelLayout.wallVoxels) ? levelLayout.wallVoxels : [];
@@ -623,12 +669,152 @@ export function createGrid(scene, options = {}) {
   );
   const decorativeObjects = Array.isArray(levelLayout.decorativeObjects) ? levelLayout.decorativeObjects : [];
   const decorativeEntries = [];
+  const decorativeEntriesByChunk = new Map();
+  const decorativeChunkGroups = new Map();
+  const staticVisualChunkKeys = new Set();
+  const staticBatchStats = {
+    mergedMeshCount: 0,
+    staticChunkCount: 0,
+    decorativeChunkCount: 0,
+  };
+
+  function getChunkKeyFromWorld(worldX, worldZ) {
+    const cellX = Math.max(0, Math.min(GRID_SIZE - 1, Math.floor((worldX + half) / CELL_SIZE)));
+    const cellZ = Math.max(0, Math.min(GRID_SIZE - 1, Math.floor((worldZ + half) / CELL_SIZE)));
+    const chunkX = Math.floor(cellX / STATIC_VISUAL_CHUNK_SIZE);
+    const chunkZ = Math.floor(cellZ / STATIC_VISUAL_CHUNK_SIZE);
+    return `${chunkX},${chunkZ}`;
+  }
+
+  function getOrCreateChunkBuckets(map, chunkKey) {
+    let buckets = map.get(chunkKey);
+    if (!buckets) {
+      buckets = new Map();
+      map.set(chunkKey, buckets);
+    }
+    staticVisualChunkKeys.add(chunkKey);
+    return buckets;
+  }
+
+  function addPreparedVisualPartsToBuckets(bucketMap, preparedVisual, instanceMatrix, bucketPrefix) {
+    if (!preparedVisual || !Array.isArray(preparedVisual.parts) || preparedVisual.parts.length === 0) {
+      return;
+    }
+    for (const part of preparedVisual.parts) {
+      if (!part?.geometry || !part?.material || !part?.matrix) {
+        continue;
+      }
+      const bucketKey = `${bucketPrefix}:${part.key}:${part.material.uuid}`;
+      let bucket = bucketMap.get(bucketKey);
+      if (!bucket) {
+        bucket = {
+          material: part.material,
+          castShadow: part.castShadow === true,
+          receiveShadow: part.receiveShadow === true,
+          geometries: [],
+        };
+        bucketMap.set(bucketKey, bucket);
+      }
+      const geometry = part.geometry.clone();
+      staticBatchPartMatrix.multiplyMatrices(instanceMatrix, part.matrix);
+      geometry.applyMatrix4(staticBatchPartMatrix);
+      bucket.geometries.push(geometry);
+    }
+  }
+
+  function createMergedMeshesFromBuckets(bucketMap, parentGroup) {
+    let createdMeshes = 0;
+    for (const bucket of bucketMap.values()) {
+      if (!bucket || !Array.isArray(bucket.geometries) || bucket.geometries.length === 0) {
+        continue;
+      }
+      const mergedGeometry = mergeGeometries(bucket.geometries, false);
+      for (const geometry of bucket.geometries) {
+        geometry.dispose();
+      }
+      bucket.geometries.length = 0;
+      if (!mergedGeometry) {
+        continue;
+      }
+      const mesh = new THREE.Mesh(mergedGeometry, bucket.material);
+      mesh.castShadow = bucket.castShadow;
+      mesh.receiveShadow = bucket.receiveShadow;
+      parentGroup.add(mesh);
+      createdMeshes += 1;
+    }
+    return createdMeshes;
+  }
+
+  function rebuildDecorativeChunk(chunkKey) {
+    const existingGroup = decorativeChunkGroups.get(chunkKey);
+    if (existingGroup) {
+      disposeMeshGroupResources(existingGroup, shouldDisposeGridResource);
+      if (existingGroup.parent) {
+        existingGroup.parent.remove(existingGroup);
+      }
+      decorativeChunkGroups.delete(chunkKey);
+    }
+    const entries = decorativeEntriesByChunk.get(chunkKey) ?? [];
+    if (editorMode || entries.length === 0) {
+      return;
+    }
+    const bucketMap = new Map();
+    for (const entry of entries) {
+      if (!entry?.bounds || entry.removed === true) {
+        continue;
+      }
+      const preparedVisual = getPreparedDecorationBatchParts(entry.type);
+      if (!preparedVisual) {
+        continue;
+      }
+      staticBatchQuaternion.setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        THREE.MathUtils.degToRad(Number(entry.rotation) || 0)
+      );
+      staticBatchPosition.set(entry.position.x, entry.position.y, entry.position.z);
+      staticBatchInstanceMatrix.compose(staticBatchPosition, staticBatchQuaternion, staticBatchScale);
+      addPreparedVisualPartsToBuckets(bucketMap, preparedVisual, staticBatchInstanceMatrix, `decor:${entry.type}`);
+    }
+    if (bucketMap.size === 0) {
+      staticBatchStats.mergedMeshCount = staticVisualRoot.children.reduce(
+        (count, child) => count + (child?.isMesh ? 1 : 0),
+        0
+      );
+      staticBatchStats.decorativeChunkCount = decorativeChunkGroups.size;
+      staticBatchStats.staticChunkCount = staticVisualChunkKeys.size;
+      return;
+    }
+    const chunkGroup = new THREE.Group();
+    chunkGroup.name = `DecorationChunk:${chunkKey}`;
+    createMergedMeshesFromBuckets(bucketMap, chunkGroup);
+    staticVisualRoot.add(chunkGroup);
+    decorativeChunkGroups.set(chunkKey, chunkGroup);
+  }
+
+  function refreshStaticBatchStats() {
+    let mergedMeshCount = 0;
+    const activeChunkKeys = new Set([
+      ...terrainChunkBuckets.keys(),
+      ...rampChunkBuckets.keys(),
+      ...decorativeChunkGroups.keys(),
+    ]);
+    staticVisualRoot.traverse((child) => {
+      if (child?.isMesh) {
+        mergedMeshCount += 1;
+      }
+    });
+    staticBatchStats.mergedMeshCount = mergedMeshCount;
+    staticBatchStats.decorativeChunkCount = decorativeChunkGroups.size;
+    staticBatchStats.staticChunkCount = activeChunkKeys.size;
+  }
 
   const altitudeCubeGeo = new THREE.BoxGeometry(
     ALTITUDE_CUBE_SIZE,
     ALTITUDE_CUBE_SIZE,
     ALTITUDE_CUBE_SIZE
   );
+  const terrainChunkBuckets = new Map();
+  const rampChunkBuckets = new Map();
 
   for (const voxel of wallVoxels) {
     const cellX = Number(voxel?.x);
@@ -687,15 +873,21 @@ export function createGrid(scene, options = {}) {
     cube.receiveShadow = true;
     cube.userData.editorObjectType = "wall";
     cube.userData.editorWall = { x: cellX, y: cellY, z: cellZ };
-    const terrainWallVisual = createTerrainWallVisual({
-      addBottomCap: !wallVoxelKeySet.has(`${cellX},${cellY - 1},${cellZ}`),
-    });
-    if (terrainWallVisual) {
-      terrainWallVisual.position.y = -(ALTITUDE_CUBE_SIZE * 0.5);
+    const addBottomCap = !wallVoxelKeySet.has(`${cellX},${cellY - 1},${cellZ}`);
+    const terrainPreparedVisual = getPreparedTerrainWallBatchParts({ addBottomCap });
+    if (terrainPreparedVisual) {
       cube.material.visible = false;
       cube.castShadow = false;
       cube.receiveShadow = false;
-      cube.add(terrainWallVisual);
+      staticBatchPosition.set(worldX, baseY, worldZ);
+      staticBatchQuaternion.identity();
+      staticBatchInstanceMatrix.compose(staticBatchPosition, staticBatchQuaternion, staticBatchScale);
+      addPreparedVisualPartsToBuckets(
+        getOrCreateChunkBuckets(terrainChunkBuckets, getChunkKeyFromWorld(worldX, worldZ)),
+        terrainPreparedVisual,
+        staticBatchInstanceMatrix,
+        `terrain:${addBottomCap ? "cap" : "plain"}`
+      );
     }
     editorRaycastTargets.push(cube);
     gridRoot.add(cube);
@@ -708,28 +900,61 @@ export function createGrid(scene, options = {}) {
     if (!Number.isFinite(worldX) || !Number.isFinite(worldY) || !Number.isFinite(worldZ)) {
       continue;
     }
-    const decorationVisual = createDecorationVisual(decoration.type);
-    if (!decorationVisual) {
+    const normalizedRotation = Number(decoration.rotation) || 0;
+    if (editorMode) {
+      const decorationVisual = createDecorationVisual(decoration.type);
+      if (!decorationVisual) {
+        continue;
+      }
+      decorationVisual.position.set(worldX, worldY, worldZ);
+      decorationVisual.rotation.y = THREE.MathUtils.degToRad(normalizedRotation);
+      decorationVisual.userData.editorObjectType = decoration.type;
+      decorationVisual.userData.editorDecoration = {
+        type: decoration.type,
+        position: clonePosition(decoration.position),
+        rotation: normalizedRotation,
+      };
+      tempDecorationBounds.setFromObject(decorationVisual);
+      decorativeEntries.push({
+        type: decoration.type,
+        position: clonePosition(decoration.position),
+        rotation: normalizedRotation,
+        mesh: decorationVisual,
+        bounds: tempDecorationBounds.clone(),
+      });
+      editorRaycastTargets.push(decorationVisual);
+      gridRoot.add(decorationVisual);
       continue;
     }
-    decorationVisual.position.set(worldX, worldY, worldZ);
-    decorationVisual.rotation.y = THREE.MathUtils.degToRad(Number(decoration.rotation) || 0);
-    decorationVisual.userData.editorObjectType = decoration.type;
-    decorationVisual.userData.editorDecoration = {
+    const preparedDecoration = getPreparedDecorationBatchParts(decoration.type);
+    if (!preparedDecoration) {
+      continue;
+    }
+    staticBatchQuaternion.setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0),
+      THREE.MathUtils.degToRad(normalizedRotation)
+    );
+    staticBatchPosition.set(worldX, worldY, worldZ);
+    staticBatchInstanceMatrix.compose(staticBatchPosition, staticBatchQuaternion, staticBatchScale);
+    tempDecorationBounds.copy(preparedDecoration.bounds).applyMatrix4(staticBatchInstanceMatrix);
+    const chunkKey = getChunkKeyFromWorld(worldX, worldZ);
+    const entry = {
       type: decoration.type,
       position: clonePosition(decoration.position),
-      rotation: Number(decoration.rotation) || 0,
-    };
-    tempDecorationBounds.setFromObject(decorationVisual);
-    decorativeEntries.push({
-      type: decoration.type,
-      position: clonePosition(decoration.position),
-      rotation: Number(decoration.rotation) || 0,
-      mesh: decorationVisual,
+      rotation: normalizedRotation,
+      mesh: null,
       bounds: tempDecorationBounds.clone(),
-    });
-    editorRaycastTargets.push(decorationVisual);
-    gridRoot.add(decorationVisual);
+      chunkKey,
+      removed: false,
+    };
+    decorativeEntries.push(entry);
+    let chunkEntries = decorativeEntriesByChunk.get(chunkKey);
+    if (!chunkEntries) {
+      chunkEntries = [];
+      decorativeEntriesByChunk.set(chunkKey, chunkEntries);
+    }
+    chunkEntries.push(entry);
+    staticVisualChunkKeys.add(chunkKey);
   }
 
   const rampHighEdgeCounts = new Map();
@@ -785,12 +1010,23 @@ export function createGrid(scene, options = {}) {
       z: ramp.lowCell.z,
       rotation: ramp.rotation,
     };
-    const rampVisual = createRampVisual(ramp.rotation);
-    if (rampVisual) {
+    const rampPreparedVisual = getPreparedRampBatchParts();
+    if (rampPreparedVisual) {
       rampMesh.material.visible = false;
       rampMesh.castShadow = false;
       rampMesh.receiveShadow = false;
-      rampMesh.add(rampVisual);
+      staticBatchPosition.set(centerX, lowY, centerZ);
+      staticBatchQuaternion.setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        THREE.MathUtils.degToRad(ramp.rotation)
+      );
+      staticBatchInstanceMatrix.compose(staticBatchPosition, staticBatchQuaternion, staticBatchScale);
+      addPreparedVisualPartsToBuckets(
+        getOrCreateChunkBuckets(rampChunkBuckets, getChunkKeyFromWorld(centerX, centerZ)),
+        rampPreparedVisual,
+        staticBatchInstanceMatrix,
+        "ramp:base"
+      );
     }
     editorRaycastTargets.push(rampMesh);
     gridRoot.add(rampMesh);
@@ -871,6 +1107,17 @@ export function createGrid(scene, options = {}) {
       getSurfaceYAtWorld: getRampSurfaceYAtWorld,
     });
   }
+
+  for (const bucketMap of terrainChunkBuckets.values()) {
+    staticBatchStats.mergedMeshCount += createMergedMeshesFromBuckets(bucketMap, staticVisualRoot);
+  }
+  for (const bucketMap of rampChunkBuckets.values()) {
+    staticBatchStats.mergedMeshCount += createMergedMeshesFromBuckets(bucketMap, staticVisualRoot);
+  }
+  for (const chunkKey of decorativeEntriesByChunk.keys()) {
+    rebuildDecorativeChunk(chunkKey);
+  }
+  refreshStaticBatchStats();
 
   function getRampSurfaceYAtWorld(worldX, worldZ) {
     for (const rampObstacle of rampObstacles) {
@@ -1815,18 +2062,33 @@ export function createGrid(scene, options = {}) {
     tempDecorationRemovalBounds.min.set(minX, minY, minZ);
     tempDecorationRemovalBounds.max.set(maxX, maxY, maxZ);
     let removedCount = 0;
+    const affectedChunkKeys = new Set();
     for (let i = decorativeEntries.length - 1; i >= 0; i -= 1) {
       const entry = decorativeEntries[i];
-      if (!entry?.mesh || !entry?.bounds || !entry.mesh.parent) {
+      if (!entry?.bounds) {
         continue;
       }
       if (!entry.bounds.intersectsBox(tempDecorationRemovalBounds)) {
         continue;
       }
-      if (entry.mesh.parent) {
+      if (entry.mesh?.parent) {
         entry.mesh.parent.remove(entry.mesh);
       }
       decorativeEntries.splice(i, 1);
+      entry.removed = true;
+      if (typeof entry.chunkKey === "string" && entry.chunkKey.length > 0) {
+        const chunkEntries = decorativeEntriesByChunk.get(entry.chunkKey);
+        if (Array.isArray(chunkEntries)) {
+          const chunkIndex = chunkEntries.indexOf(entry);
+          if (chunkIndex >= 0) {
+            chunkEntries.splice(chunkIndex, 1);
+          }
+          if (chunkEntries.length === 0) {
+            decorativeEntriesByChunk.delete(entry.chunkKey);
+          }
+        }
+        affectedChunkKeys.add(entry.chunkKey);
+      }
       const levelObjectIndex = normalizedLevelObjects.findIndex((levelEntry) => (
         decorativeObjectMatchesLevelEntry(levelEntry, entry)
       ));
@@ -1835,11 +2097,26 @@ export function createGrid(scene, options = {}) {
       }
       removedCount += 1;
     }
+    for (const chunkKey of affectedChunkKeys) {
+      rebuildDecorativeChunk(chunkKey);
+    }
+    if (affectedChunkKeys.size > 0) {
+      refreshStaticBatchStats();
+    }
     return removedCount;
   }
 
   function getEditorRaycastTargets() {
     return editorRaycastTargets.filter((target) => !!target?.parent);
+  }
+
+  function getRenderBatchStats() {
+    refreshStaticBatchStats();
+    return {
+      mergedMeshCount: staticBatchStats.mergedMeshCount,
+      staticChunkCount: staticBatchStats.staticChunkCount,
+      decorativeChunkCount: staticBatchStats.decorativeChunkCount,
+    };
   }
 
   return {
@@ -1879,6 +2156,7 @@ export function createGrid(scene, options = {}) {
     updateBoundaryWallVisual,
     getLevelObjects,
     getEditorRaycastTargets,
+    getRenderBatchStats,
     removeDecorationsOverlappingBounds,
     dispose,
     isSameCell,

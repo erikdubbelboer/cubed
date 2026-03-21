@@ -127,6 +127,7 @@ let sharedAtlasTexture = null;
 let preloadPromise = null;
 let preloadFailed = false;
 const sharedWallBottomCapMaterials = new Map();
+const preparedBatchVisualCache = new Map();
 
 function logKenneyDebug(message, details = null, { onceKey = null } = {}) {
   if (!KENNEY_DEBUG_ENABLED) {
@@ -191,7 +192,6 @@ function setShadowState(root) {
     }
     child.castShadow = true;
     child.receiveShadow = true;
-    child.frustumCulled = false;
   });
 }
 
@@ -432,6 +432,73 @@ function computeBounds(root) {
   };
 }
 
+function getMaterialArray(material) {
+  return Array.isArray(material) ? material : [material];
+}
+
+function capturePreparedVisualData(root) {
+  if (!root) {
+    return null;
+  }
+  root.updateMatrixWorld(true, true);
+  const parts = [];
+  const bounds = new THREE.Box3().makeEmpty();
+  root.traverse((child) => {
+    if (!child?.isMesh || !child.geometry || !child.material) {
+      return;
+    }
+    const materials = getMaterialArray(child.material);
+    const primaryMaterial = materials[0] ?? null;
+    if (!primaryMaterial) {
+      return;
+    }
+    if (child.geometry.boundingBox == null && typeof child.geometry.computeBoundingBox === "function") {
+      child.geometry.computeBoundingBox();
+    }
+    if (child.geometry.boundingSphere == null && typeof child.geometry.computeBoundingSphere === "function") {
+      child.geometry.computeBoundingSphere();
+    }
+    const partMatrix = child.matrixWorld.clone();
+    const geometryBounds = child.geometry.boundingBox
+      ? child.geometry.boundingBox.clone().applyMatrix4(partMatrix)
+      : null;
+    if (geometryBounds) {
+      bounds.union(geometryBounds);
+    }
+    parts.push({
+      key: `${child.name || "mesh"}:${parts.length}`,
+      name: child.name || "",
+      geometry: child.geometry,
+      material: primaryMaterial,
+      matrix: partMatrix,
+      castShadow: child.castShadow === true,
+      receiveShadow: child.receiveShadow === true,
+    });
+  });
+  return {
+    parts,
+    bounds,
+    materials: collectUniqueMaterials(root),
+  };
+}
+
+function getPreparedVisualData(cacheKey, buildVisual) {
+  if (preparedBatchVisualCache.has(cacheKey)) {
+    return preparedBatchVisualCache.get(cacheKey);
+  }
+  const visualRoot = buildVisual();
+  if (!visualRoot) {
+    return null;
+  }
+  const prepared = capturePreparedVisualData(visualRoot);
+  if (!prepared) {
+    return null;
+  }
+  prepared.variantKey = cacheKey;
+  preparedBatchVisualCache.set(cacheKey, prepared);
+  return prepared;
+}
+
 function createCloneRoot(descriptor, {
   fit = "height",
   targetWidth = null,
@@ -601,6 +668,37 @@ export function createEnemyVisual(enemyType = null) {
   return root;
 }
 
+export function getPreparedEnemyBatchParts(enemyType = null) {
+  const targetHeight = Math.max(
+    0.2,
+    (Number.isFinite(Number(enemyType?.size)) ? Number(enemyType.size) : 1) * ENEMY_VISUAL_HEIGHT_MULTIPLIER
+  );
+  return getPreparedVisualData(`enemy:${targetHeight.toFixed(4)}`, () => {
+    const descriptor = getDescriptor("enemy");
+    if (!descriptor) {
+      return null;
+    }
+    const root = createCloneRoot(descriptor, {
+      fit: "height",
+      targetHeight,
+      anchorY: "bottom",
+      sharedMaterialVariantKey: "enemy:live",
+      sharedMaterialStyle: {
+        color: 0xffffff,
+        emissive: 0x000000,
+        emissiveIntensity: 0,
+        roughness: 0.82,
+        metalness: 0.02,
+        useMap: true,
+      },
+    });
+    if (root) {
+      root.rotation.y = ENEMY_VISUAL_YAW_CORRECTION;
+    }
+    return root;
+  });
+}
+
 export function createRemotePlayerVisual() {
   const descriptor = getDescriptor("remotePlayer");
   if (!descriptor) {
@@ -654,6 +752,30 @@ export function createMoneyDropVisual(value = 1) {
   return root;
 }
 
+export function getPreparedMoneyDropBatchParts(value = 1) {
+  const normalizedValue = Math.max(1, Math.floor(Number(value) || 1));
+  return getPreparedVisualData(`moneyDrop:${normalizedValue}`, () => {
+    const descriptor = getDescriptor("moneyDrop");
+    if (!descriptor) {
+      return null;
+    }
+    return createCloneRoot(descriptor, {
+      fit: "height",
+      targetHeight: MONEY_DROP_TARGET_SIZE,
+      anchorY: "center",
+      sharedMaterialVariantKey: `moneyDrop:${normalizedValue}`,
+      sharedMaterialStyle: {
+        color: 0xffffff,
+        emissive: 0x000000,
+        emissiveIntensity: 0,
+        roughness: Math.min(DEFAULT_PICKUP_ROUGHNESS, 0.3),
+        metalness: Math.max(DEFAULT_PICKUP_METALNESS, 0.18),
+        useMap: true,
+      },
+    });
+  });
+}
+
 export function createRampVisual(rotation = 0) {
   const descriptor = getDescriptor("ramp");
   if (!descriptor) {
@@ -681,6 +803,10 @@ export function createRampVisual(rotation = 0) {
   }
   logKenneyDebug("Created ramp visual", { rotation, ok: !!root }, { onceKey: `create-ramp:${rotation}` });
   return root;
+}
+
+export function getPreparedRampBatchParts() {
+  return getPreparedVisualData("ramp:base", () => createRampVisual(0));
 }
 
 export function createTerrainWallVisual({ addBottomCap = false } = {}) {
@@ -732,6 +858,12 @@ export function createTerrainWallVisual({ addBottomCap = false } = {}) {
   return root;
 }
 
+export function getPreparedTerrainWallBatchParts({ addBottomCap = false } = {}) {
+  return getPreparedVisualData(`terrainWall:${addBottomCap ? "bottomCap" : "plain"}`, () => (
+    createTerrainWallVisual({ addBottomCap })
+  ));
+}
+
 export function createDecorationVisual(type) {
   const normalizedType = typeof type === "string" ? type.trim().toLowerCase() : "";
   if (!Object.prototype.hasOwnProperty.call(DECORATIVE_PROP_TARGET_HEIGHTS, normalizedType)) {
@@ -766,6 +898,14 @@ export function createDecorationVisual(type) {
     ok: !!root,
   }, { onceKey: `create-decoration:${normalizedType}` });
   return root;
+}
+
+export function getPreparedDecorationBatchParts(type) {
+  const normalizedType = typeof type === "string" ? type.trim().toLowerCase() : "";
+  if (!Object.prototype.hasOwnProperty.call(DECORATIVE_PROP_TARGET_HEIGHTS, normalizedType)) {
+    return null;
+  }
+  return getPreparedVisualData(`decor:${normalizedType}`, () => createDecorationVisual(normalizedType));
 }
 
 export function createBlockVisual({ opacity = 1 } = {}) {
