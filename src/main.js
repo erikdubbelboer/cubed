@@ -8338,7 +8338,7 @@ function runGameFrame({ renderFrame = true } = {}) {
           }
         }
       } else if (waveState === "BUILD") {
-        buildPhaseRemainingSeconds = Math.max(0, buildPhaseRemainingSeconds - rawDeltaSeconds);
+        buildPhaseRemainingSeconds = Math.max(0, buildPhaseRemainingSeconds - simulationDeltaSeconds);
         if (buildPhaseRemainingSeconds <= 0) {
           startQueuedWaveNow();
         }
