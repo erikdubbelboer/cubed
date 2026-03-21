@@ -8852,7 +8852,9 @@ function initGame() {
     if (waveState === "EDITOR" && levelEditor && typeof levelEditor.getExportPayload === "function") {
       return levelEditor.getExportPayload();
     }
-    return typeof grid?.getLevelObjects === "function" ? grid.getLevelObjects() : [];
+    return {
+      levelObjects: typeof grid?.getLevelObjects === "function" ? grid.getLevelObjects() : [],
+    };
   };
 
   applyViewportMetrics(getViewportMetrics());

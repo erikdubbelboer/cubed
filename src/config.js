@@ -1,6 +1,18 @@
 import LEVEL_DATA from "./level.json";
 import TECH_TREE_DATA from "./techtree.json";
 
+function resolveImportedLevelObjects(levelData) {
+  if (Array.isArray(levelData)) {
+    return levelData;
+  }
+  if (Array.isArray(levelData?.levelObjects)) {
+    return levelData.levelObjects;
+  }
+  return [];
+}
+
+const IMPORTED_LEVEL_OBJECTS = resolveImportedLevelObjects(LEVEL_DATA);
+
 export const GAME_CONFIG = {
   scene: {
     // Camera field-of-view in degrees. Typical range: 60-95.
@@ -493,7 +505,7 @@ export const GAME_CONFIG = {
     // Decorative props use world-space position coordinates and do not affect gameplay collisions/pathing.
     // rotation for ramps is low->high direction:
     // 0 => +Z, 90 => +X, 180 => -Z, 270 => -X.
-    levelObjects: LEVEL_DATA.levelObjects,
+    levelObjects: IMPORTED_LEVEL_OBJECTS,
   },
 
   towers: {

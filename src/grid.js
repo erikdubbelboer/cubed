@@ -98,6 +98,10 @@ function cellKey(cellX, cellZ) {
   return `${cellX},${cellZ}`;
 }
 
+function rampSurfaceKey(cellX, cellZ, level) {
+  return `${cellX},${cellZ},${level}`;
+}
+
 function cloneCell(cell) {
   if (!cell) {
     return null;
@@ -283,6 +287,8 @@ function parseLevelLayout(levelObjects, options = {}) {
   const ramps = [];
   const decorativeObjects = [];
   const rampCellsByKey = new Map();
+  const rampOccupiedSurfaceMap = new Map();
+  const rampOuterSurfaceMap = new Map();
 
   for (const entry of parsedEntries) {
     if (entry.type !== "wall") {
@@ -367,12 +373,25 @@ function parseLevelLayout(levelObjects, options = {}) {
     if (rampCellsByKey.has(lowCellKey) || rampCellsByKey.has(highCellKey)) {
       throw new Error(`grid.levelObjects[${entry.index}] ramp overlaps another ramp.`);
     }
-    if (wallHeights[lowCell.z][lowCell.x] > 0 || wallHeights[highCell.z][highCell.x] > 0) {
-      throw new Error(`grid.levelObjects[${entry.index}] ramp overlaps a wall block.`);
-    }
 
     const lowLevel = entry.position.y;
     const highLevel = lowLevel + 1;
+    const lowSurfaceKey = rampSurfaceKey(lowCell.x, lowCell.z, lowLevel);
+    const highSurfaceKey = rampSurfaceKey(highCell.x, highCell.z, highLevel);
+    const lowOuterSurfaceKey = rampSurfaceKey(lowOuterCell.x, lowOuterCell.z, lowLevel);
+    const highOuterSurfaceKey = rampSurfaceKey(highOuterCell.x, highOuterCell.z, highLevel);
+    if (wallHeights[lowCell.z][lowCell.x] > lowLevel || wallHeights[highCell.z][highCell.x] > lowLevel) {
+      throw new Error(`grid.levelObjects[${entry.index}] ramp intersects wall volume.`);
+    }
+    if (rampOuterSurfaceMap.has(lowSurfaceKey) || rampOuterSurfaceMap.has(highSurfaceKey)) {
+      throw new Error(`grid.levelObjects[${entry.index}] ramp blocks another ramp end.`);
+    }
+    if (
+      (isMainGridCell(lowOuterCell.x, lowOuterCell.z) && rampOccupiedSurfaceMap.has(lowOuterSurfaceKey))
+      || (isMainGridCell(highOuterCell.x, highOuterCell.z) && rampOccupiedSurfaceMap.has(highOuterSurfaceKey))
+    ) {
+      throw new Error(`grid.levelObjects[${entry.index}] ramp end is blocked by another ramp.`);
+    }
     const rampId = ramps.length;
 
     const lowCellData = createRampCellData({
@@ -402,6 +421,14 @@ function parseLevelLayout(levelObjects, options = {}) {
 
     rampCellsByKey.set(lowCellKey, lowCellData);
     rampCellsByKey.set(highCellKey, highCellData);
+    rampOccupiedSurfaceMap.set(lowSurfaceKey, rampId);
+    rampOccupiedSurfaceMap.set(highSurfaceKey, rampId);
+    if (isMainGridCell(lowOuterCell.x, lowOuterCell.z)) {
+      rampOuterSurfaceMap.set(lowOuterSurfaceKey, rampId);
+    }
+    if (isMainGridCell(highOuterCell.x, highOuterCell.z)) {
+      rampOuterSurfaceMap.set(highOuterSurfaceKey, rampId);
+    }
     ramps.push({
       id: rampId,
       rotation: entry.rotation,
@@ -830,6 +857,8 @@ export function createGrid(scene, options = {}) {
     const worldX = -half + cellX * CELL_SIZE + CELL_SIZE / 2;
     const worldZ = -half + cellZ * CELL_SIZE + CELL_SIZE / 2;
     const baseY = FLOOR_Y + (cellY * ALTITUDE_CUBE_SIZE);
+    const rampCellData = getRampCellData(cellX, cellZ);
+    const isUnderRampCell = !!rampCellData;
 
     altitudeObstacles.push({
       position: new THREE.Vector3(worldX, baseY, worldZ),
@@ -843,6 +872,9 @@ export function createGrid(scene, options = {}) {
       cellZ,
       // Terrain tops should remain continuously walkable across adjacent cells.
       topInsetFromRadius: 0,
+      // Support walls that live under ramp cells should stay solid, but the ramp
+      // remains the only walkable top surface for traversal onto that cell.
+      supportsPlayer: !isUnderRampCell,
     });
 
     const lightness = GRID_CONFIG.altitudeBaseLightness

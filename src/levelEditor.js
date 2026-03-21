@@ -274,13 +274,90 @@ export function createLevelEditor({
   }
 
   function getRampOccupiedCellsFor(ramp) {
-    const direction = getRampDirectionFromRotation(ramp.rotation);
-    const lowCell = { x: ramp.position.x, z: ramp.position.z };
+    return getRampLayout(ramp.position.x, ramp.position.y, ramp.position.z, ramp.rotation).occupiedCells;
+  }
+
+  function getRampSurfaceKey(cellX, cellZ, level) {
+    return `${cellX},${cellZ},${level}`;
+  }
+
+  function getRampLayout(x, y, z, rotation) {
+    const direction = getRampDirectionFromRotation(rotation);
+    const lowCell = { x, z };
     const highCell = {
       x: lowCell.x + direction.x,
       z: lowCell.z + direction.z,
     };
-    return [lowCell, highCell];
+    const lowLevel = y;
+    const highLevel = y + 1;
+    return {
+      lowCell,
+      highCell,
+      lowOuterCell: {
+        x: lowCell.x - direction.x,
+        z: lowCell.z - direction.z,
+      },
+      highOuterCell: {
+        x: highCell.x + direction.x,
+        z: highCell.z + direction.z,
+      },
+      lowLevel,
+      highLevel,
+      occupiedCells: [lowCell, highCell],
+      occupiedSurfaceKeys: [
+        getRampSurfaceKey(lowCell.x, lowCell.z, lowLevel),
+        getRampSurfaceKey(highCell.x, highCell.z, highLevel),
+      ],
+      outerSurfaceKeys: [
+        getRampSurfaceKey(lowCell.x - direction.x, lowCell.z - direction.z, lowLevel),
+        getRampSurfaceKey(highCell.x + direction.x, highCell.z + direction.z, highLevel),
+      ],
+    };
+  }
+
+  function getWallStackHeightAt(cellX, cellZ) {
+    let maxHeight = 0;
+    for (const wall of wallMap.values()) {
+      if (wall.position.x !== cellX || wall.position.z !== cellZ) {
+        continue;
+      }
+      maxHeight = Math.max(maxHeight, wall.position.y + 1);
+    }
+    return maxHeight;
+  }
+
+  function findRampOccupyingCell(cellX, cellZ, ignoreRampKey = null) {
+    for (const [rampKey, ramp] of rampMap.entries()) {
+      if (ignoreRampKey && rampKey === ignoreRampKey) {
+        continue;
+      }
+      const cells = getRampOccupiedCellsFor(ramp);
+      if (cells.some((cell) => cell.x === cellX && cell.z === cellZ)) {
+        return ramp;
+      }
+    }
+    return null;
+  }
+
+  function doesRampConflictWithExistingRampEnds(layout, ignoreRampKey = null) {
+    for (const [rampKey, ramp] of rampMap.entries()) {
+      if (ignoreRampKey && rampKey === ignoreRampKey) {
+        continue;
+      }
+      const existingLayout = getRampLayout(
+        ramp.position.x,
+        ramp.position.y,
+        ramp.position.z,
+        ramp.rotation
+      );
+      if (layout.occupiedSurfaceKeys.some((key) => existingLayout.outerSurfaceKeys.includes(key))) {
+        return true;
+      }
+      if (layout.outerSurfaceKeys.some((key) => existingLayout.occupiedSurfaceKeys.includes(key))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function rebuildFromLevelObjects(entries) {
@@ -373,17 +450,19 @@ export function createLevelEditor({
     if (wallMap.has(key3(x, y, z))) {
       return false;
     }
-    const occupiedRampCells = getRampCellOccupancyMap();
-    return !occupiedRampCells.has(key2(x, z));
+    const occupyingRamp = findRampOccupyingCell(x, z);
+    if (!occupyingRamp) {
+      return true;
+    }
+    return y < occupyingRamp.position.y;
   }
 
   function canPlaceRampAt(x, y, z, rotation, ignoreRampKey = null) {
     if (!isInsideBounds(x, z) || y < 0) {
       return false;
     }
-    const lowCell = { x, z };
-    const direction = getRampDirectionFromRotation(rotation);
-    const highCell = { x: x + direction.x, z: z + direction.z };
+    const layout = getRampLayout(x, y, z, rotation);
+    const { lowCell, highCell } = layout;
     if (!isInsideBounds(highCell.x, highCell.z)) {
       return false;
     }
@@ -393,13 +472,13 @@ export function createLevelEditor({
       return false;
     }
 
-    for (const wall of wallMap.values()) {
-      if ((wall.position.x === lowCell.x && wall.position.z === lowCell.z)
-        || (wall.position.x === highCell.x && wall.position.z === highCell.z)) {
-        return false;
-      }
+    const lowWallHeight = getWallStackHeightAt(lowCell.x, lowCell.z);
+    const highWallHeight = getWallStackHeightAt(highCell.x, highCell.z);
+    if (lowWallHeight > y || highWallHeight > y) {
+      return false;
     }
-    return true;
+
+    return !doesRampConflictWithExistingRampEnds(layout, ignoreRampKey);
   }
 
   function toCellAndLevelAtPoint(worldPoint) {

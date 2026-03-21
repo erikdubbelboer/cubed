@@ -128,7 +128,7 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Enemy hit geometry assumptions must stay aligned across `player.js`, `towers.js`, and `enemies.js`.
 
 ## Grid, Pathfinding, and Blocking Contracts
-- Level source is sparse object data in [`src/level.json`](/Users/erik/Desktop/webgame/src/level.json), imported into `GAME_CONFIG.grid.levelObjects`.
+- Level source is sparse object data in [`src/level.json`](/Users/erik/Desktop/webgame/src/level.json), imported into `GAME_CONFIG.grid.levelObjects`; the file may be either `{ "levelObjects": [...] }` or a raw `[...]` array for paste-from-export convenience.
 - Object schema: `{ type, position: { x, y, z }, rotation }`.
 - Supported marker/object types: `wall`, `spawn`, `end`, `playerSpawn`, `ramp`, `chest`, `barrel`, `stones` (`path` allowed as legacy visual marker).
 - Ramp rotation mapping (low -> high): `0:+Z`, `90:+X`, `180:-Z`, `270:-X`; ramp anchor is low-end cell.
@@ -141,6 +141,7 @@ Capture project decisions that are easy to regress but not always obvious from l
   - Cardinal-only neighbors.
   - Normal cells require equal height.
   - Ramp traversal allowed only through valid ramp ends (no side entry/exit).
+  - A ramp's front/back outer entry cells must remain non-ramp surfaces at the matching level; a ramp cell cannot double as another ramp's entry/exit cell.
 - Blocking contract:
   - `canBlockCell`/`canBlockCells` must preserve at least one route from every spawn to `end`.
   - `setBlockedCells` commits blockers and reroutes active enemies immediately.
@@ -171,13 +172,15 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Editor mode toggles with `N` (`waveState === "EDITOR"`) and rebuilds grid in editor mode.
 - Editor camera movement is free-fly while in editor mode: gravity/collision walking are disabled there, and forward movement follows the current look direction instead of ground-plane walking.
 - Editor mutates level object model (`src/levelEditor.js`) and rebuilds preview/pathing after edits.
+- Editor ramps may share their occupied X/Z cells with lower wall voxels when each wall stack top is `<= ramp.position.y`; overlap becomes invalid only when a wall voxel extends into the ramp volume, and removing those lower walls later is still allowed.
+- Wall voxels under ramp-occupied cells remain collision-only support geometry for the ramp; they must not act as independent walkable top surfaces, so ramp traversal still only enters/exits through the ramp's forward/back ends.
 - `end` and `playerSpawn` are unique markers; `spawn` is multi-place.
 - Decorative editor props place freely on world surfaces via editor raycasts rather than voxel snapping, but remain serialized into `levelObjects` alongside the snapped gameplay objects.
 - Decorative editor props support arbitrary yaw rotation via the editor scroll-wheel tool rotation path rather than cardinal-only ramp/player-start rotation.
 - Marker `y` values are authoritative and must match traversable surface; invalid markers fail path system validation.
 - Player spawn facing uses `playerSpawn.rotation` cardinal mapping (same mapping as ramp cardinal conventions).
 - Exiting editor validates playability before returning to gameplay.
-- Export API: `window.exportLevel()` returns current level objects (editor model while in editor, runtime grid otherwise).
+- Export API: `window.exportLevel()` returns a paste-ready `{ levelObjects }` payload for the current level (editor model while in editor, runtime grid otherwise).
 
 ## Debug + Validation
 - Runtime debug helpers are exposed via `window.gameDebug` (economy/tower/enemy/path/touch-control helpers).

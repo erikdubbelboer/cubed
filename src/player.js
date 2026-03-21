@@ -2026,6 +2026,7 @@ export function createPlayer({
           || !Number.isFinite(obstacleHalfSizeX)
           || !Number.isFinite(obstacleHalfSizeZ)
           || typeof obstacleHeight !== "number"
+          || obstacle?.supportsPlayer === false
         ) {
           continue;
         }
@@ -2352,6 +2353,7 @@ export function createPlayer({
 
             const stepUpDelta = obstacleTopY - playerFeetY;
             const canStepUp = isTerrainTopObstacle
+              && obstacle?.supportsPlayer !== false
               && stepUpDelta > 0
               && stepUpDelta <= STEP_UP_HEIGHT;
             if (canStepUp) {
