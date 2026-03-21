@@ -11,7 +11,7 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Very important: never introduce HTML runtime/player-facing UI again; every runtime UI surface must render on the canvas, except for the single readonly co-op share-link input.
 - Menu settings persist in `localStorage` via `webgame.masterVolume` and `webgame.difficulty`.
 - `GAME_CONFIG.audio.baseMasterVolume` defines the midpoint of the menu volume slider: `50%` maps to that configured gain and `100%` maps to `2x` that gain; stored `webgame.masterVolume` remains the actual applied master gain.
-- Mouse sensitivity for desktop pointer-lock look persists in `localStorage` via `webgame.mouseSensitivity`; `PLAYER_CONFIG.controls.pointerSpeed` is the slider midpoint (`50%`), `100%` maps to `2x`, and the stored value remains the actual applied pointer speed.
+- Look sensitivity persists in `localStorage` via `webgame.mouseSensitivity` and applies to both desktop pointer-lock look and touch look; `PLAYER_CONFIG.controls.pointerSpeed` is the slider midpoint (`50%`), `100%` maps to `2x`, and the stored value remains the actual applied pointer speed.
 
 ## Kenney Visual Asset Contract
 - `src/kenneyModels.js` owns the shared preloaded Kenney OBJ-based visual factories for enemies, remote co-op players, money drops, ramps, terrain wall voxels, and placed block towers.

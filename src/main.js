@@ -2617,7 +2617,7 @@ function refreshMenuUi() {
   const fullscreenLabel = isGameFullscreen() ? "Exit Fullscreen" : "Enter Fullscreen";
   const fullscreenDisabled = fullscreenRequestPending || !canToggleGameFullscreen();
   const hostToast = getHostLobbyToastViewState();
-  const mouseSensitivityVisible = !isTouchDevice;
+  const mouseSensitivityVisible = true;
 
   return {
     sessionScreen,
