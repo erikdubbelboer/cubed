@@ -36,6 +36,13 @@ const RAMP_ROTATION_TO_DIRECTION = new Map([
 const RAMP_ROLE_LOW = "low";
 const RAMP_ROLE_HIGH = "high";
 const STATIC_VISUAL_CHUNK_SIZE = 6;
+const RAMP_SURFACE_ALONG_MIN = -CELL_SIZE * 0.5;
+const RAMP_SURFACE_ALONG_MAX = CELL_SIZE * 1.5;
+const RAMP_TOP_LANDING_LENGTH = CELL_SIZE * 0.5;
+const RAMP_SURFACE_SLOPE_END = Math.max(
+  RAMP_SURFACE_ALONG_MIN + 0.0001,
+  RAMP_SURFACE_ALONG_MAX - RAMP_TOP_LANDING_LENGTH
+);
 
 function shouldDisposeGridResource(resource) {
   return !isKenneyAssetManagedResource(resource);
@@ -52,6 +59,18 @@ function saturate(value) {
 function smoothstep01(value) {
   const t = saturate(value);
   return t * t * (3 - (2 * t));
+}
+
+function getRampSurfaceRatioForAlong(along) {
+  const clampedAlong = clamp(along, RAMP_SURFACE_ALONG_MIN, RAMP_SURFACE_ALONG_MAX);
+  if (clampedAlong >= RAMP_SURFACE_SLOPE_END) {
+    return 1;
+  }
+  return saturate((clampedAlong - RAMP_SURFACE_ALONG_MIN) / (RAMP_SURFACE_SLOPE_END - RAMP_SURFACE_ALONG_MIN));
+}
+
+function getRampSurfaceYForAlong(lowY, highY, along) {
+  return THREE.MathUtils.lerp(lowY, highY, getRampSurfaceRatioForAlong(along));
 }
 
 function disposeMeshGroupResources(root, shouldDisposeResource) {
@@ -620,8 +639,9 @@ export function createGrid(scene, options = {}) {
     const rampCellData = getRampCellData(cellX, cellZ);
     if (rampCellData) {
       const lowSurfaceY = FLOOR_Y + (rampCellData.lowLevel * ALTITUDE_CUBE_SIZE);
-      const centerRatio = rampCellData.role === RAMP_ROLE_LOW ? 0.25 : 0.75;
-      return lowSurfaceY + (centerRatio * ALTITUDE_CUBE_SIZE);
+      const highSurfaceY = FLOOR_Y + (rampCellData.highLevel * ALTITUDE_CUBE_SIZE);
+      const alongAtCellCenter = rampCellData.role === RAMP_ROLE_LOW ? 0 : CELL_SIZE;
+      return getRampSurfaceYForAlong(lowSurfaceY, highSurfaceY, alongAtCellCenter);
     }
     return FLOOR_Y + (getCellHeightLevels(cellX, cellZ) * ALTITUDE_CUBE_SIZE);
   }
@@ -1081,6 +1101,18 @@ export function createGrid(scene, options = {}) {
       lowY,
       lowEdgeCenterZ + (rampRightWorld.y * CELL_SIZE * 0.5)
     );
+    const landingStartCenterX = lowCellCenter.x + (rampDirectionWorld.x * CELL_SIZE);
+    const landingStartCenterZ = lowCellCenter.z + (rampDirectionWorld.y * CELL_SIZE);
+    const landingStartA = new THREE.Vector3(
+      landingStartCenterX - (rampRightWorld.x * CELL_SIZE * 0.5),
+      highY,
+      landingStartCenterZ - (rampRightWorld.y * CELL_SIZE * 0.5)
+    );
+    const landingStartB = new THREE.Vector3(
+      landingStartCenterX + (rampRightWorld.x * CELL_SIZE * 0.5),
+      highY,
+      landingStartCenterZ + (rampRightWorld.y * CELL_SIZE * 0.5)
+    );
     const topC = new THREE.Vector3(
       highEdgeCenterX + (rampRightWorld.x * CELL_SIZE * 0.5),
       highY,
@@ -1094,10 +1126,7 @@ export function createGrid(scene, options = {}) {
 
     const rampHalfSizeX = Math.abs(ramp.direction.x) > 0 ? CELL_SIZE : CELL_SIZE * 0.5;
     const rampHalfSizeZ = Math.abs(ramp.direction.z) > 0 ? CELL_SIZE : CELL_SIZE * 0.5;
-    const rampAlongMin = -CELL_SIZE * 0.5;
-    const rampAlongMax = CELL_SIZE * 1.5;
     const rampAcrossMax = CELL_SIZE * 0.5;
-    const rampLengthWorld = CELL_SIZE * 2;
     const rampSurfaceMinY = lowY;
     const rampSurfaceMaxY = highY;
 
@@ -1106,19 +1135,19 @@ export function createGrid(scene, options = {}) {
       const deltaZ = worldZ - lowCellCenter.z;
       const along = (deltaX * rampDirectionWorld.x) + (deltaZ * rampDirectionWorld.y);
       const across = (deltaX * rampRightWorld.x) + (deltaZ * rampRightWorld.y);
-      if (along < rampAlongMin || along > rampAlongMax || Math.abs(across) > rampAcrossMax) {
+      if (along < RAMP_SURFACE_ALONG_MIN || along > RAMP_SURFACE_ALONG_MAX || Math.abs(across) > rampAcrossMax) {
         return null;
       }
-      const alongT = (along - rampAlongMin) / rampLengthWorld;
-      const clampedT = THREE.MathUtils.clamp(alongT, 0, 1);
-      return rampSurfaceMinY + ((rampSurfaceMaxY - rampSurfaceMinY) * clampedT);
+      return getRampSurfaceYForAlong(rampSurfaceMinY, rampSurfaceMaxY, along);
     };
 
     rampTopSurfaces.push({
-      a: topA,
-      b: topB,
-      c: topC,
-      d: topD,
+      triangles: [
+        [topA, topB, landingStartB],
+        [topA, landingStartB, landingStartA],
+        [landingStartA, landingStartB, topC],
+        [landingStartA, topC, topD],
+      ],
     });
 
     rampObstacles.push({
@@ -1800,33 +1829,25 @@ export function createGrid(scene, options = {}) {
     }
 
     for (const rampSurface of rampTopSurfaces) {
-      const firstHit = ray.intersectTriangle(
-        rampSurface.a,
-        rampSurface.b,
-        rampSurface.c,
-        false,
-        buildRaycastRampHitPoint
-      );
-      if (firstHit) {
-        const hitDistanceSq = firstHit.distanceToSquared(origin);
-        if (hitDistanceSq < bestDistanceSq) {
-          bestDistanceSq = hitDistanceSq;
-          buildRaycastBestPoint.copy(firstHit);
+      const triangles = Array.isArray(rampSurface?.triangles) ? rampSurface.triangles : [];
+      for (const triangle of triangles) {
+        if (!Array.isArray(triangle) || triangle.length !== 3) {
+          continue;
         }
-      }
-
-      const secondHit = ray.intersectTriangle(
-        rampSurface.a,
-        rampSurface.c,
-        rampSurface.d,
-        false,
-        buildRaycastRampHitPoint
-      );
-      if (secondHit) {
-        const hitDistanceSq = secondHit.distanceToSquared(origin);
+        const hitPoint = ray.intersectTriangle(
+          triangle[0],
+          triangle[1],
+          triangle[2],
+          false,
+          buildRaycastRampHitPoint
+        );
+        if (!hitPoint) {
+          continue;
+        }
+        const hitDistanceSq = hitPoint.distanceToSquared(origin);
         if (hitDistanceSq < bestDistanceSq) {
           bestDistanceSq = hitDistanceSq;
-          buildRaycastBestPoint.copy(secondHit);
+          buildRaycastBestPoint.copy(hitPoint);
         }
       }
     }
