@@ -1546,8 +1546,27 @@ export function createUiOverlay({
   maxCanvasPixels = 8388608,
   mobileConfig = {},
 } = {}) {
-  const drawCanvas = document.createElement("canvas");
+  let drawCanvas = null;
+  if (typeof OffscreenCanvas !== "undefined") {
+    try {
+      const candidateCanvas = new OffscreenCanvas(
+        Math.max(1, Math.floor(width)),
+        Math.max(1, Math.floor(height))
+      );
+      if (candidateCanvas.getContext("2d")) {
+        drawCanvas = candidateCanvas;
+      }
+    } catch (error) {
+      // Fall back to a DOM canvas when OffscreenCanvas is unavailable or partial.
+    }
+  }
+  if (!drawCanvas) {
+    drawCanvas = document.createElement("canvas");
+  }
   const drawCtx = drawCanvas.getContext("2d");
+  if (!drawCtx) {
+    throw new Error("Failed to create 2D UI overlay context.");
+  }
   const overlayTexture = new THREE.CanvasTexture(drawCanvas);
   overlayTexture.generateMipmaps = false;
   overlayTexture.minFilter = THREE.LinearFilter;
@@ -1721,8 +1740,13 @@ export function createUiOverlay({
       ? Math.sqrt(maxCanvasPixels / Math.max(1, viewportWidth * viewportHeight))
       : basePixelRatio;
     pixelRatio = Math.max(0.5, Math.min(basePixelRatio, textureRatioCap, areaRatioCap));
-    drawCanvas.width = Math.max(1, Math.floor(viewportWidth * pixelRatio));
-    drawCanvas.height = Math.max(1, Math.floor(viewportHeight * pixelRatio));
+    const nextCanvasWidth = Math.max(1, Math.floor(viewportWidth * pixelRatio));
+    const nextCanvasHeight = Math.max(1, Math.floor(viewportHeight * pixelRatio));
+    if (nextCanvasWidth !== drawCanvas.width || nextCanvasHeight !== drawCanvas.height) {
+      drawCanvas.width = nextCanvasWidth;
+      drawCanvas.height = nextCanvasHeight;
+      overlayTexture.dispose();
+    }
     overlayTexture.needsUpdate = true;
     state.menuCursorX = clamp(state.menuCursorX, 0, viewportWidth);
     state.menuCursorY = clamp(state.menuCursorY, 0, viewportHeight);
@@ -4395,7 +4419,10 @@ export function createUiOverlay({
   return {
     scene: overlayScene,
     camera: overlayCamera,
-    domElement: drawCanvas,
+    domElement: (
+      typeof HTMLCanvasElement !== "undefined" && drawCanvas instanceof HTMLCanvasElement
+    ) ? drawCanvas : null,
+    usesOffscreenCanvas: typeof OffscreenCanvas !== "undefined" && drawCanvas instanceof OffscreenCanvas,
     resize,
     setState,
     draw,

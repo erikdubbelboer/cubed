@@ -1210,16 +1210,6 @@ const uiOverlay = createUiOverlay({
     ...MOBILE_UI_CONFIG,
   },
 });
-Object.assign(uiOverlay.domElement.style, {
-  position: "absolute",
-  inset: "0",
-  width: "100%",
-  height: "100%",
-  pointerEvents: "none",
-  touchAction: "none",
-  zIndex: "2",
-});
-app.appendChild(uiOverlay.domElement);
 
 const ambientLight = new THREE.AmbientLight(
   LIGHT_CONFIG.ambient.color,
@@ -8775,6 +8765,10 @@ function renderCurrentVisualFrame() {
 
   renderer.clear();
   renderer.render(scene, camera);
+  if (uiOverlay.scene && uiOverlay.camera) {
+    renderer.clearDepth();
+    renderer.render(uiOverlay.scene, uiOverlay.camera);
+  }
   renderer.getContext?.().flush?.();
 }
 
