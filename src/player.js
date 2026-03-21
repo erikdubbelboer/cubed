@@ -302,7 +302,9 @@ export function createPlayer({
     0,
     Number(PLAYER_CONFIG.look.pointerLockSettleDurationMs) || (isFirefoxDesktop ? 120 : 0)
   );
-  const touchLookSensitivity = PLAYER_CONFIG.look.touchSensitivity;
+  const touchLookSensitivity = Number.isFinite(Number(PLAYER_CONFIG.look.touchSensitivity))
+    ? Math.max(0, Number(PLAYER_CONFIG.look.touchSensitivity))
+    : 0;
   let yaw = camera.rotation.y;
   let pitch = camera.rotation.x;
   let lookDeltaX = 0;
@@ -1948,8 +1950,12 @@ export function createPlayer({
       return;
     }
 
-    yaw -= lookDeltaX * touchLookSensitivity;
-    pitch -= lookDeltaY * touchLookSensitivity;
+    const sensitivityScale = defaultPointerSpeed > 0
+      ? (controls.pointerSpeed / defaultPointerSpeed)
+      : 1;
+    const appliedTouchSensitivity = touchLookSensitivity * sensitivityScale;
+    yaw -= lookDeltaX * appliedTouchSensitivity;
+    pitch -= lookDeltaY * appliedTouchSensitivity;
     pitch = Math.min(MAX_PITCH, Math.max(-MAX_PITCH, pitch));
     camera.rotation.set(pitch, yaw, 0);
     lookDeltaX = 0;
