@@ -1542,6 +1542,8 @@ export function createUiOverlay({
   width,
   height,
   maxPixelRatio = 2,
+  maxTextureSize = Number.POSITIVE_INFINITY,
+  maxCanvasPixels = 8388608,
   mobileConfig = {},
 } = {}) {
   const drawCanvas = document.createElement("canvas");
@@ -1708,7 +1710,17 @@ export function createUiOverlay({
   function resize(nextWidth, nextHeight) {
     viewportWidth = Math.max(1, Math.floor(nextWidth));
     viewportHeight = Math.max(1, Math.floor(nextHeight));
-    pixelRatio = clamp(window.devicePixelRatio || 1, 1, maxPixelRatio);
+    const basePixelRatio = clamp(window.devicePixelRatio || 1, 1, maxPixelRatio);
+    const textureRatioCap = Number.isFinite(maxTextureSize) && maxTextureSize > 0
+      ? Math.min(
+        maxTextureSize / viewportWidth,
+        maxTextureSize / viewportHeight
+      )
+      : basePixelRatio;
+    const areaRatioCap = Number.isFinite(maxCanvasPixels) && maxCanvasPixels > 0
+      ? Math.sqrt(maxCanvasPixels / Math.max(1, viewportWidth * viewportHeight))
+      : basePixelRatio;
+    pixelRatio = Math.max(0.5, Math.min(basePixelRatio, textureRatioCap, areaRatioCap));
     drawCanvas.width = Math.max(1, Math.floor(viewportWidth * pixelRatio));
     drawCanvas.height = Math.max(1, Math.floor(viewportHeight * pixelRatio));
     overlayTexture.needsUpdate = true;

@@ -105,6 +105,7 @@ const DIFFICULTY_PRESETS = [
 const DIFFICULTY_PRESET_BY_ID = new Map(DIFFICULTY_PRESETS.map((preset) => [preset.id, preset]));
 const TECH_TREE_DRAG_THRESHOLD_PX = 8;
 const TECH_TREE_TOUCH_LONG_PRESS_MS = 420;
+const DESKTOP_MENU_REOPEN_SUPPRESSION_MS = 500;
 const MOBILE_LOOK_SENSITIVITY_SCALE = Number.isFinite(Number(MOBILE_UI_CONFIG.lookSensitivityScale))
   ? Math.max(0.1, Number(MOBILE_UI_CONFIG.lookSensitivityScale))
   : 1;
@@ -860,6 +861,7 @@ let runId = 0;
 let localWeaponChosenForRunId = -1;
 let pendingStartAfterWeaponChoiceRunId = null;
 let suppressPauseMenuOnNextUnlock = false;
+let suppressPauseMenuUntilMs = 0;
 let lastAppliedPlayerMenuMode = null;
 let mainMenuNotice = "";
 let selectedDifficultyId = DIFFICULTY_PRESET_BY_ID.has(readStoredString(STORAGE_KEY_DIFFICULTY))
@@ -1166,6 +1168,7 @@ let viewportPixelRatio = initialViewportMetrics.pixelRatio;
 let viewportIsPortrait = initialViewportMetrics.isPortrait;
 let viewportSyncFrameId = null;
 let viewportSyncSettleTimeoutId = null;
+let pendingForcedFullscreenRefreshFrames = 0;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SCENE_CONFIG.backgroundColor);
@@ -1190,17 +1193,33 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.localClippingEnabled = true;
 renderer.toneMappingExposure = SCENE_CONFIG.toneMappingExposure;
 renderer.autoClear = false;
+Object.assign(renderer.domElement.style, {
+  position: "absolute",
+  inset: "0",
+});
 app.appendChild(renderer.domElement);
 
 const uiOverlay = createUiOverlay({
   width: viewportWidth,
   height: viewportHeight,
   maxPixelRatio: SCENE_CONFIG.maxPixelRatio,
+  maxTextureSize: renderer.capabilities.maxTextureSize,
+  maxCanvasPixels: 8388608,
   mobileConfig: {
     movePadRadiusPx: UI_CONFIG.movePadRadiusPx,
     ...MOBILE_UI_CONFIG,
   },
 });
+Object.assign(uiOverlay.domElement.style, {
+  position: "absolute",
+  inset: "0",
+  width: "100%",
+  height: "100%",
+  pointerEvents: "none",
+  touchAction: "none",
+  zIndex: "2",
+});
+app.appendChild(uiOverlay.domElement);
 
 const ambientLight = new THREE.AmbientLight(
   LIGHT_CONFIG.ambient.color,
@@ -3055,16 +3074,16 @@ function getFullscreenElement() {
 }
 
 function getGameFullscreenTarget() {
-  if (document.documentElement && typeof document.documentElement.requestFullscreen === "function") {
-    return {
-      element: document.documentElement,
-      request: document.documentElement.requestFullscreen.bind(document.documentElement),
-    };
-  }
   if (app && typeof app.requestFullscreen === "function") {
     return {
       element: app,
       request: app.requestFullscreen.bind(app),
+    };
+  }
+  if (document.documentElement && typeof document.documentElement.requestFullscreen === "function") {
+    return {
+      element: document.documentElement,
+      request: document.documentElement.requestFullscreen.bind(document.documentElement),
     };
   }
   if (app && typeof app.webkitRequestFullscreen === "function") {
@@ -3161,7 +3180,10 @@ async function toggleGameFullscreen() {
 
 document.addEventListener("fullscreenchange", () => {
   fullscreenRequestPending = false;
+  pendingForcedFullscreenRefreshFrames = Math.max(pendingForcedFullscreenRefreshFrames, 6);
+  scheduleViewportSync();
   refreshMenuUi();
+  requestImmediateVisualRefresh();
 });
 document.addEventListener("fullscreenerror", () => {
   fullscreenRequestPending = false;
@@ -3169,7 +3191,10 @@ document.addEventListener("fullscreenerror", () => {
 }, true);
 document.addEventListener("webkitfullscreenchange", () => {
   fullscreenRequestPending = false;
+  pendingForcedFullscreenRefreshFrames = Math.max(pendingForcedFullscreenRefreshFrames, 6);
+  scheduleViewportSync();
   refreshMenuUi();
+  requestImmediateVisualRefresh();
 });
 document.addEventListener("webkitfullscreenerror", () => {
   fullscreenRequestPending = false;
@@ -3255,6 +3280,7 @@ function setOverlayScreen(nextOverlayScreen, { pauseSimulation = null, unlockPoi
     refreshPauseState();
   }
   syncPlayerMenuMode();
+  requestImmediateVisualRefresh();
 }
 
 function openPauseMenu() {
@@ -3290,6 +3316,7 @@ function closePauseMenu({ requestPointerLock = false } = {}) {
     && !isTouchDevice
     && document.pointerLockElement !== renderer.domElement
   ) {
+    armPauseMenuReopenSuppression();
     player?.requestPointerLock?.();
   }
   return true;
@@ -4145,7 +4172,11 @@ function handleHudButtonAction(buttonId) {
 }
 
 function handleVisibilityOrFocusChange() {
-  if ((document.hidden || !document.hasFocus()) && isInRunSession()) {
+  if (
+    (document.hidden || !document.hasFocus())
+    && isInRunSession()
+    && !shouldSuppressPauseMenuReopen()
+  ) {
     openPauseMenu();
   }
   refreshBackgroundKeepAlive();
@@ -4212,6 +4243,34 @@ const runtimeUiSliderDrag = {
   pointerId: null,
   isTouch: false,
 };
+
+function captureDesktopRuntimeUiPointer(pointerId) {
+  if (pointerId == null || typeof app.setPointerCapture !== "function") {
+    return;
+  }
+  try {
+    app.setPointerCapture(pointerId);
+  } catch (error) {
+    // Ignore pointer-capture races when the pointer already ended.
+  }
+}
+
+function releaseDesktopRuntimeUiPointer(pointerId) {
+  if (
+    pointerId == null
+    || typeof app.releasePointerCapture !== "function"
+    || typeof app.hasPointerCapture !== "function"
+  ) {
+    return;
+  }
+  try {
+    if (app.hasPointerCapture(pointerId)) {
+      app.releasePointerCapture(pointerId);
+    }
+  } catch (error) {
+    // Ignore release failures when capture was already dropped.
+  }
+}
 
 function isEditableDomTarget(target) {
   if (!(target instanceof Element)) {
@@ -4465,6 +4524,10 @@ function isRuntimeCanvasUiVisible() {
 function clearRuntimeUiSliderDrag(pointerId = null) {
   if (pointerId != null && runtimeUiSliderDrag.pointerId !== pointerId) {
     return;
+  }
+  if (runtimeUiSliderDrag.active && !runtimeUiSliderDrag.isTouch) {
+    // Desktop sliders use pointer capture; always release it when the drag ends.
+    releaseDesktopRuntimeUiPointer(runtimeUiSliderDrag.pointerId);
   }
   runtimeUiSliderDrag.active = false;
   runtimeUiSliderDrag.sliderId = null;
@@ -5239,8 +5302,14 @@ function getCanvasPointerPosition(event) {
   const canvasRect = renderer.domElement.getBoundingClientRect();
   const rectWidth = Math.max(1, canvasRect.width);
   const rectHeight = Math.max(1, canvasRect.height);
-  const localX = clamp(event.clientX - canvasRect.left, 0, rectWidth);
-  const localY = clamp(event.clientY - canvasRect.top, 0, rectHeight);
+  const eventTargetsCanvas = event?.target === renderer.domElement || event?.currentTarget === renderer.domElement;
+  const hasOffsetCoordinates = Number.isFinite(Number(event?.offsetX)) && Number.isFinite(Number(event?.offsetY));
+  const localX = eventTargetsCanvas && hasOffsetCoordinates
+    ? clamp(Number(event.offsetX), 0, rectWidth)
+    : clamp(event.clientX - canvasRect.left, 0, rectWidth);
+  const localY = eventTargetsCanvas && hasOffsetCoordinates
+    ? clamp(Number(event.offsetY), 0, rectHeight)
+    : clamp(event.clientY - canvasRect.top, 0, rectHeight);
   const x = (localX / rectWidth) * viewportWidth;
   const y = (localY / rectHeight) * viewportHeight;
   return { x, y };
@@ -5248,6 +5317,26 @@ function getCanvasPointerPosition(event) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function getNowMs() {
+  return typeof performance?.now === "function" ? performance.now() : Date.now();
+}
+
+function armPauseMenuReopenSuppression(durationMs = DESKTOP_MENU_REOPEN_SUPPRESSION_MS) {
+  const duration = Math.max(0, Number(durationMs) || 0);
+  if (duration <= 0) {
+    return;
+  }
+  suppressPauseMenuUntilMs = Math.max(suppressPauseMenuUntilMs, getNowMs() + duration);
+}
+
+function clearPauseMenuReopenSuppression() {
+  suppressPauseMenuUntilMs = 0;
+}
+
+function shouldSuppressPauseMenuReopen() {
+  return getNowMs() < suppressPauseMenuUntilMs;
 }
 
 function isPointInsideRect(x, y, rect) {
@@ -5762,7 +5851,7 @@ function updateSellHoldFromAim(deltaSeconds) {
 }
 
 if (!isTouchDevice) {
-  renderer.domElement.addEventListener("click", (event) => {
+  app.addEventListener("click", (event) => {
     if (!suppressNextDesktopCanvasClick) {
       return;
     }
@@ -5771,9 +5860,87 @@ if (!isTouchDevice) {
     event.stopImmediatePropagation();
   }, true);
 
+  app.addEventListener("pointerdown", (event) => {
+    if (event.pointerType !== "mouse" || isEditableDomTarget(event.target) || !player || event.button !== 0) {
+      return;
+    }
+
+    suppressNextDesktopCanvasClick = false;
+    const pointer = getCanvasPointerPosition(event);
+    if (isRuntimeCanvasUiVisible()) {
+      // Preserve the initiating pointerId for desktop sliders so the matching
+      // pointerup/pointercancel can end the drag even after leaving the app.
+      if (handleRuntimeUiPointerAction(pointer.x, pointer.y, {
+        pointerId: event.pointerId,
+        isTouch: false,
+      })) {
+        if (runtimeUiSliderDrag.active && runtimeUiSliderDrag.pointerId === event.pointerId) {
+          captureDesktopRuntimeUiPointer(event.pointerId);
+        }
+        suppressNextDesktopCanvasClick = true;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+
+    if (!player.controls.isLocked) {
+      const hudButton = uiOverlay.hitTestHudButton(pointer.x, pointer.y);
+      if (hudButton && handleHudButtonAction(hudButton)) {
+        suppressNextDesktopCanvasClick = true;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+    }
+
+    if (!player.controls.isLocked && isTechTreeMenuVisible()) {
+      if (currentMenuMode === MENU_MODE_WEAPON_SELECT) {
+        applyMenuChoice(uiOverlay.hitTestMenuOption(pointer.x, pointer.y));
+        suppressNextDesktopCanvasClick = true;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+
+      const panelHit = uiOverlay.hitTestTechTreePanel(pointer.x, pointer.y);
+      if (!panelHit) {
+        updateDesktopTechTreeHover(pointer.x, pointer.y);
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+      updateDesktopTechTreeHover(pointer.x, pointer.y);
+      beginDesktopTechTreeDrag(pointer.x, pointer.y, false);
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+
+  app.addEventListener("pointermove", (event) => {
+    if (event.pointerType !== "mouse" || !player) {
+      return;
+    }
+    if (
+      runtimeUiSliderDrag.active
+      && !runtimeUiSliderDrag.isTouch
+      && runtimeUiSliderDrag.pointerId === event.pointerId
+    ) {
+      const pointer = getCanvasPointerPosition(event);
+      updateRuntimeUiSliderDrag(pointer.x, pointer.y);
+      techTreeDesktopHover.nodeId = null;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, { capture: true, passive: false });
+
   window.addEventListener("mousemove", (event) => {
     if (!player) return;
-    if (runtimeUiSliderDrag.active && !runtimeUiSliderDrag.isTouch) {
+    if (
+      runtimeUiSliderDrag.active
+      && !runtimeUiSliderDrag.isTouch
+      && runtimeUiSliderDrag.pointerId == null
+    ) {
       const pointer = getCanvasPointerPosition(event);
       updateRuntimeUiSliderDrag(pointer.x, pointer.y);
       techTreeDesktopHover.nodeId = null;
@@ -5829,6 +5996,29 @@ if (!isTouchDevice) {
     }
   }, true);
 
+  const finishDesktopRuntimeUiPointer = (event) => {
+    if (event.pointerType !== "mouse") {
+      return;
+    }
+    if (runtimeUiSliderDrag.active && !runtimeUiSliderDrag.isTouch) {
+      clearRuntimeUiSliderDrag(
+        runtimeUiSliderDrag.pointerId == null ? null : event.pointerId
+      );
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  };
+
+  // Use window-level release as a safety net because slider drags can end off-element.
+  window.addEventListener("pointerup", finishDesktopRuntimeUiPointer, { capture: true, passive: false });
+  window.addEventListener("pointercancel", finishDesktopRuntimeUiPointer, { capture: true, passive: false });
+  app.addEventListener("lostpointercapture", (event) => {
+    if (event.pointerType !== "mouse") {
+      return;
+    }
+    clearRuntimeUiSliderDrag(event.pointerId);
+  }, true);
+
   window.addEventListener("wheel", (event) => {
     if (waveState !== "EDITOR" || !levelEditor) {
       return;
@@ -5872,6 +6062,13 @@ if (!isTouchDevice) {
       return;
     }
     if (!player) {
+      return;
+    }
+    if (
+      !player.controls.isLocked
+      && event.target instanceof Node
+      && app.contains(event.target)
+    ) {
       return;
     }
 
@@ -8294,6 +8491,12 @@ function isAwaitingInitialBuildStartAfterWeaponChoice() {
 }
 
 function runGameFrame({ renderFrame = true } = {}) {
+  if (renderFrame) {
+    syncViewportMetricsIfNeeded();
+    if (pendingForcedFullscreenRefreshFrames > 0) {
+      pendingForcedFullscreenRefreshFrames -= 1;
+    }
+  }
   const rawDeltaSeconds = clock.getDelta();
   const simulationDeltaSeconds = rawDeltaSeconds * gameSpeedMultiplier;
   syncPlayerMenuMode();
@@ -8448,6 +8651,21 @@ function runGameFrame({ renderFrame = true } = {}) {
     return;
   }
 
+  renderCurrentVisualFrame();
+}
+
+function renderCurrentVisualFrame() {
+  if (!renderer || !uiOverlay || !camera || !scene) {
+    return;
+  }
+  if (pendingForcedFullscreenRefreshFrames > 0) {
+    renderer.domElement.style.transform = pendingForcedFullscreenRefreshFrames % 2 === 0
+      ? "translateZ(0)"
+      : "translateZ(0.001px)";
+  } else if (renderer.domElement.style.transform) {
+    renderer.domElement.style.transform = "";
+  }
+
   const towerInventory = waveState === "EDITOR"
     ? EDITOR_TOOL_INVENTORY.map((entry) => ({
       ...entry,
@@ -8557,10 +8775,14 @@ function runGameFrame({ renderFrame = true } = {}) {
 
   renderer.clear();
   renderer.render(scene, camera);
-  if (uiOverlay.scene && uiOverlay.camera) {
-    renderer.clearDepth();
-    renderer.render(uiOverlay.scene, uiOverlay.camera);
+  renderer.getContext?.().flush?.();
+}
+
+function requestImmediateVisualRefresh() {
+  if (document.visibilityState === "hidden") {
+    return;
   }
+  renderCurrentVisualFrame();
 }
 
 function shouldUseHiddenIntervalLoop() {
@@ -8710,6 +8932,8 @@ function initGame() {
   player.controls.addEventListener("unlock", () => {
     if (suppressPauseMenuOnNextUnlock) {
       suppressPauseMenuOnNextUnlock = false;
+    } else if (shouldSuppressPauseMenuReopen()) {
+      // Ignore transient unlocks/blur races caused by resume/fullscreen transitions.
     } else if (isInRunSession() && overlayScreen === OVERLAY_SCREEN_NONE && waveState !== "EDITOR" && !isTechTreeMenuVisible()) {
       openPauseMenu();
     }
@@ -8717,6 +8941,7 @@ function initGame() {
     syncPlayerMenuMode();
   });
   player.controls.addEventListener("lock", () => {
+    clearPauseMenuReopenSuppression();
     syncPlayerMenuMode();
   });
 
@@ -8894,6 +9119,25 @@ function applyViewportMetrics(nextViewportMetrics = getViewportMetrics()) {
   if (didOrientationBucketChange && touchControlsActive) {
     resetMobileInputState();
   }
+  requestImmediateVisualRefresh();
+}
+
+function syncViewportMetricsIfNeeded() {
+  const nextViewportMetrics = getViewportMetrics();
+  const nextWidth = Math.max(1, Math.floor(nextViewportMetrics.width));
+  const nextHeight = Math.max(1, Math.floor(nextViewportMetrics.height));
+  const nextPixelRatio = clamp(nextViewportMetrics.pixelRatio, 1, SCENE_CONFIG.maxPixelRatio);
+  const nextIsPortrait = !!nextViewportMetrics.isPortrait;
+  if (
+    nextWidth === viewportWidth
+    && nextHeight === viewportHeight
+    && nextPixelRatio === viewportPixelRatio
+    && nextIsPortrait === viewportIsPortrait
+  ) {
+    return false;
+  }
+  applyViewportMetrics(nextViewportMetrics);
+  return true;
 }
 
 function scheduleViewportSync() {
