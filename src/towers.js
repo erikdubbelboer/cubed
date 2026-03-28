@@ -476,6 +476,7 @@ export function createTowerSystem({
   const groundHit = new THREE.Vector3();
   const terrainObstacles = Array.isArray(grid.heightObstacles) ? grid.heightObstacles : [];
   const rampObstacles = Array.isArray(grid.rampObstacles) ? grid.rampObstacles : [];
+  const decorativeObstacles = Array.isArray(grid.decorativeObstacles) ? grid.decorativeObstacles : [];
   const spawnCells = Array.isArray(grid.spawnCells) ? grid.spawnCells : [];
   const endCell = grid.endCell ?? null;
   const gridCellSize = Math.max(0.01, Number(grid.cellSize) || 0);
@@ -4493,6 +4494,49 @@ export function createTowerSystem({
     return false;
   }
 
+  function lineOfSightBlockedByDecorativeObstacles(origin, targetPosition) {
+    for (const obstacle of decorativeObstacles) {
+      if (obstacle?.blocksProjectiles === false) {
+        continue;
+      }
+      const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
+      const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
+        ? Number(obstacle.halfSizeX)
+        : Number(obstacle?.halfSize);
+      const obstacleHalfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
+        ? Number(obstacle.halfSizeZ)
+        : Number(obstacle?.halfSize);
+      const obstacleHeight = Number(obstacle?.height);
+      const obstacleBaseY = Number(obstacle?.baseY ?? 0);
+      if (
+        !obstaclePos
+        || !Number.isFinite(obstacleHalfSizeX)
+        || !Number.isFinite(obstacleHalfSizeZ)
+        || !Number.isFinite(obstacleHeight)
+        || obstacleHeight <= 0
+      ) {
+        continue;
+      }
+
+      if (
+        segmentIntersectsAabb(
+          origin,
+          targetPosition,
+          obstaclePos.x - obstacleHalfSizeX,
+          obstacleBaseY,
+          obstaclePos.z - obstacleHalfSizeZ,
+          obstaclePos.x + obstacleHalfSizeX,
+          obstacleBaseY + obstacleHeight,
+          obstaclePos.z + obstacleHalfSizeZ
+        )
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   function isPointInTowerRange(tower, targetPosition) {
     const towerRange = getTowerRangeForType(tower?.towerType, tower?.ownerId) || (tower.range ?? GUN_RANGE);
     return tower.mesh.position.distanceToSquared(targetPosition) <= (towerRange * towerRange);
@@ -4514,7 +4558,8 @@ export function createTowerSystem({
     }
     return (
       !lineOfSightBlockedByOtherTower(origin, targetPosition, tower) &&
-      !lineOfSightBlockedByTerrain(origin, targetPosition)
+      !lineOfSightBlockedByTerrain(origin, targetPosition) &&
+      !lineOfSightBlockedByDecorativeObstacles(origin, targetPosition)
     );
   }
 
@@ -4988,6 +5033,7 @@ export function createTowerSystem({
     }
     for (let i = gunProjectiles.length - 1; i >= 0; i -= 1) {
       const projectile = gunProjectiles[i];
+      tempVecA.copy(projectile.mesh.position);
       projectile.mesh.position.addScaledVector(projectile.velocity, deltaSeconds);
       projectile.life -= deltaSeconds;
 
@@ -5004,6 +5050,51 @@ export function createTowerSystem({
           gunProjectiles.splice(i, 1);
           continue;
         }
+      }
+
+      let hitDecorativeObstacle = false;
+      for (const obstacle of decorativeObstacles) {
+        if (obstacle?.blocksProjectiles === false) {
+          continue;
+        }
+        const obstaclePos = obstacle?.mesh?.position ?? obstacle?.position;
+        const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
+          ? Number(obstacle.halfSizeX)
+          : Number(obstacle?.halfSize);
+        const obstacleHalfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
+          ? Number(obstacle.halfSizeZ)
+          : Number(obstacle?.halfSize);
+        const obstacleHeight = Number(obstacle?.height);
+        const obstacleBaseY = Number(obstacle?.baseY ?? 0);
+        if (
+          !obstaclePos
+          || !Number.isFinite(obstacleHalfSizeX)
+          || !Number.isFinite(obstacleHalfSizeZ)
+          || !Number.isFinite(obstacleHeight)
+          || obstacleHeight <= 0
+        ) {
+          continue;
+        }
+        if (
+          segmentIntersectsAabb(
+            tempVecA,
+            projectile.mesh.position,
+            obstaclePos.x - obstacleHalfSizeX - projectile.hitRadius,
+            obstacleBaseY - projectile.hitRadius,
+            obstaclePos.z - obstacleHalfSizeZ - projectile.hitRadius,
+            obstaclePos.x + obstacleHalfSizeX + projectile.hitRadius,
+            obstacleBaseY + obstacleHeight + projectile.hitRadius,
+            obstaclePos.z + obstacleHalfSizeZ + projectile.hitRadius
+          )
+        ) {
+          hitDecorativeObstacle = true;
+          break;
+        }
+      }
+      if (hitDecorativeObstacle) {
+        destroyGunProjectile(projectile);
+        gunProjectiles.splice(i, 1);
+        continue;
       }
 
       if (projectile.life <= 0) {
@@ -5802,6 +5893,7 @@ export function createTowerSystem({
     const staticObstacles = [
       ...terrainObstacles,
       ...(Array.isArray(grid.rampObstacles) ? grid.rampObstacles : []),
+      ...decorativeObstacles,
       ...(Array.isArray(grid.endpointObstacles) ? grid.endpointObstacles : []),
     ];
 

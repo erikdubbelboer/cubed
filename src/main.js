@@ -6,6 +6,11 @@ import { createTowerSystem } from "./towers.js";
 import { createLevelEditor } from "./levelEditor.js";
 import { createUiOverlay } from "./uiOverlay.js";
 import { createMultiplayerController } from "./multiplayer.js";
+import {
+  createEditorModelPreviewManager,
+  getEditorDoodadPreviewId,
+  getEditorToolPreviewId,
+} from "./editorModelPreviews.js";
 import { GAME_CONFIG } from "./config.js";
 import { createSoundSystem } from "./soundSystem.js";
 import {
@@ -761,6 +766,58 @@ const EDITOR_TOOL_INVENTORY = [
   },
 ];
 
+function buildEditorToolInventory() {
+  const selectedDoodadType = levelEditor?.getSelectedDoodadType?.() ?? "";
+  return EDITOR_TOOL_INVENTORY.map((entry) => ({
+    ...entry,
+    affordable: true,
+    remaining: 1,
+    cost: 0,
+    previewId: entry.type === "doodads" && selectedDoodadType
+      ? getEditorDoodadPreviewId(selectedDoodadType)
+      : getEditorToolPreviewId(entry.type),
+  }));
+}
+
+function buildEditorDoodadMenuViewState() {
+  const menuState = levelEditor?.getDoodadMenuState?.() ?? null;
+  if (!menuState) {
+    return null;
+  }
+  return {
+    ...menuState,
+    items: Array.isArray(menuState.items)
+      ? menuState.items.map((item) => ({
+        ...item,
+        previewId: getEditorDoodadPreviewId(item.type),
+      }))
+      : [],
+  };
+}
+
+function collectVisibleEditorPreviewIds(towerInventory, editorDoodadMenu) {
+  const previewIds = [];
+  const pushPreviewId = (previewId) => {
+    if (
+      typeof previewId === "string"
+      && previewId.length > 0
+      && !previewIds.includes(previewId)
+    ) {
+      previewIds.push(previewId);
+    }
+  };
+
+  for (const item of towerInventory) {
+    pushPreviewId(item?.previewId);
+  }
+  if (editorDoodadMenu?.visible && Array.isArray(editorDoodadMenu.items)) {
+    for (const item of editorDoodadMenu.items) {
+      pushPreviewId(item?.previewId);
+    }
+  }
+  return previewIds;
+}
+
 const app = document.getElementById("app");
 
 const ERUDA_QUERY_PARAM = "eruda";
@@ -1197,18 +1254,6 @@ Object.assign(renderer.domElement.style, {
 });
 app.appendChild(renderer.domElement);
 
-const uiOverlay = createUiOverlay({
-  width: viewportWidth,
-  height: viewportHeight,
-  maxPixelRatio: SCENE_CONFIG.maxPixelRatio,
-  maxTextureSize: renderer.capabilities.maxTextureSize,
-  maxCanvasPixels: 8388608,
-  mobileConfig: {
-    movePadRadiusPx: UI_CONFIG.movePadRadiusPx,
-    ...MOBILE_UI_CONFIG,
-  },
-});
-
 const ambientLight = new THREE.AmbientLight(
   LIGHT_CONFIG.ambient.color,
   LIGHT_CONFIG.ambient.intensity
@@ -1246,6 +1291,19 @@ directionalLight.shadow.normalBias = LIGHT_CONFIG.directional.shadowNormalBias;
 scene.add(directionalLight);
 
 await preloadKenneyModels();
+const editorModelPreviews = createEditorModelPreviewManager();
+const uiOverlay = createUiOverlay({
+  width: viewportWidth,
+  height: viewportHeight,
+  maxPixelRatio: SCENE_CONFIG.maxPixelRatio,
+  maxTextureSize: renderer.capabilities.maxTextureSize,
+  maxCanvasPixels: 8388608,
+  previewProvider: editorModelPreviews,
+  mobileConfig: {
+    movePadRadiusPx: UI_CONFIG.movePadRadiusPx,
+    ...MOBILE_UI_CONFIG,
+  },
+});
 
 let grid = createGrid(scene);
 function placeCameraAtPlayerSpawn(targetGrid = grid) {
@@ -8795,10 +8853,10 @@ function runGameFrame({ renderFrame = true } = {}) {
     return;
   }
 
-  renderCurrentVisualFrame();
+  renderCurrentVisualFrame(rawDeltaSeconds);
 }
 
-function renderCurrentVisualFrame() {
+function renderCurrentVisualFrame(rawDeltaSeconds = 0) {
   if (!renderer || !uiOverlay || !camera || !scene) {
     return;
   }
@@ -8810,13 +8868,11 @@ function renderCurrentVisualFrame() {
     renderer.domElement.style.transform = "";
   }
 
+  const editorDoodadMenu = waveState === "EDITOR"
+    ? buildEditorDoodadMenuViewState()
+    : null;
   const towerInventory = waveState === "EDITOR"
-    ? EDITOR_TOOL_INVENTORY.map((entry) => ({
-      ...entry,
-      affordable: true,
-      remaining: 1,
-      cost: 0,
-    }))
+    ? buildEditorToolInventory()
     : (towerSystem
     ? towerSystem.getTowerInventory().map((entry, index) => ({
       ...entry,
@@ -8837,6 +8893,14 @@ function renderCurrentVisualFrame() {
       hotkey: String((index + 1) % 10 || 0),
     }))
     : []);
+  if (waveState === "EDITOR") {
+    editorModelPreviews.setVisiblePreviewIds(
+      collectVisibleEditorPreviewIds(towerInventory, editorDoodadMenu)
+    );
+    editorModelPreviews.update(rawDeltaSeconds);
+  } else {
+    editorModelPreviews.setVisiblePreviewIds([]);
+  }
   const hudWaveNumber = Math.max(
     1,
     Math.floor(
@@ -8895,9 +8959,7 @@ function renderCurrentVisualFrame() {
     selectedTowerType: waveState === "EDITOR"
       ? (levelEditor?.getSelectedInventoryTool?.() ?? levelEditor?.getSelectedTool?.() ?? null)
       : (towerSystem ? towerSystem.getSelectedTowerType() : null),
-    editorDoodadMenu: waveState === "EDITOR"
-      ? (levelEditor?.getDoodadMenuState?.() ?? null)
-      : null,
+    editorDoodadMenu,
     buildMode: waveState === "EDITOR" ? false : (towerSystem ? towerSystem.isBuildMode() : false),
     showKeyboardHints: !showTouchControls,
     showTouchControls,
@@ -9064,9 +9126,15 @@ function initGame() {
     getMovementObstacles: () => {
       const terrainObstacles = Array.isArray(grid.heightObstacles) ? grid.heightObstacles : [];
       const rampObstacles = Array.isArray(grid.rampObstacles) ? grid.rampObstacles : [];
+      const decorativeObstacles = Array.isArray(grid.decorativeObstacles) ? grid.decorativeObstacles : [];
       const endpointObstacles = Array.isArray(grid.endpointObstacles) ? grid.endpointObstacles : [];
       const towerObstacles = towerSystem ? towerSystem.getMovementObstacles() : [];
-      const staticObstacles = [...terrainObstacles, ...rampObstacles, ...endpointObstacles];
+      const staticObstacles = [
+        ...terrainObstacles,
+        ...rampObstacles,
+        ...decorativeObstacles,
+        ...endpointObstacles,
+      ];
       if (staticObstacles.length === 0) {
         return towerObstacles;
       }

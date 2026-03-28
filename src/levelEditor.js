@@ -57,9 +57,30 @@ function isDecorationTool(type) {
   return isDecorativeObjectType(type);
 }
 
+function isGridSnappedDecorationType(type) {
+  return getDecorativeModelSpec(type)?.placement === "grid";
+}
+
+function getDecorationRotationStepDegrees(type) {
+  const configuredStep = Number(getDecorativeModelSpec(type)?.rotationStepDegrees);
+  return Number.isFinite(configuredStep) && configuredStep > 0
+    ? configuredStep
+    : DECORATION_ROTATION_STEP_DEGREES;
+}
+
+function normalizeDecorationRotation(type, rawRotation = 0) {
+  const normalized = normalizeFreeRotation(rawRotation);
+  const configuredStep = Number(getDecorativeModelSpec(type)?.rotationStepDegrees);
+  if (!Number.isFinite(configuredStep) || configuredStep <= 0 || configuredStep >= 360) {
+    return normalized;
+  }
+  const quantized = Math.round(normalized / configuredStep) * configuredStep;
+  return ((quantized % 360) + 360) % 360;
+}
+
 function normalizeRotationForType(type, rawRotation = 0) {
   return isDecorationTool(type)
-    ? normalizeFreeRotation(rawRotation)
+    ? normalizeDecorationRotation(type, rawRotation)
     : normalizeCardinalRotation(rawRotation);
 }
 
@@ -569,6 +590,42 @@ export function createLevelEditor({
     };
   }
 
+  function getDecorationPlacementPosition(type, worldPoint) {
+    if (!worldPoint) {
+      return null;
+    }
+    const supportY = typeof grid?.getSupportSurfaceYBelowWorld === "function"
+      ? Number(grid.getSupportSurfaceYBelowWorld(worldPoint.x, worldPoint.y, worldPoint.z))
+      : Number(worldPoint.y);
+    if (!isGridSnappedDecorationType(type)) {
+      return {
+        x: Number(worldPoint.x) || 0,
+        y: Number.isFinite(supportY) ? supportY : (Number(worldPoint.y) || 0),
+        z: Number(worldPoint.z) || 0,
+      };
+    }
+    const cell = typeof grid?.worldToCell === "function"
+      ? grid.worldToCell(worldPoint.x, worldPoint.z)
+      : null;
+    if (!cell || !Number.isInteger(cell.x) || !Number.isInteger(cell.z)) {
+      return null;
+    }
+    const snappedCenter = typeof grid?.cellToWorldCenter === "function"
+      ? grid.cellToWorldCenter(cell.x, cell.z, 0)
+      : null;
+    if (!snappedCenter) {
+      return null;
+    }
+    const snappedSupportY = typeof grid?.getSupportSurfaceYBelowWorld === "function"
+      ? Number(grid.getSupportSurfaceYBelowWorld(snappedCenter.x, worldPoint.y, snappedCenter.z))
+      : supportY;
+    return {
+      x: snappedCenter.x,
+      y: Number.isFinite(snappedSupportY) ? snappedSupportY : (Number(worldPoint.y) || 0),
+      z: snappedCenter.z,
+    };
+  }
+
   function findDecorationIndexMatchingTarget(target) {
     if (!target || !isDecorationTool(target.type)) {
       return -1;
@@ -641,17 +698,14 @@ export function createLevelEditor({
       if (!didHitSurface) {
         return { valid: false, mode: selectedTool, target: null };
       }
-      const surfaceY = typeof grid?.getBuildSurfaceYAtWorld === "function"
-        ? grid.getBuildSurfaceYAtWorld(floorHitPoint.x, floorHitPoint.z)
-        : floorHitPoint.y;
-      const rotation = normalizeFreeRotation(decorationRotationByType[selectedTool] ?? 0);
+      const position = getDecorationPlacementPosition(selectedTool, floorHitPoint);
+      if (!position) {
+        return { valid: false, mode: selectedTool, target: null };
+      }
+      const rotation = normalizeDecorationRotation(selectedTool, decorationRotationByType[selectedTool] ?? 0);
       const target = {
         type: selectedTool,
-        position: {
-          x: floorHitPoint.x,
-          y: surfaceY,
-          z: floorHitPoint.z,
-        },
+        position,
         rotation,
       };
       return {
@@ -1108,33 +1162,62 @@ export function createLevelEditor({
     if (!doodadMenuOpen || getDoodadCount() === 0) {
       return false;
     }
-    const currentPageStart = Math.floor(doodadMenuIndex / EDITOR_DOODAD_PAGE_SIZE) * EDITOR_DOODAD_PAGE_SIZE;
-    const currentPageEnd = Math.min(getDoodadCount(), currentPageStart + EDITOR_DOODAD_PAGE_SIZE) - 1;
+    const doodadCount = getDoodadCount();
+    const pageCount = getDoodadPageCount();
+    const currentPage = Math.floor(doodadMenuIndex / EDITOR_DOODAD_PAGE_SIZE);
+    const currentPageStart = currentPage * EDITOR_DOODAD_PAGE_SIZE;
+    const currentPageEnd = Math.min(doodadCount, currentPageStart + EDITOR_DOODAD_PAGE_SIZE) - 1;
     const currentOffset = doodadMenuIndex - currentPageStart;
-    let nextRow = clamp(
-      Math.floor(currentOffset / EDITOR_DOODAD_PAGE_COLUMNS) + Math.sign(Number(dy) || 0),
-      0,
-      EDITOR_DOODAD_PAGE_ROWS - 1
-    );
+    const currentRow = Math.floor(currentOffset / EDITOR_DOODAD_PAGE_COLUMNS);
+    const currentColumn = currentOffset % EDITOR_DOODAD_PAGE_COLUMNS;
+    const currentPageRowCount = Math.floor((currentPageEnd - currentPageStart) / EDITOR_DOODAD_PAGE_COLUMNS) + 1;
+
+    function resolvePageCellIndex(pageIndex, row, column) {
+      const pageStart = pageIndex * EDITOR_DOODAD_PAGE_SIZE;
+      const pageEnd = Math.min(doodadCount, pageStart + EDITOR_DOODAD_PAGE_SIZE) - 1;
+      const pageRowCount = Math.floor((pageEnd - pageStart) / EDITOR_DOODAD_PAGE_COLUMNS) + 1;
+      let nextRow = clamp(row, 0, pageRowCount - 1);
+      let nextColumn = clamp(column, 0, EDITOR_DOODAD_PAGE_COLUMNS - 1);
+      let nextIndex = pageStart + (nextRow * EDITOR_DOODAD_PAGE_COLUMNS) + nextColumn;
+      while (nextIndex > pageEnd && nextColumn > 0) {
+        nextColumn -= 1;
+        nextIndex = pageStart + (nextRow * EDITOR_DOODAD_PAGE_COLUMNS) + nextColumn;
+      }
+      while (nextIndex > pageEnd && nextRow > 0) {
+        nextRow -= 1;
+        nextIndex = pageStart + (nextRow * EDITOR_DOODAD_PAGE_COLUMNS) + nextColumn;
+        while (nextIndex > pageEnd && nextColumn > 0) {
+          nextColumn -= 1;
+          nextIndex = pageStart + (nextRow * EDITOR_DOODAD_PAGE_COLUMNS) + nextColumn;
+        }
+      }
+      return clamp(nextIndex, pageStart, pageEnd);
+    }
+
+    let targetPage = currentPage;
+    let targetRow = currentRow;
+    if (Math.sign(Number(dy) || 0) < 0) {
+      if (currentRow <= 0) {
+        targetPage = (currentPage + pageCount - 1) % pageCount;
+        targetRow = EDITOR_DOODAD_PAGE_ROWS - 1;
+      } else {
+        targetRow = currentRow - 1;
+      }
+    } else if (Math.sign(Number(dy) || 0) > 0) {
+      if (currentRow >= currentPageRowCount - 1) {
+        targetPage = (currentPage + 1) % pageCount;
+        targetRow = 0;
+      } else {
+        targetRow = currentRow + 1;
+      }
+    }
+
     let nextColumn = clamp(
-      (currentOffset % EDITOR_DOODAD_PAGE_COLUMNS) + Math.sign(Number(dx) || 0),
+      currentColumn + Math.sign(Number(dx) || 0),
       0,
       EDITOR_DOODAD_PAGE_COLUMNS - 1
     );
-    let nextIndex = currentPageStart + (nextRow * EDITOR_DOODAD_PAGE_COLUMNS) + nextColumn;
-    while (nextIndex > currentPageEnd && nextColumn > 0) {
-      nextColumn -= 1;
-      nextIndex = currentPageStart + (nextRow * EDITOR_DOODAD_PAGE_COLUMNS) + nextColumn;
-    }
-    while (nextIndex > currentPageEnd && nextRow > 0) {
-      nextRow -= 1;
-      nextIndex = currentPageStart + (nextRow * EDITOR_DOODAD_PAGE_COLUMNS) + nextColumn;
-      while (nextIndex > currentPageEnd && nextColumn > 0) {
-        nextColumn -= 1;
-        nextIndex = currentPageStart + (nextRow * EDITOR_DOODAD_PAGE_COLUMNS) + nextColumn;
-      }
-    }
-    nextIndex = clamp(nextIndex, currentPageStart, currentPageEnd);
+    const nextIndex = resolvePageCellIndex(targetPage, targetRow, nextColumn);
     if (nextIndex === doodadMenuIndex) {
       return false;
     }
@@ -1220,10 +1303,15 @@ export function createLevelEditor({
   function rotateDecoration(step = 1) {
     const normalizedStep = Math.sign(Number(step) || 0);
     if (normalizedStep === 0 || !isDecorationTool(selectedTool)) {
-      return isDecorationTool(selectedTool) ? normalizeFreeRotation(decorationRotationByType[selectedTool] ?? 0) : null;
+      return isDecorationTool(selectedTool)
+        ? normalizeDecorationRotation(selectedTool, decorationRotationByType[selectedTool] ?? 0)
+        : null;
     }
-    const currentRotation = normalizeFreeRotation(decorationRotationByType[selectedTool] ?? 0);
-    const nextRotation = normalizeFreeRotation(currentRotation + (normalizedStep * DECORATION_ROTATION_STEP_DEGREES));
+    const currentRotation = normalizeDecorationRotation(selectedTool, decorationRotationByType[selectedTool] ?? 0);
+    const nextRotation = normalizeDecorationRotation(
+      selectedTool,
+      currentRotation + (normalizedStep * getDecorationRotationStepDegrees(selectedTool))
+    );
     decorationRotationByType[selectedTool] = nextRotation;
     return nextRotation;
   }
@@ -1337,6 +1425,7 @@ export function createLevelEditor({
     getExportPayload,
     getSelectedTool: () => selectedTool,
     getSelectedInventoryTool,
+    getSelectedDoodadType: () => selectedDoodadType,
     getRampRotation: () => rampRotation,
     getPlayerSpawnRotation: () => playerSpawnRotation,
     isDoodadMenuOpen: () => doodadMenuOpen,

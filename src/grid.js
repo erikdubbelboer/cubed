@@ -10,6 +10,7 @@ import {
 } from "./kenneyModels.js";
 import {
   DECORATIVE_MODEL_TYPES,
+  getDecorativeModelSpec,
   isDecorativeObjectType as isCatalogDecorativeObjectType,
 } from "./modelCatalog.js";
 
@@ -187,7 +188,13 @@ function parseRotation(rawRotation, entryIndex, type) {
     throw new Error(`grid.levelObjects[${entryIndex}] rotation must be numeric.`);
   }
   if (isDecorativeObjectType(type)) {
-    return ((numericRotation % 360) + 360) % 360;
+    const normalized = ((numericRotation % 360) + 360) % 360;
+    const rotationStepDegrees = Number(getDecorativeModelSpec(type)?.rotationStepDegrees);
+    if (!Number.isFinite(rotationStepDegrees) || rotationStepDegrees <= 0 || rotationStepDegrees >= 360) {
+      return normalized;
+    }
+    const quantized = Math.round(normalized / rotationStepDegrees) * rotationStepDegrees;
+    return ((quantized % 360) + 360) % 360;
   }
   const quantized = Math.round(numericRotation / 90) * 90;
   if (Math.abs(numericRotation - quantized) > 1e-6) {
@@ -271,6 +278,31 @@ function normalizeLevelObjectTypeForExport(type) {
   return type;
 }
 
+function isGridSnappedDecorativeType(type) {
+  return getDecorativeModelSpec(type)?.placement === "grid";
+}
+
+function normalizeDecorativePosition(type, position) {
+  if (!isGridSnappedDecorativeType(type)) {
+    return clonePosition(position);
+  }
+  const worldX = Number(position?.x);
+  const worldY = Number(position?.y);
+  const worldZ = Number(position?.z);
+  const half = (GRID_SIZE * CELL_SIZE) * 0.5;
+  const cellX = Math.floor((worldX + half) / CELL_SIZE);
+  const cellZ = Math.floor((worldZ + half) / CELL_SIZE);
+  if (!isMainGridCell(cellX, cellZ)) {
+    return clonePosition(position);
+  }
+  const center = cellToWorld(cellX, cellZ);
+  return {
+    x: center.x,
+    y: worldY,
+    z: center.z,
+  };
+}
+
 function parseLevelLayout(levelObjects, options = {}) {
   const allowIncompleteMarkers = options.allowIncompleteMarkers === true;
   if (!Array.isArray(levelObjects)) {
@@ -309,6 +341,7 @@ function parseLevelLayout(levelObjects, options = {}) {
   let playerSpawnRotation = 0;
   const ramps = [];
   const decorativeObjects = [];
+  const rawDecorativeEntries = [];
   const rampCellsByKey = new Map();
   const rampOccupiedSurfaceMap = new Map();
   const rampOuterSurfaceMap = new Map();
@@ -329,11 +362,7 @@ function parseLevelLayout(levelObjects, options = {}) {
 
   for (const entry of parsedEntries) {
     if (isDecorativeObjectType(entry.type)) {
-      decorativeObjects.push({
-        type: entry.type,
-        position: clonePosition(entry.position),
-        rotation: entry.rotation,
-      });
+      rawDecorativeEntries.push(entry);
       continue;
     }
     if (!LEVEL_MARKER_TYPES.has(entry.type)) {
@@ -465,6 +494,18 @@ function parseLevelLayout(levelObjects, options = {}) {
     });
   }
 
+  for (const entry of rawDecorativeEntries) {
+    entry.position = normalizeDecorativePosition(
+      entry.type,
+      entry.position
+    );
+    decorativeObjects.push({
+      type: entry.type,
+      position: clonePosition(entry.position),
+      rotation: entry.rotation,
+    });
+  }
+
   if (!allowIncompleteMarkers && spawnCells.length === 0) {
     throw new Error("grid.levelObjects must contain at least one spawn marker.");
   }
@@ -475,7 +516,11 @@ function parseLevelLayout(levelObjects, options = {}) {
   const heights = createHeightMatrix();
   for (let cellZ = 0; cellZ < GRID_SIZE; cellZ += 1) {
     for (let cellX = 0; cellX < GRID_SIZE; cellX += 1) {
-      heights[cellZ][cellX] = wallHeights[cellZ][cellX];
+      let supportedHeight = 0;
+      while (wallVoxelKeySet.has(`${cellX},${supportedHeight},${cellZ}`)) {
+        supportedHeight += 1;
+      }
+      heights[cellZ][cellX] = supportedHeight;
     }
   }
   for (const ramp of ramps) {
@@ -695,6 +740,7 @@ export function createGrid(scene, options = {}) {
   const rampObstacles = [];
   const rampTopSurfaces = [];
   const editorRaycastTargets = [];
+  const decorativeObstacles = [];
   const buildRaycastObstacleBox = new THREE.Box3();
   const buildRaycastHitPoint = new THREE.Vector3();
   const buildRaycastBestPoint = new THREE.Vector3();
@@ -703,6 +749,8 @@ export function createGrid(scene, options = {}) {
   const wallAnchorRaycastBestNormal = new THREE.Vector3();
   const tempDecorationBounds = new THREE.Box3();
   const tempDecorationRemovalBounds = new THREE.Box3();
+  const tempDecorativeObstacleSize = new THREE.Vector3();
+  const tempDecorativeObstacleCenter = new THREE.Vector3();
   const staticBatchInstanceMatrix = new THREE.Matrix4();
   const staticBatchPartMatrix = new THREE.Matrix4();
   const staticBatchQuaternion = new THREE.Quaternion();
@@ -728,6 +776,40 @@ export function createGrid(scene, options = {}) {
     staticChunkCount: 0,
     decorativeChunkCount: 0,
   };
+
+  function createDecorativeObstacleFromBounds(type, bounds) {
+    const collision = getDecorativeModelSpec(type)?.collision;
+    const blocksPlayer = collision?.blocksPlayer === true;
+    const blocksProjectiles = collision?.blocksProjectiles === true;
+    if (!bounds || (!blocksPlayer && !blocksProjectiles)) {
+      return null;
+    }
+    bounds.getSize(tempDecorativeObstacleSize);
+    if (
+      tempDecorativeObstacleSize.x <= GRID_CONFIG.rayParallelEpsilon
+      || tempDecorativeObstacleSize.y <= GRID_CONFIG.rayParallelEpsilon
+      || tempDecorativeObstacleSize.z <= GRID_CONFIG.rayParallelEpsilon
+    ) {
+      return null;
+    }
+    bounds.getCenter(tempDecorativeObstacleCenter);
+    return {
+      kind: "decorative",
+      decorativeType: type,
+      position: new THREE.Vector3(
+        tempDecorativeObstacleCenter.x,
+        bounds.min.y,
+        tempDecorativeObstacleCenter.z
+      ),
+      halfSizeX: tempDecorativeObstacleSize.x * 0.5,
+      halfSizeZ: tempDecorativeObstacleSize.z * 0.5,
+      height: tempDecorativeObstacleSize.y,
+      baseY: bounds.min.y,
+      collidesWithPlayer: blocksPlayer,
+      supportsPlayer: collision?.supportsPlayer !== false,
+      blocksProjectiles,
+    };
+  }
 
   function getChunkKeyFromWorld(worldX, worldZ) {
     const cellX = Math.max(0, Math.min(GRID_SIZE - 1, Math.floor((worldX + half) / CELL_SIZE)));
@@ -977,7 +1059,12 @@ export function createGrid(scene, options = {}) {
         rotation: normalizedRotation,
         mesh: decorationVisual,
         bounds: tempDecorationBounds.clone(),
+        collisionObstacle: createDecorativeObstacleFromBounds(decoration.type, tempDecorationBounds),
       });
+      const collisionObstacle = decorativeEntries[decorativeEntries.length - 1]?.collisionObstacle ?? null;
+      if (collisionObstacle) {
+        decorativeObstacles.push(collisionObstacle);
+      }
       editorRaycastTargets.push(decorationVisual);
       gridRoot.add(decorationVisual);
       continue;
@@ -1000,10 +1087,14 @@ export function createGrid(scene, options = {}) {
       rotation: normalizedRotation,
       mesh: null,
       bounds: tempDecorationBounds.clone(),
+      collisionObstacle: createDecorativeObstacleFromBounds(decoration.type, tempDecorationBounds),
       chunkKey,
       removed: false,
     };
     decorativeEntries.push(entry);
+    if (entry.collisionObstacle) {
+      decorativeObstacles.push(entry.collisionObstacle);
+    }
     let chunkEntries = decorativeEntriesByChunk.get(chunkKey);
     if (!chunkEntries) {
       chunkEntries = [];
@@ -1764,6 +1855,62 @@ export function createGrid(scene, options = {}) {
     return getCellSurfaceY(cell.x, cell.z);
   }
 
+  function getSupportSurfaceYBelowWorld(worldX, worldY, worldZ) {
+    const cell = worldToCell(worldX, worldZ);
+    if (!cell) {
+      return null;
+    }
+
+    const ceilingY = Number(worldY);
+    const maxSurfaceY = Number.isFinite(ceilingY)
+      ? (ceilingY + 1e-4)
+      : Number.POSITIVE_INFINITY;
+    let bestY = FLOOR_Y;
+
+    for (const obstacle of altitudeObstacles) {
+      const obstaclePos = obstacle?.position;
+      const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
+        ? Number(obstacle.halfSizeX)
+        : Number(obstacle?.halfSize);
+      const obstacleHalfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
+        ? Number(obstacle.halfSizeZ)
+        : Number(obstacle?.halfSize);
+      const obstacleHeight = Number(obstacle?.height);
+      const obstacleBaseY = Number(obstacle?.baseY ?? 0);
+      if (
+        !obstaclePos
+        || obstacle?.supportsPlayer === false
+        || !Number.isFinite(obstacleHalfSizeX)
+        || !Number.isFinite(obstacleHalfSizeZ)
+        || !Number.isFinite(obstacleHeight)
+        || obstacleHeight <= 0
+      ) {
+        continue;
+      }
+      if (
+        worldX < (obstaclePos.x - obstacleHalfSizeX)
+        || worldX > (obstaclePos.x + obstacleHalfSizeX)
+        || worldZ < (obstaclePos.z - obstacleHalfSizeZ)
+        || worldZ > (obstaclePos.z + obstacleHalfSizeZ)
+      ) {
+        continue;
+      }
+      const topY = obstacleBaseY + obstacleHeight;
+      if (topY <= maxSurfaceY) {
+        bestY = Math.max(bestY, topY);
+      }
+    }
+
+    for (const rampObstacle of rampObstacles) {
+      const rampSurfaceY = rampObstacle?.getSurfaceYAtWorld?.(worldX, worldZ);
+      if (Number.isFinite(rampSurfaceY) && rampSurfaceY <= maxSurfaceY) {
+        bestY = Math.max(bestY, rampSurfaceY);
+      }
+    }
+
+    return bestY;
+  }
+
   function raycastBuildSurface(ray, outPoint = new THREE.Vector3()) {
     if (!ray || !ray.origin || !ray.direction) {
       return false;
@@ -2133,6 +2280,12 @@ export function createGrid(scene, options = {}) {
       }
       decorativeEntries.splice(i, 1);
       entry.removed = true;
+      if (entry.collisionObstacle) {
+        const collisionIndex = decorativeObstacles.indexOf(entry.collisionObstacle);
+        if (collisionIndex >= 0) {
+          decorativeObstacles.splice(collisionIndex, 1);
+        }
+      }
       if (typeof entry.chunkKey === "string" && entry.chunkKey.length > 0) {
         const chunkEntries = decorativeEntriesByChunk.get(entry.chunkKey);
         if (Array.isArray(chunkEntries)) {
@@ -2194,6 +2347,7 @@ export function createGrid(scene, options = {}) {
     tiles,
     heightObstacles: altitudeObstacles,
     rampObstacles,
+    decorativeObstacles,
     endpointObstacles,
     worldToCell,
     cellToWorldCenter,
@@ -2208,6 +2362,7 @@ export function createGrid(scene, options = {}) {
     getCellMarker,
     getCellSurfaceY,
     getBuildSurfaceYAtWorld,
+    getSupportSurfaceYBelowWorld,
     raycastBuildSurface,
     raycastWallAnchor,
     updateBoundaryWallVisual,

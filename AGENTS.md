@@ -20,7 +20,8 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Co-op uses the Kenney human model for the remote peer only; the local player remains first-person.
 - Money drops use the Kenney coin model, ramp visuals use Kenney stairs attached to the existing ramp helper mesh, and both terrain wall voxels and placed block towers use the Kenney wall model.
 - Terrain wall voxels must keep their hidden cube helper meshes authoritative for collision, build surfaces, LOS, and editor raycasts; the Kenney wall model is a visual child only.
-- Decorative editor props use the Kenney OBJ doodad catalog (`chest`, `barrel`, `stones`, plus the graveyard/environment doodads in `src/modelCatalog.js`), are visual-only, and must never be added to collision/pathing/LOS obstacle sets.
+- Decorative editor props use the Kenney OBJ doodad catalog (`chest`, `barrel`, `stones`, plus the graveyard/environment doodads in `src/modelCatalog.js`) and remain visual-only by default.
+- Exception: the `gate` doodad snaps to grid cell centers with 90-degree rotation steps and contributes numeric blockers for player movement and projectile collision only; it must never affect enemy pathing, build surfaces, or LOS/build obstacle sets beyond projectile blocking.
 - Decorative props are culled automatically when a placed tower's world bounds overlap them; they are dressing, not protected gameplay geometry.
 - Block build preview stays procedural/abstract on purpose; do not replace the green/red preview validity mesh with the imported wall art unless the preview readability problem is solved first.
 
@@ -132,7 +133,7 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Object schema: `{ type, position: { x, y, z }, rotation }`.
 - Supported marker/object types: `wall`, `spawn`, `end`, `playerSpawn`, `ramp`, and every decorative doodad type listed in `src/modelCatalog.js` (`path` allowed as legacy visual marker).
 - Ramp rotation mapping (low -> high): `0:+Z`, `90:+X`, `180:-Z`, `270:-X`; ramp anchor is low-end cell.
-- Grid-snapped gameplay objects continue to use integer cell coordinates in `position`; decorative props use world-space `position` coordinates and arbitrary numeric yaw in `rotation`.
+- Grid-snapped gameplay objects continue to use integer cell coordinates in `position`; decorative props use world-space `position` coordinates and arbitrary numeric yaw in `rotation`, except `gate`, which still serializes as world-space coordinates but snaps only its X/Z to cell centers and uses cardinal rotation.
 - Grid exposes marker-centric/runtime helpers (spawn/end/player spawn, buildability, ramp data, world<->cell mapping).
 - Endpoint collision contract:
   - Spawn/end cubes are movement/projectile obstacles.
@@ -175,8 +176,9 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Editor ramps may share their occupied X/Z cells with lower wall voxels when each wall stack top is `<= ramp.position.y`; overlap becomes invalid only when a wall voxel extends into the ramp volume, and removing those lower walls later is still allowed.
 - Wall voxels under ramp-occupied cells remain collision-only support geometry for the ramp; they must not act as independent walkable top surfaces, so ramp traversal still only enters/exits through the ramp's forward/back ends.
 - `end` and `playerSpawn` are unique markers; `spawn` is multi-place.
-- Decorative editor props place freely on world surfaces via editor raycasts rather than voxel snapping, but remain serialized into `levelObjects` alongside the snapped gameplay objects.
-- Decorative editor props support arbitrary yaw rotation via the editor scroll-wheel tool rotation path rather than cardinal-only ramp/player-start rotation.
+- Decorative editor props place freely on world surfaces via editor raycasts rather than voxel snapping, but remain serialized into `levelObjects` alongside the snapped gameplay objects; `gate` is the exception and snaps to the targeted grid cell center/surface instead.
+- Decorative editor props support arbitrary yaw rotation via the editor scroll-wheel tool rotation path rather than cardinal-only ramp/player-start rotation; `gate` is the exception and rotates in 90-degree steps.
+- Editor toolbar buttons and the doodad picker render through shared canvas-drawn 3D previews from `src/editorModelPreviews.js`; the doodad toolbar slot mirrors the currently selected doodad type, and the UI must fall back to legacy icons if a preview cannot be produced.
 - Marker `y` values are authoritative and must match traversable surface; invalid markers fail path system validation.
 - Player spawn facing uses `playerSpawn.rotation` cardinal mapping (same mapping as ramp cardinal conventions).
 - Exiting editor validates playability before returning to gameplay.

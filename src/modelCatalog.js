@@ -17,7 +17,17 @@ const DECORATIVE_MODEL_BASE_DEFS = [
   { type: "crypt-b", targetHeightCells: 0.5 },
   { type: "debris-wood", targetHeightCells: 0.12 },
   { type: "debris", targetHeightCells: 0.16 },
-  { type: "gate", targetHeightCells: 0.98 },
+  {
+    type: "gate",
+    targetHeightCells: 0.98,
+    placement: "grid",
+    rotationStepDegrees: 90,
+    collision: {
+      blocksPlayer: true,
+      blocksProjectiles: true,
+      supportsPlayer: false,
+    },
+  },
   { type: "grave-border", targetHeightCells: 0.12 },
   { type: "grave", targetHeightCells: 0.12 },
   { type: "gravestone-broken", targetHeightCells: 0.32 },
@@ -54,6 +64,9 @@ function humanizeTypeLabel(type) {
 export const DECORATIVE_MODEL_SPECS = Object.freeze(
   DECORATIVE_MODEL_BASE_DEFS.map((entry) => Object.freeze({
     ...entry,
+    collision: entry.collision && typeof entry.collision === "object"
+      ? Object.freeze({ ...entry.collision })
+      : null,
     label: humanizeTypeLabel(entry.type),
   }))
 );

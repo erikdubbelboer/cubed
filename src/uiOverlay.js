@@ -1569,6 +1569,7 @@ function normalizeTowerInventory(inputInventory) {
       type: entry?.type || "unknown",
       label: entry?.label || entry?.type || "Tower",
       iconId: entry?.iconId || "tower_gun",
+      previewId: typeof entry?.previewId === "string" ? entry.previewId : "",
       hotkey: entry?.hotkey || "",
       remaining,
       affordable,
@@ -1593,6 +1594,7 @@ function normalizeEditorDoodadMenu(menuState) {
     ? menuState.items.map((item) => ({
       type: item?.type || "unknown",
       label: item?.label || item?.type || "Doodad",
+      previewId: typeof item?.previewId === "string" ? item.previewId : "",
       focused: item?.focused === true,
       selected: item?.selected === true,
     }))
@@ -1616,6 +1618,7 @@ export function createUiOverlay({
   maxPixelRatio = 2,
   maxTextureSize = Number.POSITIVE_INFINITY,
   maxCanvasPixels = 8388608,
+  previewProvider = null,
   mobileConfig = {},
 } = {}) {
   let drawCanvas = null;
@@ -1670,6 +1673,9 @@ export function createUiOverlay({
   let viewportWidth = Math.max(1, Math.floor(width));
   let viewportHeight = Math.max(1, Math.floor(height));
   let pixelRatio = 1;
+  const activePreviewProvider = previewProvider && typeof previewProvider.drawPreview === "function"
+    ? previewProvider
+    : null;
 
   const state = {
     hudVisible: true,
@@ -1798,6 +1804,25 @@ export function createUiOverlay({
       return;
     }
     touchBlockedRects.push({ x, y, width, height });
+  }
+
+  function drawIconOrPreview(fallbackIconId, previewId, x, y, width, height) {
+    if (
+      activePreviewProvider
+      && typeof previewId === "string"
+      && previewId.length > 0
+      && activePreviewProvider.drawPreview(drawCtx, previewId, x, y, width, height) === true
+    ) {
+      return;
+    }
+    const fallbackSize = Math.min(width, height);
+    drawIconById(
+      drawCtx,
+      fallbackIconId,
+      x + ((width - fallbackSize) * 0.5),
+      y + ((height - fallbackSize) * 0.5),
+      fallbackSize
+    );
   }
 
   function resize(nextWidth, nextHeight) {
@@ -2681,7 +2706,7 @@ export function createUiOverlay({
       if (isDepleted) {
         drawCtx.globalAlpha = 0.42;
       }
-      drawIconById(drawCtx, item.iconId, iconX, iconY, iconSize);
+      drawIconOrPreview(item.iconId, item.previewId, iconX, iconY, iconSize, iconSize);
       drawCtx.restore();
 
       if (item.hotkey && state.showKeyboardHints) {
@@ -2835,7 +2860,7 @@ export function createUiOverlay({
       const iconSize = Math.min(cellWidth * 0.52, cellHeight * 0.46);
       const iconX = x + (cellWidth - iconSize) * 0.5;
       const iconY = y + clamp(cellHeight * 0.08, 6, 12);
-      drawIconById(drawCtx, "editor_doodad", iconX, iconY, iconSize);
+      drawIconOrPreview("editor_doodad", item.previewId, iconX, iconY, iconSize, iconSize);
 
       const labelWidth = cellWidth - 12;
       const labelBaseSize = clamp(cellHeight * 0.16, 10, 15);

@@ -2067,7 +2067,8 @@ export function createPlayer({
       if (canMove) {
         const forwardAxis = (controls.isLocked ? keyboardForward : 0) + virtualState.forward;
         const strafeAxis = (controls.isLocked ? keyboardStrafe : 0) + virtualState.strafe;
-        const length = Math.hypot(forwardAxis, strafeAxis);
+        const verticalAxis = jumpHeld ? 1 : 0;
+        const length = Math.hypot(forwardAxis, strafeAxis, verticalAxis);
         const activeMoveSpeed = moveSpeed
           * playerMovementSpeedMultiplier
           * (controls.isLocked && moveState.sprint ? sprintMultiplier : 1);
@@ -2079,6 +2080,7 @@ export function createPlayer({
             freeFlyRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
             freeFlyDelta.copy(freeFlyForward).multiplyScalar(forwardAxis / length);
             freeFlyDelta.addScaledVector(freeFlyRight, strafeAxis / length);
+            freeFlyDelta.addScaledVector(yAxis, verticalAxis / length);
             if (freeFlyDelta.lengthSq() > 0) {
               freeFlyDelta.normalize().multiplyScalar(activeMoveSpeed * deltaSeconds);
               camera.position.add(freeFlyDelta);
