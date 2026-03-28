@@ -1,4 +1,13 @@
 import * as THREE from "three";
+import { createDecorationVisual, isKenneyAssetManagedResource } from "./kenneyModels.js";
+import {
+  DECORATIVE_MODEL_SPECS,
+  EDITOR_DOODAD_PAGE_COLUMNS,
+  EDITOR_DOODAD_PAGE_ROWS,
+  EDITOR_DOODAD_PAGE_SIZE,
+  getDecorativeModelSpec,
+  isDecorativeObjectType,
+} from "./modelCatalog.js";
 
 const TOOL_BY_DIGIT = {
   1: "eraser",
@@ -7,12 +16,10 @@ const TOOL_BY_DIGIT = {
   4: "end",
   5: "ramp",
   6: "playerSpawn",
-  7: "chest",
-  8: "barrel",
-  9: "stones",
+  7: "doodads",
 };
 
-const TOOL_ORDER = ["eraser", "wall", "spawn", "end", "ramp", "playerSpawn", "chest", "barrel", "stones"];
+const TOOL_ORDER = ["eraser", "wall", "spawn", "end", "ramp", "playerSpawn", "doodads"];
 const TOOL_COLORS = {
   eraser: 0xff8b8b,
   wall: 0x7db9ff,
@@ -20,15 +27,7 @@ const TOOL_COLORS = {
   end: 0xffa884,
   ramp: 0xa0d8ff,
   playerSpawn: 0x60ff7f,
-  chest: 0xf0c380,
-  barrel: 0xc88356,
-  stones: 0xaab6c5,
-};
-const DECORATION_TOOL_SET = new Set(["chest", "barrel", "stones"]);
-const DECORATION_PREVIEW_SIZE = {
-  chest: { width: 0.48, height: 0.34, depth: 0.36 },
-  barrel: { width: 0.3, height: 0.34, depth: 0.3 },
-  stones: { width: 0.46, height: 0.18, depth: 0.34 },
+  doodads: 0xc7bb8a,
 };
 const DECORATION_MATCH_EPSILON = 0.08;
 const DECORATION_ROTATION_STEP_DEGREES = 15;
@@ -55,13 +54,17 @@ function normalizeFreeRotation(rawRotation = 0) {
 }
 
 function isDecorationTool(type) {
-  return DECORATION_TOOL_SET.has(type);
+  return isDecorativeObjectType(type);
 }
 
 function normalizeRotationForType(type, rawRotation = 0) {
   return isDecorationTool(type)
     ? normalizeFreeRotation(rawRotation)
     : normalizeCardinalRotation(rawRotation);
+}
+
+function getToolColor(type) {
+  return TOOL_COLORS[isDecorationTool(type) ? "doodads" : type] ?? TOOL_COLORS.wall;
 }
 
 function cloneLevelObject(entry) {
@@ -208,11 +211,15 @@ export function createLevelEditor({
   let selectedTool = "wall";
   let rampRotation = 0;
   let playerSpawnRotation = 0;
-  const decorationRotationByType = {
-    chest: 0,
-    barrel: 0,
-    stones: 0,
-  };
+  let selectedDoodadType = DECORATIVE_MODEL_SPECS[0]?.type ?? "chest";
+  let doodadMenuOpen = false;
+  let doodadMenuIndex = Math.max(
+    0,
+    DECORATIVE_MODEL_SPECS.findIndex((entry) => entry.type === selectedDoodadType)
+  );
+  const decorationRotationByType = Object.fromEntries(
+    DECORATIVE_MODEL_SPECS.map((entry) => [entry.type, 0])
+  );
   let lastCandidate = null;
 
   const wallMap = new Map();
@@ -237,23 +244,19 @@ export function createLevelEditor({
 
   const previewCube = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), previewMaterial);
   const previewRamp = new THREE.Mesh(createRampPreviewGeometry(), previewMaterial);
-  const previewChest = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), previewMaterial);
-  const previewBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1, 12), previewMaterial);
-  const previewStones = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), previewMaterial);
   const previewFacingArrowGeometry = new THREE.ConeGeometry(0.14, 0.36, 12);
   previewFacingArrowGeometry.rotateX(Math.PI * 0.5);
   const previewFacingArrow = new THREE.Mesh(previewFacingArrowGeometry, previewMaterial);
+  const previewDecorationRoot = new THREE.Group();
+  let previewDecorationVisual = null;
+  let previewDecorationVisualKey = "";
   previewCube.visible = false;
   previewRamp.visible = false;
-  previewChest.visible = false;
-  previewBarrel.visible = false;
-  previewStones.visible = false;
+  previewDecorationRoot.visible = false;
   previewFacingArrow.visible = false;
   previewRoot.add(previewCube);
   previewRoot.add(previewRamp);
-  previewRoot.add(previewChest);
-  previewRoot.add(previewBarrel);
-  previewRoot.add(previewStones);
+  previewRoot.add(previewDecorationRoot);
   previewRoot.add(previewFacingArrow);
 
   function getGridSize() {
@@ -266,6 +269,72 @@ export function createLevelEditor({
 
   function getFloorY() {
     return Number(grid?.tileTopY) || 0;
+  }
+
+  function disposePreviewVisualResources(root) {
+    if (!root) {
+      return;
+    }
+    const disposedMaterials = new Set();
+    root.traverse((child) => {
+      if (!child?.material) {
+        return;
+      }
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (
+          !material
+          || disposedMaterials.has(material)
+          || typeof material.dispose !== "function"
+          || isKenneyAssetManagedResource(material)
+        ) {
+          continue;
+        }
+        disposedMaterials.add(material);
+        material.dispose();
+      }
+    });
+  }
+
+  function clearPreviewDecorationVisual() {
+    if (previewDecorationVisual?.parent) {
+      previewDecorationVisual.parent.remove(previewDecorationVisual);
+    }
+    disposePreviewVisualResources(previewDecorationVisual);
+    previewDecorationVisual = null;
+    previewDecorationVisualKey = "";
+  }
+
+  function ensurePreviewDecorationVisual(type, previewColor, previewOpacity) {
+    const normalizedType = typeof type === "string" ? type.trim().toLowerCase() : "";
+    if (!isDecorationTool(normalizedType)) {
+      clearPreviewDecorationVisual();
+      return null;
+    }
+    const colorHex = Number(previewColor) || 0xffffff;
+    const opacity = THREE.MathUtils.clamp(Number(previewOpacity) || 1, 0.05, 1);
+    const nextKey = `${normalizedType}:${colorHex}:${opacity.toFixed(3)}`;
+    if (previewDecorationVisual && previewDecorationVisualKey === nextKey) {
+      return previewDecorationVisual;
+    }
+    clearPreviewDecorationVisual();
+    previewDecorationVisual = createDecorationVisual(normalizedType, {
+      instanceMaterialStyle: {
+        color: colorHex,
+        emissive: colorHex,
+        emissiveIntensity: 0.18,
+        roughness: 0.82,
+        metalness: 0.02,
+        opacity,
+        transparent: true,
+        useMap: false,
+      },
+    });
+    previewDecorationVisualKey = nextKey;
+    if (previewDecorationVisual) {
+      previewDecorationRoot.add(previewDecorationVisual);
+    }
+    return previewDecorationVisual;
   }
 
   function isInsideBounds(x, z) {
@@ -512,6 +581,9 @@ export function createLevelEditor({
   }
 
   function getPlacementCandidate() {
+    if (doodadMenuOpen) {
+      return { valid: false, mode: "doodad_menu", target: null };
+    }
     raycaster.setFromCamera(aimPoint, camera);
 
     const targets = typeof grid?.getEditorRaycastTargets === "function"
@@ -692,9 +764,7 @@ export function createLevelEditor({
     if (!previewRoot.visible) {
       previewCube.visible = false;
       previewRamp.visible = false;
-      previewChest.visible = false;
-      previewBarrel.visible = false;
-      previewStones.visible = false;
+      previewDecorationRoot.visible = false;
       previewFacingArrow.visible = false;
       return;
     }
@@ -702,7 +772,7 @@ export function createLevelEditor({
     const isValid = !!candidate.valid;
     const previewColor = candidate.mode === "eraser"
       ? 0xff6c6c
-      : (isValid ? (TOOL_COLORS[selectedTool] ?? TOOL_COLORS.wall) : 0xff6c6c);
+      : (isValid ? getToolColor(selectedTool) : 0xff6c6c);
     previewMaterial.color.setHex(previewColor);
     previewMaterial.opacity = candidate.mode === "eraser"
       ? 0.28
@@ -713,9 +783,7 @@ export function createLevelEditor({
       const target = candidate.target;
       if (target?.type === "ramp") {
         previewCube.visible = false;
-        previewChest.visible = false;
-        previewBarrel.visible = false;
-        previewStones.visible = false;
+        previewDecorationRoot.visible = false;
         previewRamp.visible = true;
         const direction = getRampDirectionFromRotation(target.rotation);
         const high = {
@@ -741,25 +809,16 @@ export function createLevelEditor({
       if (isDecorationTool(target?.type)) {
         previewCube.visible = false;
         previewRamp.visible = false;
-        previewChest.visible = target.type === "chest";
-        previewBarrel.visible = target.type === "barrel";
-        previewStones.visible = target.type === "stones";
-        const previewConfig = DECORATION_PREVIEW_SIZE[target.type] ?? DECORATION_PREVIEW_SIZE.chest;
-        const previewMesh = target.type === "chest"
-          ? previewChest
-          : (target.type === "barrel" ? previewBarrel : previewStones);
-        const cellSize = getCellSize();
-        previewMesh.position.set(
-          Number(target.position?.x) || 0,
-          (Number(target.position?.y) || 0) + (previewConfig.height * cellSize * 0.5),
-          Number(target.position?.z) || 0
-        );
-        previewMesh.rotation.set(0, THREE.MathUtils.degToRad(Number(target.rotation) || 0), 0);
-        previewMesh.scale.set(
-          previewConfig.width * cellSize,
-          previewConfig.height * cellSize,
-          previewConfig.depth * cellSize
-        );
+        previewDecorationRoot.visible = true;
+        const previewVisual = ensurePreviewDecorationVisual(target.type, previewColor, previewMaterial.opacity);
+        if (previewVisual) {
+          previewDecorationRoot.position.set(
+            Number(target.position?.x) || 0,
+            Number(target.position?.y) || 0,
+            Number(target.position?.z) || 0
+          );
+          previewDecorationRoot.rotation.set(0, THREE.MathUtils.degToRad(Number(target.rotation) || 0), 0);
+        }
         return;
       }
     }
@@ -767,9 +826,7 @@ export function createLevelEditor({
     if (candidate.mode === "ramp") {
       previewCube.visible = false;
       previewRamp.visible = true;
-      previewChest.visible = false;
-      previewBarrel.visible = false;
-      previewStones.visible = false;
+      previewDecorationRoot.visible = false;
       previewFacingArrow.visible = false;
       const direction = getRampDirectionFromRotation(candidate.target.rotation);
       const low = candidate.target;
@@ -797,34 +854,23 @@ export function createLevelEditor({
     if (isDecorationTool(candidate.mode)) {
       previewCube.visible = false;
       previewRamp.visible = false;
+      previewDecorationRoot.visible = true;
       previewFacingArrow.visible = false;
-      previewChest.visible = candidate.mode === "chest";
-      previewBarrel.visible = candidate.mode === "barrel";
-      previewStones.visible = candidate.mode === "stones";
       const target = candidate.target?.position ?? candidate.target;
-      const cellSize = getCellSize();
-      const previewConfig = DECORATION_PREVIEW_SIZE[candidate.mode] ?? DECORATION_PREVIEW_SIZE.chest;
-      const previewMesh = candidate.mode === "chest"
-        ? previewChest
-        : (candidate.mode === "barrel" ? previewBarrel : previewStones);
-      previewMesh.position.set(
-        Number(target?.x) || 0,
-        (Number(target?.y) || 0) + (previewConfig.height * cellSize * 0.5),
-        Number(target?.z) || 0
-      );
-      previewMesh.rotation.set(0, THREE.MathUtils.degToRad(Number(candidate.target?.rotation) || 0), 0);
-      previewMesh.scale.set(
-        previewConfig.width * cellSize,
-        previewConfig.height * cellSize,
-        previewConfig.depth * cellSize
-      );
+      const previewVisual = ensurePreviewDecorationVisual(candidate.mode, previewColor, previewMaterial.opacity);
+      if (previewVisual) {
+        previewDecorationRoot.position.set(
+          Number(target?.x) || 0,
+          Number(target?.y) || 0,
+          Number(target?.z) || 0
+        );
+        previewDecorationRoot.rotation.set(0, THREE.MathUtils.degToRad(Number(candidate.target?.rotation) || 0), 0);
+      }
       return;
     }
 
     previewRamp.visible = false;
-    previewChest.visible = false;
-    previewBarrel.visible = false;
-    previewStones.visible = false;
+    previewDecorationRoot.visible = false;
     previewCube.visible = true;
     previewFacingArrow.visible = candidate.mode === "playerSpawn";
     const target = candidate.target;
@@ -998,11 +1044,173 @@ export function createLevelEditor({
     };
   }
 
-  function setSelectedTool(nextTool) {
-    if (!TOOL_ORDER.includes(nextTool)) {
+  function getDoodadCount() {
+    return DECORATIVE_MODEL_SPECS.length;
+  }
+
+  function getDoodadPageCount() {
+    return Math.max(1, Math.ceil(getDoodadCount() / EDITOR_DOODAD_PAGE_SIZE));
+  }
+
+  function getSelectedInventoryTool() {
+    return doodadMenuOpen
+      ? "doodads"
+      : (isDecorationTool(selectedTool) ? "doodads" : selectedTool);
+  }
+
+  function syncDoodadMenuIndexToType(type) {
+    const normalizedType = typeof type === "string" ? type.trim().toLowerCase() : "";
+    const nextIndex = DECORATIVE_MODEL_SPECS.findIndex((entry) => entry.type === normalizedType);
+    if (nextIndex >= 0) {
+      doodadMenuIndex = nextIndex;
+    }
+    return doodadMenuIndex;
+  }
+
+  function openDoodadMenu() {
+    doodadMenuOpen = true;
+    syncDoodadMenuIndexToType(selectedDoodadType);
+    return true;
+  }
+
+  function closeDoodadMenu() {
+    const wasOpen = doodadMenuOpen;
+    doodadMenuOpen = false;
+    return wasOpen;
+  }
+
+  function toggleDoodadMenu() {
+    if (doodadMenuOpen) {
+      doodadMenuOpen = false;
       return false;
     }
-    selectedTool = nextTool;
+    openDoodadMenu();
+    return true;
+  }
+
+  function chooseDoodadType(type, { closeMenu = true, selectTool = true } = {}) {
+    const decorativeSpec = getDecorativeModelSpec(type);
+    if (!decorativeSpec) {
+      return false;
+    }
+    selectedDoodadType = decorativeSpec.type;
+    syncDoodadMenuIndexToType(selectedDoodadType);
+    if (selectTool) {
+      selectedTool = selectedDoodadType;
+    }
+    if (closeMenu) {
+      doodadMenuOpen = false;
+    }
+    return true;
+  }
+
+  function moveDoodadMenuSelection(dx = 0, dy = 0) {
+    if (!doodadMenuOpen || getDoodadCount() === 0) {
+      return false;
+    }
+    const currentPageStart = Math.floor(doodadMenuIndex / EDITOR_DOODAD_PAGE_SIZE) * EDITOR_DOODAD_PAGE_SIZE;
+    const currentPageEnd = Math.min(getDoodadCount(), currentPageStart + EDITOR_DOODAD_PAGE_SIZE) - 1;
+    const currentOffset = doodadMenuIndex - currentPageStart;
+    let nextRow = clamp(
+      Math.floor(currentOffset / EDITOR_DOODAD_PAGE_COLUMNS) + Math.sign(Number(dy) || 0),
+      0,
+      EDITOR_DOODAD_PAGE_ROWS - 1
+    );
+    let nextColumn = clamp(
+      (currentOffset % EDITOR_DOODAD_PAGE_COLUMNS) + Math.sign(Number(dx) || 0),
+      0,
+      EDITOR_DOODAD_PAGE_COLUMNS - 1
+    );
+    let nextIndex = currentPageStart + (nextRow * EDITOR_DOODAD_PAGE_COLUMNS) + nextColumn;
+    while (nextIndex > currentPageEnd && nextColumn > 0) {
+      nextColumn -= 1;
+      nextIndex = currentPageStart + (nextRow * EDITOR_DOODAD_PAGE_COLUMNS) + nextColumn;
+    }
+    while (nextIndex > currentPageEnd && nextRow > 0) {
+      nextRow -= 1;
+      nextIndex = currentPageStart + (nextRow * EDITOR_DOODAD_PAGE_COLUMNS) + nextColumn;
+      while (nextIndex > currentPageEnd && nextColumn > 0) {
+        nextColumn -= 1;
+        nextIndex = currentPageStart + (nextRow * EDITOR_DOODAD_PAGE_COLUMNS) + nextColumn;
+      }
+    }
+    nextIndex = clamp(nextIndex, currentPageStart, currentPageEnd);
+    if (nextIndex === doodadMenuIndex) {
+      return false;
+    }
+    doodadMenuIndex = nextIndex;
+    return true;
+  }
+
+  function pageDoodadMenu(step = 1) {
+    if (!doodadMenuOpen || getDoodadCount() === 0) {
+      return false;
+    }
+    const direction = Math.sign(Number(step) || 0);
+    if (direction === 0) {
+      return false;
+    }
+    const currentPage = Math.floor(doodadMenuIndex / EDITOR_DOODAD_PAGE_SIZE);
+    const nextPage = clamp(currentPage + direction, 0, getDoodadPageCount() - 1);
+    if (nextPage === currentPage) {
+      return false;
+    }
+    const pageOffset = doodadMenuIndex % EDITOR_DOODAD_PAGE_SIZE;
+    doodadMenuIndex = Math.min(
+      getDoodadCount() - 1,
+      (nextPage * EDITOR_DOODAD_PAGE_SIZE) + pageOffset
+    );
+    return true;
+  }
+
+  function confirmDoodadMenuSelection() {
+    if (!doodadMenuOpen) {
+      return false;
+    }
+    const selectedEntry = DECORATIVE_MODEL_SPECS[doodadMenuIndex] ?? null;
+    return selectedEntry ? chooseDoodadType(selectedEntry.type) : false;
+  }
+
+  function getDoodadMenuState() {
+    if (!doodadMenuOpen) {
+      return null;
+    }
+    const pageIndex = Math.floor(doodadMenuIndex / EDITOR_DOODAD_PAGE_SIZE);
+    const pageStart = pageIndex * EDITOR_DOODAD_PAGE_SIZE;
+    const pageItems = DECORATIVE_MODEL_SPECS.slice(pageStart, pageStart + EDITOR_DOODAD_PAGE_SIZE);
+    return {
+      visible: true,
+      title: "Doodads",
+      pageIndex,
+      pageCount: getDoodadPageCount(),
+      columns: EDITOR_DOODAD_PAGE_COLUMNS,
+      rows: EDITOR_DOODAD_PAGE_ROWS,
+      items: pageItems.map((entry, index) => {
+        const globalIndex = pageStart + index;
+        return {
+          type: entry.type,
+          label: entry.label,
+          focused: globalIndex === doodadMenuIndex,
+          selected: entry.type === selectedDoodadType,
+        };
+      }),
+    };
+  }
+
+  function setSelectedTool(nextTool) {
+    if (nextTool === "doodads") {
+      openDoodadMenu();
+      return true;
+    }
+    if (!TOOL_ORDER.includes(nextTool) && !isDecorationTool(nextTool)) {
+      return false;
+    }
+    if (isDecorationTool(nextTool)) {
+      chooseDoodadType(nextTool, { closeMenu: true, selectTool: true });
+    } else {
+      selectedTool = nextTool;
+      doodadMenuOpen = false;
+    }
     if (selectedTool === "playerSpawn" && playerSpawnMarker) {
       playerSpawnRotation = normalizeCardinalRotation(playerSpawnMarker.rotation);
     }
@@ -1025,6 +1233,10 @@ export function createLevelEditor({
     const nextTool = TOOL_BY_DIGIT[digit];
     if (!nextTool) {
       return false;
+    }
+    if (nextTool === "doodads") {
+      toggleDoodadMenu();
+      return true;
     }
     return setSelectedTool(nextTool);
   }
@@ -1071,6 +1283,9 @@ export function createLevelEditor({
   }
 
   function applyPrimaryAction() {
+    if (doodadMenuOpen) {
+      return false;
+    }
     // Re-sample candidate at action time so recent wheel/tool/camera changes are never one-frame stale.
     lastCandidate = getPlacementCandidate();
     updatePreview(lastCandidate);
@@ -1084,9 +1299,14 @@ export function createLevelEditor({
   }
 
   function dispose() {
+    clearPreviewDecorationVisual();
     scene.remove(previewRoot);
     previewRoot.traverse((child) => {
-      if (child?.geometry && typeof child.geometry.dispose === "function") {
+      if (
+        child?.geometry
+        && typeof child.geometry.dispose === "function"
+        && !isKenneyAssetManagedResource(child.geometry)
+      ) {
         child.geometry.dispose();
       }
       if (!child?.material) {
@@ -1094,7 +1314,9 @@ export function createLevelEditor({
       }
       const materials = Array.isArray(child.material) ? child.material : [child.material];
       for (const material of materials) {
-        material?.dispose?.();
+        if (!isKenneyAssetManagedResource(material)) {
+          material?.dispose?.();
+        }
       }
     });
   }
@@ -1114,7 +1336,17 @@ export function createLevelEditor({
     getLevelObjects,
     getExportPayload,
     getSelectedTool: () => selectedTool,
+    getSelectedInventoryTool,
     getRampRotation: () => rampRotation,
     getPlayerSpawnRotation: () => playerSpawnRotation,
+    isDoodadMenuOpen: () => doodadMenuOpen,
+    openDoodadMenu,
+    closeDoodadMenu,
+    toggleDoodadMenu,
+    moveDoodadMenuSelection,
+    pageDoodadMenu,
+    confirmDoodadMenuSelection,
+    chooseDoodadType,
+    getDoodadMenuState,
   };
 }

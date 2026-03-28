@@ -1173,6 +1173,42 @@ function drawIconEditorStones(ctx, x, y, size) {
   }
 }
 
+function drawIconEditorDoodad(ctx, x, y, size) {
+  drawPanel(
+    ctx,
+    x + size * 0.2,
+    y + size * 0.5,
+    size * 0.6,
+    size * 0.16,
+    size * 0.05,
+    "rgba(124, 104, 85, 0.92)",
+    "rgba(229, 214, 191, 0.88)",
+    Math.max(1.1, size * 0.04)
+  );
+  drawPanel(
+    ctx,
+    x + size * 0.32,
+    y + size * 0.28,
+    size * 0.14,
+    size * 0.28,
+    size * 0.06,
+    "rgba(156, 163, 174, 0.94)",
+    "rgba(243, 247, 252, 0.9)",
+    Math.max(1.1, size * 0.04)
+  );
+  drawPanel(
+    ctx,
+    x + size * 0.52,
+    y + size * 0.18,
+    size * 0.12,
+    size * 0.38,
+    size * 0.06,
+    "rgba(81, 128, 81, 0.92)",
+    "rgba(213, 247, 213, 0.86)",
+    Math.max(1, size * 0.035)
+  );
+}
+
 function drawIconWeaponMachineGun(ctx, x, y, size) {
   drawPanel(
     ctx,
@@ -1511,6 +1547,9 @@ export function drawIconById(ctx, iconId, x, y, size) {
     case "editor_stones":
       drawIconEditorStones(ctx, x, y, size);
       return;
+    case "editor_doodad":
+      drawIconEditorDoodad(ctx, x, y, size);
+      return;
     default:
       drawIconDefault(ctx, x, y, size);
   }
@@ -1536,6 +1575,39 @@ function normalizeTowerInventory(inputInventory) {
       cost: Math.max(0, Math.floor(Number(entry?.cost) || 0)),
     };
   });
+}
+
+function normalizeEditorDoodadMenu(menuState) {
+  if (!menuState || typeof menuState !== "object" || menuState.visible !== true) {
+    return {
+      visible: false,
+      title: "Doodads",
+      pageIndex: 0,
+      pageCount: 1,
+      columns: 5,
+      rows: 3,
+      items: [],
+    };
+  }
+  const items = Array.isArray(menuState.items)
+    ? menuState.items.map((item) => ({
+      type: item?.type || "unknown",
+      label: item?.label || item?.type || "Doodad",
+      focused: item?.focused === true,
+      selected: item?.selected === true,
+    }))
+    : [];
+  return {
+    visible: true,
+    title: typeof menuState.title === "string" && menuState.title.length > 0
+      ? menuState.title
+      : "Doodads",
+    pageIndex: Math.max(0, Math.floor(Number(menuState.pageIndex) || 0)),
+    pageCount: Math.max(1, Math.floor(Number(menuState.pageCount) || 1)),
+    columns: Math.max(1, Math.floor(Number(menuState.columns) || 5)),
+    rows: Math.max(1, Math.floor(Number(menuState.rows) || 3)),
+    items,
+  };
 }
 
 export function createUiOverlay({
@@ -1618,6 +1690,7 @@ export function createUiOverlay({
     waveNumber: 1,
     towerInventory: [],
     selectedTowerType: null,
+    editorDoodadMenu: normalizeEditorDoodadMenu(null),
     buildMode: false,
     showKeyboardHints: true,
     showTouchControls: false,
@@ -1701,6 +1774,7 @@ export function createUiOverlay({
   let techTreeNodeRects = [];
   let techTreePanelRect = null;
   let towerSlotRects = [];
+  let editorDoodadItemRects = [];
   let hudButtonRects = [];
   let touchActionZones = [];
   let touchBlockedRects = [];
@@ -1814,6 +1888,9 @@ export function createUiOverlay({
     }
     if (Object.prototype.hasOwnProperty.call(partialState, "selectedTowerType")) {
       state.selectedTowerType = partialState.selectedTowerType || null;
+    }
+    if (Object.prototype.hasOwnProperty.call(partialState, "editorDoodadMenu")) {
+      state.editorDoodadMenu = normalizeEditorDoodadMenu(partialState.editorDoodadMenu);
     }
     if (typeof partialState.buildMode === "boolean") {
       state.buildMode = partialState.buildMode;
@@ -2673,6 +2750,134 @@ export function createUiOverlay({
       pushTouchBlockedRect(x, y, slotSize, slotSize);
     }
 
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "alphabetic";
+  }
+
+  function drawEditorDoodadMenu() {
+    editorDoodadItemRects = [];
+    if (!state.editorDoodadMenu.visible) {
+      return;
+    }
+
+    drawCtx.fillStyle = "rgba(3, 8, 15, 0.56)";
+    drawCtx.fillRect(0, 0, viewportWidth, viewportHeight);
+
+    const panelWidth = clamp(viewportWidth * 0.74, 400, 940);
+    const panelHeight = clamp(viewportHeight * 0.68, 320, 640);
+    const panelX = (viewportWidth - panelWidth) * 0.5;
+    const panelY = (viewportHeight - panelHeight) * 0.5;
+    const titleFontSize = clamp(panelHeight * 0.07, 22, 34);
+    const subtitleFontSize = clamp(panelHeight * 0.035, 12, 16);
+    const columns = Math.max(1, state.editorDoodadMenu.columns || 5);
+    const rows = Math.max(1, state.editorDoodadMenu.rows || 3);
+    const headerHeight = clamp(panelHeight * 0.2, 68, 108);
+    const footerHeight = clamp(panelHeight * 0.14, 48, 72);
+    const innerPaddingX = clamp(panelWidth * 0.045, 16, 26);
+    const innerPaddingY = clamp(panelHeight * 0.04, 14, 24);
+    const gridGap = clamp(Math.min(panelWidth, panelHeight) * 0.02, 8, 16);
+    const gridX = panelX + innerPaddingX;
+    const gridY = panelY + headerHeight;
+    const gridWidth = panelWidth - (innerPaddingX * 2);
+    const gridHeight = panelHeight - headerHeight - footerHeight - innerPaddingY;
+    const cellWidth = Math.max(44, (gridWidth - (gridGap * (columns - 1))) / columns);
+    const cellHeight = Math.max(56, (gridHeight - (gridGap * (rows - 1))) / rows);
+
+    drawPanel(
+      drawCtx,
+      panelX,
+      panelY,
+      panelWidth,
+      panelHeight,
+      clamp(panelHeight * 0.05, 12, 18),
+      "rgba(10, 18, 30, 0.96)",
+      "rgba(182, 214, 240, 0.74)",
+      1.6
+    );
+
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "top";
+    drawCtx.fillStyle = "rgba(239, 246, 255, 0.98)";
+    drawCtx.font = `700 ${titleFontSize}px ${FONT_STACK}`;
+    drawCtx.fillText(state.editorDoodadMenu.title, panelX + innerPaddingX, panelY + innerPaddingY);
+
+    const pageLabel = `Page ${state.editorDoodadMenu.pageIndex + 1}/${state.editorDoodadMenu.pageCount}`;
+    drawCtx.fillStyle = "rgba(163, 197, 226, 0.92)";
+    drawCtx.font = `600 ${subtitleFontSize}px ${FONT_STACK}`;
+    drawCtx.textAlign = "right";
+    drawCtx.fillText(pageLabel, panelX + panelWidth - innerPaddingX, panelY + innerPaddingY + 4);
+
+    for (let i = 0; i < state.editorDoodadMenu.items.length; i += 1) {
+      const item = state.editorDoodadMenu.items[i];
+      const col = i % columns;
+      const row = Math.floor(i / columns);
+      const x = gridX + (col * (cellWidth + gridGap));
+      const y = gridY + (row * (cellHeight + gridGap));
+      const fill = item.focused
+        ? "rgba(29, 61, 86, 0.98)"
+        : (item.selected ? "rgba(27, 52, 42, 0.94)" : "rgba(17, 28, 43, 0.88)");
+      const stroke = item.focused
+        ? "rgba(127, 224, 255, 0.94)"
+        : (item.selected ? "rgba(137, 255, 186, 0.84)" : "rgba(137, 164, 193, 0.46)");
+
+      drawPanel(
+        drawCtx,
+        x,
+        y,
+        cellWidth,
+        cellHeight,
+        clamp(cellHeight * 0.14, 8, 12),
+        fill,
+        stroke,
+        item.focused ? 1.8 : 1.2
+      );
+
+      const iconSize = Math.min(cellWidth * 0.52, cellHeight * 0.46);
+      const iconX = x + (cellWidth - iconSize) * 0.5;
+      const iconY = y + clamp(cellHeight * 0.08, 6, 12);
+      drawIconById(drawCtx, "editor_doodad", iconX, iconY, iconSize);
+
+      const labelWidth = cellWidth - 12;
+      const labelBaseSize = clamp(cellHeight * 0.16, 10, 15);
+      const labelBoxY = y + cellHeight - clamp(cellHeight * 0.34, 22, 36);
+      drawCtx.textAlign = "center";
+      drawCtx.textBaseline = "middle";
+      drawCtx.fillStyle = item.focused
+        ? "rgba(243, 251, 255, 0.99)"
+        : "rgba(220, 234, 247, 0.95)";
+      const fittedLabel = fitLabelText(
+        drawCtx,
+        item.label,
+        labelWidth,
+        labelBaseSize,
+        9,
+        600
+      );
+      drawCtx.font = `600 ${fittedLabel.fontSize}px ${FONT_STACK}`;
+      drawCtx.fillText(
+        fittedLabel.text,
+        x + cellWidth * 0.5,
+        labelBoxY
+      );
+
+      editorDoodadItemRects.push({
+        type: item.type,
+        x,
+        y,
+        width: cellWidth,
+        height: cellHeight,
+      });
+    }
+
+    drawCtx.textAlign = "left";
+    drawCtx.textBaseline = "middle";
+    drawCtx.fillStyle = "rgba(182, 205, 226, 0.92)";
+    drawCtx.font = `600 ${subtitleFontSize}px ${FONT_STACK}`;
+    drawCtx.fillText(
+      "Arrows move  Enter select  Wheel page  Esc close",
+      panelX + innerPaddingX,
+      panelY + panelHeight - (footerHeight * 0.5)
+    );
     drawCtx.textAlign = "left";
     drawCtx.textBaseline = "alphabetic";
   }
@@ -4247,6 +4452,7 @@ export function createUiOverlay({
     shareLinkInputRect = null;
 
     if (state.hudVisible) {
+      const doodadMenuVisible = state.editorDoodadMenu.visible;
       drawJetpackHud();
       drawMoneyHud();
       drawWaveHud();
@@ -4254,8 +4460,11 @@ export function createUiOverlay({
       drawFpsHud();
       drawHudUtilityButtons();
       drawTowerTray();
-      drawBuildModeHint();
-      drawCrosshair();
+      drawEditorDoodadMenu();
+      if (!doodadMenuVisible) {
+        drawBuildModeHint();
+        drawCrosshair();
+      }
       drawTouchControls();
       drawSellPrompt();
     }
@@ -4342,12 +4551,23 @@ export function createUiOverlay({
   }
 
   function hitTestTowerSlot(x, y) {
+    if (state.editorDoodadMenu.visible) {
+      return null;
+    }
     const result = hitTestRectList(
       towerSlotRects,
       x,
       y,
       (rect) => (rect.disabled ? null : rect.type)
     );
+    return result == null ? null : result;
+  }
+
+  function hitTestEditorDoodadItem(x, y) {
+    if (!state.editorDoodadMenu.visible) {
+      return null;
+    }
+    const result = hitTestRectList(editorDoodadItemRects, x, y, (rect) => rect.type);
     return result == null ? null : result;
   }
 
@@ -4367,7 +4587,7 @@ export function createUiOverlay({
   }
 
   function hitTestHudButton(x, y) {
-    if (state.menuOpen) {
+    if (state.menuOpen || state.editorDoodadMenu.visible) {
       return null;
     }
     const result = hitTestRectList(hudButtonRects, x, y, (rect) => rect.id);
@@ -4431,6 +4651,7 @@ export function createUiOverlay({
     hitTestTechTreeNodeInfo,
     hitTestTechTreePanel,
     hitTestTowerSlot,
+    hitTestEditorDoodadItem,
     hitTestTouchAction,
     hitTestHudButton,
     hitTestRuntimeUiAction,

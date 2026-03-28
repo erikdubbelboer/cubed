@@ -18,6 +18,7 @@ import {
   getPreparedMoneyDropBatchParts,
   getKenneyDebugSnapshot,
 } from "./kenneyModels.js";
+import { isDecorativeObjectType } from "./modelCatalog.js";
 
 const SCENE_CONFIG = GAME_CONFIG.scene;
 const LIGHT_CONFIG = GAME_CONFIG.lights;
@@ -753,22 +754,10 @@ const EDITOR_TOOL_INVENTORY = [
     hotkey: "6",
   },
   {
-    type: "chest",
-    label: "Chest",
-    iconId: "editor_chest",
+    type: "doodads",
+    label: "Doodads",
+    iconId: "editor_doodad",
     hotkey: "7",
-  },
-  {
-    type: "barrel",
-    label: "Barrel",
-    iconId: "editor_barrel",
-    hotkey: "8",
-  },
-  {
-    type: "stones",
-    label: "Stones",
-    iconId: "editor_stones",
-    hotkey: "9",
   },
 ];
 
@@ -1679,7 +1668,7 @@ function createKenneyDebugPreview(kind = "enemy") {
   const normalizedKind = typeof kind === "string" ? kind.trim().toLowerCase() : "";
   let visual = null;
   if (normalizedKind === "enemy") {
-    visual = createEnemyVisual(ENEMY_TYPES.red ?? Object.values(ENEMY_TYPES)[0] ?? null);
+    visual = createEnemyVisual(ENEMY_TYPES.red ?? Object.values(ENEMY_TYPES)[0] ?? null, "red");
   } else if (normalizedKind === "coin" || normalizedKind === "money" || normalizedKind === "moneydrop") {
     visual = createMoneyDropVisual(100);
   } else if (normalizedKind === "ramp" || normalizedKind === "stairs") {
@@ -3345,7 +3334,7 @@ function setOverlayScreen(nextOverlayScreen, { pauseSimulation = null, unlockPoi
 }
 
 function openPauseMenu() {
-  if (!isInRunSession() || waveState === "EDITOR" || isTechTreeMenuVisible()) {
+  if ((!isInRunSession() && waveState !== "EDITOR") || isTechTreeMenuVisible()) {
     return false;
   }
   if (overlayScreen === OVERLAY_SCREEN_PAUSE_MENU) {
@@ -4630,6 +4619,34 @@ function handleRuntimeUiPointerAction(pointerX, pointerY, { pointerId = null, is
   }
   clearRuntimeUiSliderDrag(pointerId);
   return applyRuntimeUiAction(action);
+}
+
+function handleEditorUiPointerAction(pointerX, pointerY) {
+  if (waveState !== "EDITOR" || !levelEditor) {
+    return false;
+  }
+  const selectedDoodadType = uiOverlay.hitTestEditorDoodadItem?.(pointerX, pointerY);
+  if (selectedDoodadType) {
+    const didChooseDoodad = levelEditor.chooseDoodadType?.(selectedDoodadType) === true;
+    if (didChooseDoodad) {
+      levelEditor.update?.();
+    }
+    return didChooseDoodad;
+  }
+  if (levelEditor.isDoodadMenuOpen?.()) {
+    return false;
+  }
+  const toolType = uiOverlay.hitTestTowerSlot(pointerX, pointerY);
+  if (!toolType) {
+    return false;
+  }
+  const didSelectTool = toolType === "doodads"
+    ? levelEditor.toggleDoodadMenu?.() != null
+    : levelEditor.setSelectedTool?.(toolType) === true;
+  if (didSelectTool) {
+    levelEditor.update?.();
+  }
+  return didSelectTool;
 }
 
 function isCoopLocalTechTreeMenuVisible() {
@@ -5946,6 +5963,15 @@ if (!isTouchDevice) {
       return;
     }
 
+    if (waveState === "EDITOR" && !player.controls.isLocked) {
+      if (handleEditorUiPointerAction(pointer.x, pointer.y)) {
+        suppressNextDesktopCanvasClick = true;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+      return;
+    }
+
     if (!player.controls.isLocked) {
       const hudButton = uiOverlay.hitTestHudButton(pointer.x, pointer.y);
       if (hudButton && handleHudButtonAction(hudButton)) {
@@ -6085,13 +6111,22 @@ if (!isTouchDevice) {
     if (waveState !== "EDITOR" || !levelEditor) {
       return;
     }
+    if (levelEditor.isDoodadMenuOpen?.()) {
+      if (event.deltaY === 0) {
+        return;
+      }
+      const didPageMenu = levelEditor.pageDoodadMenu?.(event.deltaY > 0 ? 1 : -1) === true;
+      if (didPageMenu) {
+        levelEditor.update?.();
+      }
+      event.preventDefault();
+      return;
+    }
     const selectedTool = levelEditor.getSelectedTool?.();
     if (
       selectedTool !== "ramp"
       && selectedTool !== "playerSpawn"
-      && selectedTool !== "chest"
-      && selectedTool !== "barrel"
-      && selectedTool !== "stones"
+      && !isDecorativeObjectType(selectedTool)
     ) {
       return;
     }
@@ -6462,18 +6497,64 @@ window.addEventListener("keydown", (event) => {
   }
 
   if (waveState === "EDITOR") {
+    const doodadMenuOpen = levelEditor?.isDoodadMenuOpen?.() === true;
     if (event.code.startsWith("Digit")) {
       const rawDigit = Number(event.code.slice(5));
       if (!Number.isNaN(rawDigit)) {
         levelEditor?.selectToolByDigit?.(rawDigit);
+        levelEditor?.update?.();
       }
+      event.preventDefault();
       return;
+    }
+    if (doodadMenuOpen) {
+      if (event.code === "Escape" && !event.repeat) {
+        levelEditor?.closeDoodadMenu?.();
+        levelEditor?.update?.();
+        event.preventDefault();
+        return;
+      }
+      if (event.code === "Enter" && !event.repeat) {
+        levelEditor?.confirmDoodadMenuSelection?.();
+        levelEditor?.update?.();
+        event.preventDefault();
+        return;
+      }
+      if (event.code === "ArrowLeft" && !event.repeat) {
+        levelEditor?.moveDoodadMenuSelection?.(-1, 0);
+        levelEditor?.update?.();
+        event.preventDefault();
+        return;
+      }
+      if (event.code === "ArrowRight" && !event.repeat) {
+        levelEditor?.moveDoodadMenuSelection?.(1, 0);
+        levelEditor?.update?.();
+        event.preventDefault();
+        return;
+      }
+      if (event.code === "ArrowUp" && !event.repeat) {
+        levelEditor?.moveDoodadMenuSelection?.(0, -1);
+        levelEditor?.update?.();
+        event.preventDefault();
+        return;
+      }
+      if (event.code === "ArrowDown" && !event.repeat) {
+        levelEditor?.moveDoodadMenuSelection?.(0, 1);
+        levelEditor?.update?.();
+        event.preventDefault();
+        return;
+      }
     }
     if (event.code === "Enter") {
       const didMutateLevel = levelEditor?.applyPrimaryAction?.();
       if (didMutateLevel) {
         rebuildEditorGridFromCurrentModel();
       }
+      event.preventDefault();
+    } else if (event.code === "Escape" && !event.repeat) {
+      levelEditor?.closeDoodadMenu?.();
+      levelEditor?.update?.();
+      event.preventDefault();
     }
     return;
   }
@@ -8812,8 +8893,11 @@ function renderCurrentVisualFrame() {
     waveNumber: hudWaveNumber,
     towerInventory,
     selectedTowerType: waveState === "EDITOR"
-      ? (levelEditor?.getSelectedTool?.() ?? null)
+      ? (levelEditor?.getSelectedInventoryTool?.() ?? levelEditor?.getSelectedTool?.() ?? null)
       : (towerSystem ? towerSystem.getSelectedTowerType() : null),
+    editorDoodadMenu: waveState === "EDITOR"
+      ? (levelEditor?.getDoodadMenuState?.() ?? null)
+      : null,
     buildMode: waveState === "EDITOR" ? false : (towerSystem ? towerSystem.isBuildMode() : false),
     showKeyboardHints: !showTouchControls,
     showTouchControls,
@@ -9001,7 +9085,7 @@ function initGame() {
       suppressPauseMenuOnNextUnlock = false;
     } else if (shouldSuppressPauseMenuReopen()) {
       // Ignore transient unlocks/blur races caused by resume/fullscreen transitions.
-    } else if (isInRunSession() && overlayScreen === OVERLAY_SCREEN_NONE && waveState !== "EDITOR" && !isTechTreeMenuVisible()) {
+    } else if ((isInRunSession() || waveState === "EDITOR") && overlayScreen === OVERLAY_SCREEN_NONE && !isTechTreeMenuVisible()) {
       openPauseMenu();
     }
     resetMobileInputState();

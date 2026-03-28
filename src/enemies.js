@@ -386,8 +386,8 @@ function createEnemyBatchedMesh(material, maxVertexCount, maxIndexCount) {
   function initializeEnemyRenderBatches() {
     const preparedVariants = [];
     const seenVariantKeys = new Set();
-    for (const enemyType of Object.values(ENEMY_TYPES)) {
-      const preparedVisual = getPreparedEnemyBatchParts(enemyType);
+    for (const [enemyTypeId, enemyType] of Object.entries(ENEMY_TYPES)) {
+      const preparedVisual = getPreparedEnemyBatchParts(enemyType, enemyTypeId);
       if (!preparedVisual?.variantKey || seenVariantKeys.has(preparedVisual.variantKey)) {
         continue;
       }
@@ -2009,6 +2009,21 @@ function createEnemyBatchedMesh(material, maxVertexCount, maxIndexCount) {
   }
 
   function buildPreparedEnemyCollisionBoxes(preparedVisual) {
+    if (Array.isArray(preparedVisual?.enemyCollisionBoxes) && preparedVisual.enemyCollisionBoxes.length > 0) {
+      return preparedVisual.enemyCollisionBoxes.map((box) => ({
+        hitPart: box.hitPart,
+        center: {
+          x: box.center.x,
+          y: box.center.y,
+          z: box.center.z,
+        },
+        halfExtents: {
+          x: box.halfExtents.x,
+          y: box.halfExtents.y,
+          z: box.halfExtents.z,
+        },
+      }));
+    }
     if (!preparedVisual?.parts) {
       return null;
     }
@@ -2049,6 +2064,21 @@ function createEnemyBatchedMesh(material, maxVertexCount, maxIndexCount) {
   }
 
   function buildImportedEnemyCollisionBoxes(importedVisual) {
+    if (Array.isArray(importedVisual?.userData?.enemyCollisionBoxes) && importedVisual.userData.enemyCollisionBoxes.length > 0) {
+      return importedVisual.userData.enemyCollisionBoxes.map((box) => ({
+        hitPart: box.hitPart,
+        center: {
+          x: box.center.x,
+          y: box.center.y,
+          z: box.center.z,
+        },
+        halfExtents: {
+          x: box.halfExtents.x,
+          y: box.halfExtents.y,
+          z: box.halfExtents.z,
+        },
+      }));
+    }
     if (!importedVisual) {
       return null;
     }
@@ -2224,7 +2254,7 @@ function createEnemyBatchedMesh(material, maxVertexCount, maxIndexCount) {
     let visualBottomOffsetY = null;
     let visualHoverHeight = ENEMY_SURFACE_HOVER_HEIGHT;
     let collisionBoxesData = null;
-    const preparedEnemyVisual = getPreparedEnemyBatchParts(enemyType);
+    const preparedEnemyVisual = getPreparedEnemyBatchParts(enemyType, normalizedType);
 
     if (preparedEnemyVisual && liveEnemyRenderBatches.variantByKey.has(preparedEnemyVisual.variantKey)) {
       const importedBounds = preparedEnemyVisual.bounds;
@@ -2240,7 +2270,7 @@ function createEnemyBatchedMesh(material, maxVertexCount, maxIndexCount) {
         }
       }
     } else {
-      const importedVisual = createEnemyVisual(enemyType);
+      const importedVisual = createEnemyVisual(enemyType, normalizedType);
       if (importedVisual) {
         importedVisual.position.y = 0;
         visualRoot.add(importedVisual);
@@ -2760,7 +2790,7 @@ function createEnemyBatchedMesh(material, maxVertexCount, maxIndexCount) {
 
     if (enemy.liveRenderState?.active === true) {
       detachEnemyFromLiveBatches(enemy);
-      const dissolveVisual = createEnemyVisual(ENEMY_TYPES[enemy.type] ?? null);
+      const dissolveVisual = createEnemyVisual(ENEMY_TYPES[enemy.type] ?? null, enemy.type);
       if (dissolveVisual) {
         dissolveVisual.position.y = 0;
         enemy.visualRoot.add(dissolveVisual);

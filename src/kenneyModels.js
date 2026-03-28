@@ -1,6 +1,13 @@
 import * as THREE from "three";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { GAME_CONFIG } from "./config.js";
+import {
+  DECORATIVE_MODEL_SPECS,
+  getDecorativeModelSpec,
+  getEnemyModelProfile,
+  resolveEnemyModelKey,
+} from "./modelCatalog.js";
 
 const GRID_CONFIG = GAME_CONFIG.grid ?? {};
 const ENEMY_CONFIG = GAME_CONFIG.enemies ?? {};
@@ -49,14 +56,13 @@ const DEFAULT_PICKUP_METALNESS = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.me
 const DEFAULT_PICKUP_EMISSIVE_INTENSITY = Number.isFinite(Number(ECONOMY_PICKUP_CONFIG.emissiveIntensity))
   ? Math.max(0, Number(ECONOMY_PICKUP_CONFIG.emissiveIntensity))
   : 0.62;
-const DECORATIVE_PROP_TARGET_HEIGHTS = {
-  chest: GRID_CELL_SIZE * 0.42,
-  barrel: GRID_CELL_SIZE * 0.36,
-  stones: GRID_CELL_SIZE * 0.22,
-};
-
 const OBJ_LOADER = new OBJLoader();
 const TEXTURE_LOADER = new THREE.TextureLoader();
+const OBJ_MODEL_URLS = import.meta.glob("../models/*.obj", {
+  eager: true,
+  import: "default",
+  query: "?url",
+});
 const KENNEY_MANAGED_FLAG = "kenneyManaged";
 const KENNEY_SHARED_FLAG = "kenneyShared";
 const WALL_BOTTOM_CAP_GEOMETRY = markKenneyManaged(new THREE.PlaneGeometry(1, 1), { shared: true });
@@ -95,31 +101,31 @@ const MONEY_DROP_EMISSIVE_BY_VALUE = {
     : 0x10371e,
 };
 
+function getObjModelUrl(fileBasename) {
+  return OBJ_MODEL_URLS[`../models/${fileBasename}.obj`] ?? null;
+}
+
+function createObjModelDefinition(fileBasename) {
+  const objUrl = getObjModelUrl(fileBasename);
+  if (!objUrl) {
+    throw new Error(`[KenneyModels] Missing OBJ asset URL for '${fileBasename}.obj'.`);
+  }
+  return { objUrl };
+}
+
 const MODEL_DEFINITIONS = {
-  enemy: {
-    objUrl: new URL("../models/character-orc.obj", import.meta.url).href,
-  },
-  remotePlayer: {
-    objUrl: new URL("../models/character-human.obj", import.meta.url).href,
-  },
-  moneyDrop: {
-    objUrl: new URL("../models/coin.obj", import.meta.url).href,
-  },
-  ramp: {
-    objUrl: new URL("../models/stairs.obj", import.meta.url).href,
-  },
-  block: {
-    objUrl: new URL("../models/wall.obj", import.meta.url).href,
-  },
-  chest: {
-    objUrl: new URL("../models/chest.obj", import.meta.url).href,
-  },
-  barrel: {
-    objUrl: new URL("../models/barrel.obj", import.meta.url).href,
-  },
-  stones: {
-    objUrl: new URL("../models/stones.obj", import.meta.url).href,
-  },
+  "character-orc": createObjModelDefinition("character-orc"),
+  "character-ghost": createObjModelDefinition("character-ghost"),
+  "character-skeleton": createObjModelDefinition("character-skeleton"),
+  "character-vampire": createObjModelDefinition("character-vampire"),
+  "character-zombie": createObjModelDefinition("character-zombie"),
+  "character-human": createObjModelDefinition("character-human"),
+  coin: createObjModelDefinition("coin"),
+  stairs: createObjModelDefinition("stairs"),
+  wall: createObjModelDefinition("wall"),
+  ...Object.fromEntries(
+    DECORATIVE_MODEL_SPECS.map((entry) => [entry.type, createObjModelDefinition(entry.type)])
+  ),
 };
 
 const assetDescriptors = new Map();
@@ -479,6 +485,11 @@ function capturePreparedVisualData(root) {
     parts,
     bounds,
     materials: collectUniqueMaterials(root),
+    userData: {
+      enemyModelKey: root.userData?.enemyModelKey ?? null,
+      enemyModelProfile: root.userData?.enemyModelProfile ?? null,
+      enemyCollisionBoxes: cloneCollisionBoxes(root.userData?.enemyCollisionBoxes ?? null),
+    },
   };
 }
 
@@ -631,15 +642,273 @@ function getDescriptor(key) {
   return descriptor;
 }
 
-export function createEnemyVisual(enemyType = null) {
-  const descriptor = getDescriptor("enemy");
+function cloneCollisionBoxes(collisionBoxes) {
+  if (!Array.isArray(collisionBoxes)) {
+    return null;
+  }
+  return collisionBoxes.map((box) => ({
+    hitPart: box.hitPart === "head" ? "head" : "body",
+    center: {
+      x: Number(box.center?.x) || 0,
+      y: Number(box.center?.y) || 0,
+      z: Number(box.center?.z) || 0,
+    },
+    halfExtents: {
+      x: Math.max(0.01, Number(box.halfExtents?.x) || 0.01),
+      y: Math.max(0.01, Number(box.halfExtents?.y) || 0.01),
+      z: Math.max(0.01, Number(box.halfExtents?.z) || 0.01),
+    },
+  }));
+}
+
+function createCollisionBoxFromBounds(bounds, hitPart) {
+  if (!bounds || bounds.isEmpty()) {
+    return null;
+  }
+  const center = bounds.getCenter(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
+  return {
+    hitPart,
+    center: {
+      x: center.x,
+      y: center.y,
+      z: center.z,
+    },
+    halfExtents: {
+      x: Math.max(0.01, size.x * 0.5),
+      y: Math.max(0.01, size.y * 0.5),
+      z: Math.max(0.01, size.z * 0.5),
+    },
+  };
+}
+
+function computeSyntheticHeadCollisionBox(bounds, syntheticHead) {
+  if (!bounds || bounds.isEmpty() || !syntheticHead) {
+    return null;
+  }
+  const size = bounds.getSize(new THREE.Vector3());
+  const sourceCenter = bounds.getCenter(new THREE.Vector3());
+  const halfExtents = {
+    x: Math.max(0.01, size.x * syntheticHead.widthRatio * 0.5),
+    y: Math.max(0.01, size.y * syntheticHead.heightRatio * 0.5),
+    z: Math.max(0.01, size.z * syntheticHead.depthRatio * 0.5),
+  };
+  const minCenterY = bounds.min.y + halfExtents.y;
+  const maxCenterY = bounds.max.y - halfExtents.y;
+  const unclampedCenterY = bounds.min.y + (size.y * syntheticHead.centerYRatio);
+  return {
+    hitPart: "head",
+    center: {
+      x: sourceCenter.x,
+      y: THREE.MathUtils.clamp(unclampedCenterY, minCenterY, maxCenterY),
+      z: sourceCenter.z,
+    },
+    halfExtents,
+  };
+}
+
+function getPrimaryMaterial(material) {
+  const materials = getMaterialArray(material);
+  return materials[0] ?? null;
+}
+
+function collectEnemyModelMeshEntries(root, profile) {
+  const bodyEntries = [];
+  const headEntries = [];
+  const syntheticSourceBounds = new THREE.Box3().makeEmpty();
+  let hasSyntheticSourceBounds = false;
+  root.updateMatrixWorld(true, true);
+  root.traverse((child) => {
+    if (!child?.isMesh || !child.geometry || !child.material) {
+      return;
+    }
+    const primaryMaterial = getPrimaryMaterial(child.material);
+    if (!primaryMaterial) {
+      return;
+    }
+    if (child.geometry.boundingBox == null && typeof child.geometry.computeBoundingBox === "function") {
+      child.geometry.computeBoundingBox();
+    }
+    const entry = {
+      name: child.name || "",
+      geometry: child.geometry,
+      material: primaryMaterial,
+      matrixWorld: child.matrixWorld.clone(),
+      castShadow: child.castShadow === true,
+      receiveShadow: child.receiveShadow === true,
+    };
+    if (profile.headMeshNameSet.has(entry.name)) {
+      headEntries.push(entry);
+    } else {
+      bodyEntries.push(entry);
+    }
+    if (profile.syntheticHead?.sourceMeshNameSet?.has(entry.name) && child.geometry.boundingBox) {
+      const meshBounds = child.geometry.boundingBox.clone().applyMatrix4(entry.matrixWorld);
+      if (!hasSyntheticSourceBounds) {
+        syntheticSourceBounds.copy(meshBounds);
+        hasSyntheticSourceBounds = true;
+      } else {
+        syntheticSourceBounds.union(meshBounds);
+      }
+    }
+  });
+  return {
+    bodyEntries,
+    headEntries,
+    syntheticHeadSourceBounds: hasSyntheticSourceBounds ? syntheticSourceBounds : null,
+  };
+}
+
+function buildEnemyCollisionBoxesFromCollectedEntries(collectedEntries, profile) {
+  if (!collectedEntries) {
+    return null;
+  }
+  const bodyBounds = new THREE.Box3().makeEmpty();
+  const headBounds = new THREE.Box3().makeEmpty();
+  let hasBodyBounds = false;
+  let hasHeadBounds = false;
+  for (const entry of collectedEntries.bodyEntries ?? []) {
+    if (entry.geometry.boundingBox == null && typeof entry.geometry.computeBoundingBox === "function") {
+      entry.geometry.computeBoundingBox();
+    }
+    if (!entry.geometry.boundingBox) {
+      continue;
+    }
+    const meshBounds = entry.geometry.boundingBox.clone().applyMatrix4(entry.matrixWorld);
+    if (!hasBodyBounds) {
+      bodyBounds.copy(meshBounds);
+      hasBodyBounds = true;
+    } else {
+      bodyBounds.union(meshBounds);
+    }
+  }
+  for (const entry of collectedEntries.headEntries ?? []) {
+    if (entry.geometry.boundingBox == null && typeof entry.geometry.computeBoundingBox === "function") {
+      entry.geometry.computeBoundingBox();
+    }
+    if (!entry.geometry.boundingBox) {
+      continue;
+    }
+    const meshBounds = entry.geometry.boundingBox.clone().applyMatrix4(entry.matrixWorld);
+    if (!hasHeadBounds) {
+      headBounds.copy(meshBounds);
+      hasHeadBounds = true;
+    } else {
+      headBounds.union(meshBounds);
+    }
+  }
+  const collisionBoxes = [];
+  const bodyCollisionBox = hasBodyBounds ? createCollisionBoxFromBounds(bodyBounds, "body") : null;
+  if (bodyCollisionBox) {
+    collisionBoxes.push(bodyCollisionBox);
+  }
+  const headCollisionBox = hasHeadBounds
+    ? createCollisionBoxFromBounds(headBounds, "head")
+    : computeSyntheticHeadCollisionBox(
+      collectedEntries.syntheticHeadSourceBounds ?? (hasBodyBounds ? bodyBounds : null),
+      profile.syntheticHead
+    );
+  if (headCollisionBox) {
+    collisionBoxes.push(headCollisionBox);
+  }
+  return collisionBoxes.length > 0 ? collisionBoxes : null;
+}
+
+function createMergedEnemyPart(entries, meshName) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return null;
+  }
+  const transformedGeometries = [];
+  for (const entry of entries) {
+    if (!entry?.geometry) {
+      continue;
+    }
+    const transformedGeometry = entry.geometry.clone();
+    transformedGeometry.applyMatrix4(entry.matrixWorld);
+    transformedGeometries.push(transformedGeometry);
+  }
+  if (transformedGeometries.length === 0) {
+    return null;
+  }
+
+  let mergedGeometry = null;
+  if (transformedGeometries.length === 1) {
+    mergedGeometry = transformedGeometries[0];
+  } else {
+    mergedGeometry = mergeGeometries(transformedGeometries, false);
+    for (const geometry of transformedGeometries) {
+      geometry.dispose();
+    }
+  }
+  if (!mergedGeometry) {
+    return null;
+  }
+  if (mergedGeometry.boundingBox == null && typeof mergedGeometry.computeBoundingBox === "function") {
+    mergedGeometry.computeBoundingBox();
+  }
+  if (mergedGeometry.boundingSphere == null && typeof mergedGeometry.computeBoundingSphere === "function") {
+    mergedGeometry.computeBoundingSphere();
+  }
+  markKenneyManaged(mergedGeometry, { shared: true });
+  const partMesh = new THREE.Mesh(mergedGeometry, entries[0].material);
+  partMesh.name = meshName;
+  partMesh.castShadow = entries.some((entry) => entry.castShadow === true);
+  partMesh.receiveShadow = entries.some((entry) => entry.receiveShadow === true);
+  return partMesh;
+}
+
+function createPreparedEnemyBatchRoot(modelKey, targetHeight) {
+  const descriptor = getDescriptor(modelKey);
   if (!descriptor) {
     return null;
   }
+  const sourceRoot = createCloneRoot(descriptor, {
+    fit: "height",
+    targetHeight,
+    anchorY: "bottom",
+    sharedMaterialVariantKey: `enemy:${modelKey}:live`,
+    sharedMaterialStyle: {
+      color: 0xffffff,
+      emissive: 0x000000,
+      emissiveIntensity: 0,
+      roughness: 0.82,
+      metalness: 0.02,
+      useMap: true,
+    },
+  });
+  if (!sourceRoot) {
+    return null;
+  }
+  sourceRoot.rotation.y = ENEMY_VISUAL_YAW_CORRECTION;
+  const profile = getEnemyModelProfile(modelKey);
+  const collectedEntries = collectEnemyModelMeshEntries(sourceRoot, profile);
+  const collisionBoxes = buildEnemyCollisionBoxesFromCollectedEntries(collectedEntries, profile);
+  const preparedRoot = new THREE.Group();
+  const bodyMesh = createMergedEnemyPart(collectedEntries.bodyEntries, "body-mesh");
+  const headMesh = createMergedEnemyPart(collectedEntries.headEntries, "head-mesh");
+  if (!bodyMesh) {
+    return null;
+  }
+  preparedRoot.add(bodyMesh);
+  if (headMesh) {
+    preparedRoot.add(headMesh);
+  }
+  preparedRoot.userData.enemyModelKey = modelKey;
+  preparedRoot.userData.enemyModelProfile = profile;
+  preparedRoot.userData.enemyCollisionBoxes = cloneCollisionBoxes(collisionBoxes);
+  return preparedRoot;
+}
+
+export function createEnemyVisual(enemyType = null, enemyTypeId = null) {
   const targetHeight = Math.max(
     0.2,
     (Number.isFinite(Number(enemyType?.size)) ? Number(enemyType.size) : 1) * ENEMY_VISUAL_HEIGHT_MULTIPLIER
   );
+  const modelKey = resolveEnemyModelKey(enemyTypeId);
+  const descriptor = getDescriptor(modelKey);
+  if (!descriptor) {
+    return null;
+  }
   const root = createCloneRoot(descriptor, {
     fit: "height",
     targetHeight,
@@ -655,8 +924,14 @@ export function createEnemyVisual(enemyType = null) {
   });
   if (root) {
     root.rotation.y = ENEMY_VISUAL_YAW_CORRECTION;
+    const profile = getEnemyModelProfile(modelKey);
+    const collectedEntries = collectEnemyModelMeshEntries(root, profile);
+    root.userData.enemyModelKey = modelKey;
+    root.userData.enemyModelProfile = profile;
+    root.userData.enemyCollisionBoxes = buildEnemyCollisionBoxesFromCollectedEntries(collectedEntries, profile);
   }
   logKenneyDebug("Created enemy visual", {
+    modelKey,
     targetHeight,
     enemyType: enemyType ? {
       size: enemyType.size,
@@ -664,43 +939,30 @@ export function createEnemyVisual(enemyType = null) {
       emissive: enemyType.emissive,
     } : null,
     ok: !!root,
-  }, { onceKey: `create-enemy:${targetHeight.toFixed(2)}:${enemyType?.color ?? "na"}` });
+  }, { onceKey: `create-enemy:${modelKey}:${targetHeight.toFixed(2)}:${enemyType?.color ?? "na"}` });
   return root;
 }
 
-export function getPreparedEnemyBatchParts(enemyType = null) {
+export function getPreparedEnemyBatchParts(enemyType = null, enemyTypeId = null) {
   const targetHeight = Math.max(
     0.2,
     (Number.isFinite(Number(enemyType?.size)) ? Number(enemyType.size) : 1) * ENEMY_VISUAL_HEIGHT_MULTIPLIER
   );
-  return getPreparedVisualData(`enemy:${targetHeight.toFixed(4)}`, () => {
-    const descriptor = getDescriptor("enemy");
-    if (!descriptor) {
-      return null;
-    }
-    const root = createCloneRoot(descriptor, {
-      fit: "height",
-      targetHeight,
-      anchorY: "bottom",
-      sharedMaterialVariantKey: "enemy:live",
-      sharedMaterialStyle: {
-        color: 0xffffff,
-        emissive: 0x000000,
-        emissiveIntensity: 0,
-        roughness: 0.82,
-        metalness: 0.02,
-        useMap: true,
-      },
-    });
-    if (root) {
-      root.rotation.y = ENEMY_VISUAL_YAW_CORRECTION;
-    }
-    return root;
-  });
+  const modelKey = resolveEnemyModelKey(enemyTypeId);
+  const preparedVisual = getPreparedVisualData(
+    `enemy:${modelKey}:${targetHeight.toFixed(4)}`,
+    () => createPreparedEnemyBatchRoot(modelKey, targetHeight)
+  );
+  if (preparedVisual) {
+    preparedVisual.enemyModelKey = modelKey;
+    preparedVisual.enemyModelProfile = preparedVisual.userData?.enemyModelProfile ?? getEnemyModelProfile(modelKey);
+    preparedVisual.enemyCollisionBoxes = cloneCollisionBoxes(preparedVisual.userData?.enemyCollisionBoxes ?? null);
+  }
+  return preparedVisual;
 }
 
 export function createRemotePlayerVisual() {
-  const descriptor = getDescriptor("remotePlayer");
+  const descriptor = getDescriptor("character-human");
   if (!descriptor) {
     return null;
   }
@@ -726,7 +988,7 @@ export function createRemotePlayerVisual() {
 }
 
 export function createMoneyDropVisual(value = 1) {
-  const descriptor = getDescriptor("moneyDrop");
+  const descriptor = getDescriptor("coin");
   if (!descriptor) {
     return null;
   }
@@ -755,7 +1017,7 @@ export function createMoneyDropVisual(value = 1) {
 export function getPreparedMoneyDropBatchParts(value = 1) {
   const normalizedValue = Math.max(1, Math.floor(Number(value) || 1));
   return getPreparedVisualData(`moneyDrop:${normalizedValue}`, () => {
-    const descriptor = getDescriptor("moneyDrop");
+    const descriptor = getDescriptor("coin");
     if (!descriptor) {
       return null;
     }
@@ -777,7 +1039,7 @@ export function getPreparedMoneyDropBatchParts(value = 1) {
 }
 
 export function createRampVisual(rotation = 0) {
-  const descriptor = getDescriptor("ramp");
+  const descriptor = getDescriptor("stairs");
   if (!descriptor) {
     return null;
   }
@@ -810,7 +1072,7 @@ export function getPreparedRampBatchParts() {
 }
 
 export function createTerrainWallVisual({ addBottomCap = false } = {}) {
-  const descriptor = getDescriptor("block");
+  const descriptor = getDescriptor("wall");
   if (!descriptor) {
     return null;
   }
@@ -864,33 +1126,58 @@ export function getPreparedTerrainWallBatchParts({ addBottomCap = false } = {}) 
   ));
 }
 
-export function createDecorationVisual(type) {
+function getDefaultDecorationMaterialStyle() {
+  return {
+    color: 0xffffff,
+    emissive: 0x000000,
+    emissiveIntensity: 0,
+    roughness: Number.isFinite(Number(GRID_CONFIG.altitudeRoughness))
+      ? Number(GRID_CONFIG.altitudeRoughness)
+      : 0.82,
+    metalness: Number.isFinite(Number(GRID_CONFIG.altitudeMetalness))
+      ? Number(GRID_CONFIG.altitudeMetalness)
+      : 0.04,
+    useMap: true,
+  };
+}
+
+export function createDecorationVisual(type, options = {}) {
   const normalizedType = typeof type === "string" ? type.trim().toLowerCase() : "";
-  if (!Object.prototype.hasOwnProperty.call(DECORATIVE_PROP_TARGET_HEIGHTS, normalizedType)) {
+  const decorativeSpec = getDecorativeModelSpec(normalizedType);
+  if (!decorativeSpec) {
     return null;
   }
   const descriptor = getDescriptor(normalizedType);
   if (!descriptor) {
     return null;
   }
-  const targetHeight = Math.max(0.05, Number(DECORATIVE_PROP_TARGET_HEIGHTS[normalizedType]) || (GRID_CELL_SIZE * 0.25));
+  const targetHeight = Math.max(
+    0.05,
+    GRID_CELL_SIZE * Math.max(0.05, Number(decorativeSpec.targetHeightCells) || 0.25)
+  );
+  const instanceMaterialStyle = (
+    options.instanceMaterialStyle && typeof options.instanceMaterialStyle === "object"
+  )
+    ? options.instanceMaterialStyle
+    : null;
   const root = createCloneRoot(descriptor, {
     fit: "height",
     targetHeight,
     anchorY: "bottom",
-    sharedMaterialVariantKey: `decor:${normalizedType}`,
-    sharedMaterialStyle: {
-      color: 0xffffff,
-      emissive: 0x000000,
-      emissiveIntensity: 0,
-      roughness: Number.isFinite(Number(GRID_CONFIG.altitudeRoughness))
-        ? Number(GRID_CONFIG.altitudeRoughness)
-        : 0.82,
-      metalness: Number.isFinite(Number(GRID_CONFIG.altitudeMetalness))
-        ? Number(GRID_CONFIG.altitudeMetalness)
-        : 0.04,
-      useMap: true,
-    },
+    sharedMaterialVariantKey: instanceMaterialStyle
+      ? null
+      : (typeof options.sharedMaterialVariantKey === "string" && options.sharedMaterialVariantKey.length > 0
+        ? options.sharedMaterialVariantKey
+        : `decor:${normalizedType}`),
+    sharedMaterialStyle: instanceMaterialStyle
+      ? null
+      : {
+        ...getDefaultDecorationMaterialStyle(),
+        ...(options.sharedMaterialStyle && typeof options.sharedMaterialStyle === "object"
+          ? options.sharedMaterialStyle
+          : {}),
+      },
+    instanceMaterialStyle,
   });
   logKenneyDebug("Created decoration visual", {
     type: normalizedType,
@@ -902,14 +1189,14 @@ export function createDecorationVisual(type) {
 
 export function getPreparedDecorationBatchParts(type) {
   const normalizedType = typeof type === "string" ? type.trim().toLowerCase() : "";
-  if (!Object.prototype.hasOwnProperty.call(DECORATIVE_PROP_TARGET_HEIGHTS, normalizedType)) {
+  if (!getDecorativeModelSpec(normalizedType)) {
     return null;
   }
   return getPreparedVisualData(`decor:${normalizedType}`, () => createDecorationVisual(normalizedType));
 }
 
 export function createBlockVisual({ opacity = 1 } = {}) {
-  const descriptor = getDescriptor("block");
+  const descriptor = getDescriptor("wall");
   if (!descriptor) {
     return null;
   }

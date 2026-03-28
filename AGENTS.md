@@ -16,11 +16,11 @@ Capture project decisions that are easy to regress but not always obvious from l
 ## Kenney Visual Asset Contract
 - `src/kenneyModels.js` owns the shared preloaded Kenney OBJ-based visual factories for enemies, remote co-op players, money drops, ramps, terrain wall voxels, and placed block towers.
 - These imported models are visual-only. Gameplay/pathing/collision/hitboxes remain numeric in `grid`, `player`, `enemies`, and `towers`; do not move gameplay authority onto imported mesh geometry.
-- Enemy visuals use the Kenney orc model, but they still keep explicit hidden BoxGeometry hit proxies for sniper/headshot raycasts and preserve the existing collision-box contract.
+- Enemy visuals now map existing enemy tiers onto the Kenney `character-ghost`, `character-skeleton`, `character-vampire`, and `character-zombie` models; they still keep explicit hidden hit proxies for sniper/headshot raycasts and preserve the existing collision-box contract.
 - Co-op uses the Kenney human model for the remote peer only; the local player remains first-person.
 - Money drops use the Kenney coin model, ramp visuals use Kenney stairs attached to the existing ramp helper mesh, and both terrain wall voxels and placed block towers use the Kenney wall model.
 - Terrain wall voxels must keep their hidden cube helper meshes authoritative for collision, build surfaces, LOS, and editor raycasts; the Kenney wall model is a visual child only.
-- Decorative editor props (`chest`, `barrel`, `stones`) use Kenney OBJ models, are visual-only, and must never be added to collision/pathing/LOS obstacle sets.
+- Decorative editor props use the Kenney OBJ doodad catalog (`chest`, `barrel`, `stones`, plus the graveyard/environment doodads in `src/modelCatalog.js`), are visual-only, and must never be added to collision/pathing/LOS obstacle sets.
 - Decorative props are culled automatically when a placed tower's world bounds overlap them; they are dressing, not protected gameplay geometry.
 - Block build preview stays procedural/abstract on purpose; do not replace the green/red preview validity mesh with the imported wall art unless the preview readability problem is solved first.
 
@@ -130,7 +130,7 @@ Capture project decisions that are easy to regress but not always obvious from l
 ## Grid, Pathfinding, and Blocking Contracts
 - Level source is sparse object data in [`src/level.json`](/Users/erik/Desktop/webgame/src/level.json), imported into `GAME_CONFIG.grid.levelObjects`; the file may be either `{ "levelObjects": [...] }` or a raw `[...]` array for paste-from-export convenience.
 - Object schema: `{ type, position: { x, y, z }, rotation }`.
-- Supported marker/object types: `wall`, `spawn`, `end`, `playerSpawn`, `ramp`, `chest`, `barrel`, `stones` (`path` allowed as legacy visual marker).
+- Supported marker/object types: `wall`, `spawn`, `end`, `playerSpawn`, `ramp`, and every decorative doodad type listed in `src/modelCatalog.js` (`path` allowed as legacy visual marker).
 - Ramp rotation mapping (low -> high): `0:+Z`, `90:+X`, `180:-Z`, `270:-X`; ramp anchor is low-end cell.
 - Grid-snapped gameplay objects continue to use integer cell coordinates in `position`; decorative props use world-space `position` coordinates and arbitrary numeric yaw in `rotation`.
 - Grid exposes marker-centric/runtime helpers (spawn/end/player spawn, buildability, ramp data, world<->cell mapping).

@@ -500,7 +500,7 @@ export const GAME_CONFIG = {
 
     // Sparse level layout entries.
     // Schema: { type, position: { x, y, z }, rotation }
-    // type: wall | spawn | end | playerSpawn | ramp | chest | barrel | stones
+    // type: wall | spawn | end | playerSpawn | ramp | decorative doodad type
     // Grid-snapped types use integer cell coordinates in position.
     // Decorative props use world-space position coordinates and do not affect gameplay collisions/pathing.
     // rotation for ramps is low->high direction:

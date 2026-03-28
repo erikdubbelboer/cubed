@@ -8,6 +8,10 @@ import {
   getPreparedTerrainWallBatchParts,
   isKenneyAssetManagedResource,
 } from "./kenneyModels.js";
+import {
+  DECORATIVE_MODEL_TYPES,
+  isDecorativeObjectType as isCatalogDecorativeObjectType,
+} from "./modelCatalog.js";
 
 const GRID_CONFIG = GAME_CONFIG.grid;
 
@@ -24,7 +28,7 @@ const OUTER_EMPTY_SPACE_RINGS = Math.max(
   Math.floor(Number(GRID_CONFIG.outerEmptySpaceRings ?? GRID_CONFIG.outerEmptyTerrainRings) || 0)
 );
 const LEGACY_PATH_MARKERS = new Set(["P"]);
-const DECORATIVE_OBJECT_TYPES = new Set(["chest", "barrel", "stones"]);
+const DECORATIVE_OBJECT_TYPES = new Set(DECORATIVE_MODEL_TYPES);
 const LEVEL_OBJECT_TYPES = new Set(["wall", "spawn", "end", "playerspawn", "ramp", "path", ...DECORATIVE_OBJECT_TYPES]);
 const LEVEL_MARKER_TYPES = new Set(["spawn", "end", "playerspawn", "path"]);
 const RAMP_ROTATION_TO_DIRECTION = new Map([
@@ -209,7 +213,7 @@ function cloneDirection(direction) {
 }
 
 function isDecorativeObjectType(type) {
-  return DECORATIVE_OBJECT_TYPES.has(type);
+  return isCatalogDecorativeObjectType(type);
 }
 
 function decorativeObjectMatchesLevelEntry(entry, decoration) {
