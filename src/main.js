@@ -23,7 +23,7 @@ import {
   getPreparedMoneyDropBatchParts,
   getKenneyDebugSnapshot,
 } from "./kenneyModels.js";
-import { isDecorativeObjectType } from "./modelCatalog.js";
+import { isDecorativeObjectType, resolveEnemyModelKey } from "./modelCatalog.js";
 
 const SCENE_CONFIG = GAME_CONFIG.scene;
 const LIGHT_CONFIG = GAME_CONFIG.lights;
@@ -45,6 +45,16 @@ const BLOCK_TRANSPARENCY_UPGRADE_OPACITY = Number.isFinite(Number(BLOCK_TOWER_CO
   ? THREE.MathUtils.clamp(Number(BLOCK_TOWER_CONFIG.transparencyUpgradeOpacity), 0.05, 1)
   : 0.2;
 const ENEMY_TYPES = ENEMY_CONFIG.types ?? {};
+const DEBUG_ENEMY_MODEL_SPAWN_TYPES = (() => {
+  const firstTypeByModelKey = new Map();
+  for (const enemyTypeId of Object.keys(ENEMY_TYPES)) {
+    const modelKey = resolveEnemyModelKey(enemyTypeId);
+    if (!firstTypeByModelKey.has(modelKey)) {
+      firstTypeByModelKey.set(modelKey, enemyTypeId);
+    }
+  }
+  return Object.freeze(Array.from(firstTypeByModelKey.values()));
+})();
 const CONFIGURED_ROUNDS = Array.isArray(WAVE_CONFIG.rounds) ? WAVE_CONFIG.rounds : [];
 const DEFAULT_RUN_WEAPON_OPTIONS = [
   { type: "machineGun", label: "Machine Gun", iconId: "weapon_machine_gun" },
@@ -937,6 +947,7 @@ let multiplayerEnemyStateTimer = 0;
 let multiplayerMoneyDropStateTimer = 0;
 let multiplayerStateSyncTimer = 0;
 let multiplayerDamageBatchTimer = 0;
+let debugSpawnEnemiesRunId = 0;
 let nextMultiplayerEnemyStateSeq = 1;
 let nextMultiplayerMoneyDropStateSeq = 1;
 let lastBroadcastHostStateSignature = "";
@@ -9193,6 +9204,66 @@ function initGame() {
     };
   }
 
+  function spawnDebugEnemyModelSequence({
+    intervalSeconds = 1.25,
+    spawnIndex = 0,
+    types = DEBUG_ENEMY_MODEL_SPAWN_TYPES,
+  } = {}) {
+    if (!enemySystem || DEBUG_ENEMY_MODEL_SPAWN_TYPES.length === 0) {
+      return {
+        ok: false,
+        reason: "enemy_system_unavailable",
+      };
+    }
+    if (!shouldHostControlSimulation()) {
+      return {
+        ok: false,
+        reason: "host_only",
+      };
+    }
+    const requestedTypes = Array.isArray(types) ? types : DEBUG_ENEMY_MODEL_SPAWN_TYPES;
+    const normalizedTypes = requestedTypes.filter(
+      (type) => typeof type === "string" && Object.prototype.hasOwnProperty.call(ENEMY_TYPES, type)
+    );
+    if (normalizedTypes.length === 0) {
+      return {
+        ok: false,
+        reason: "no_enemy_types",
+      };
+    }
+    const parsedIntervalSeconds = Number(intervalSeconds);
+    const safeIntervalMs = Math.max(
+      0,
+      Math.round((Number.isFinite(parsedIntervalSeconds) ? parsedIntervalSeconds : 1.25) * 1000)
+    );
+    const safeSpawnIndex = Math.max(0, Math.floor(Number(spawnIndex) || 0));
+    const runId = ++debugSpawnEnemiesRunId;
+    const spawnNext = (index) => {
+      if (runId !== debugSpawnEnemiesRunId || !enemySystem || !shouldHostControlSimulation()) {
+        return;
+      }
+      enemySystem.forceSpawnEnemy(normalizedTypes[index], safeSpawnIndex);
+      if ((index + 1) < normalizedTypes.length) {
+        window.setTimeout(() => {
+          spawnNext(index + 1);
+        }, safeIntervalMs);
+      }
+    };
+    spawnNext(0);
+    return {
+      ok: true,
+      count: normalizedTypes.length,
+      intervalMs: safeIntervalMs,
+      spawnIndex: safeSpawnIndex,
+      types: normalizedTypes.slice(),
+    };
+  }
+
+  window.spawnEnemies = (intervalSeconds = 1.25) => spawnDebugEnemyModelSequence({
+    intervalSeconds,
+    spawnIndex: 0,
+  });
+
   // Debug API to let browser scripts skip UI
   window.gameDebug = {
     setPlayerPos: (x, z) => {
@@ -9252,6 +9323,10 @@ function initGame() {
       }
       return false;
     },
+    spawnEnemies: (intervalSeconds = 1.25, spawnIndex = 0) => spawnDebugEnemyModelSequence({
+      intervalSeconds,
+      spawnIndex,
+    }),
     addMoney: (amount = 100) => {
       addMoney(amount);
     },

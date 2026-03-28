@@ -151,18 +151,18 @@ export const ENEMY_MODEL_PROFILES = Object.freeze({
 });
 
 export const ENEMY_MODEL_KEY_BY_TYPE = Object.freeze({
-  red: "character-ghost",
+  red: "character-orc",
   pink: "character-ghost",
-  lead: "character-ghost",
-  blue: "character-skeleton",
-  black: "character-skeleton",
-  zebra: "character-skeleton",
-  green: "character-vampire",
-  white: "character-vampire",
+  lead: "character-skeleton",
+  blue: "character-vampire",
+  black: "character-zombie",
+  zebra: "character-orc",
+  green: "character-ghost",
+  white: "character-skeleton",
   rainbow: "character-vampire",
   yellow: "character-zombie",
-  purple: "character-zombie",
-  ceramic: "character-zombie",
+  purple: "character-orc",
+  ceramic: "character-ghost"
 });
 
 export function resolveEnemyModelKey(enemyTypeId) {

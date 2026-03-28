@@ -58,6 +58,79 @@ const DEFAULT_PICKUP_EMISSIVE_INTENSITY = Number.isFinite(Number(ECONOMY_PICKUP_
   : 0.62;
 const OBJ_LOADER = new OBJLoader();
 const TEXTURE_LOADER = new THREE.TextureLoader();
+const ARENA_ATLAS_KEY = "colormap";
+const GRAVEYARD_ATLAS_KEY = "colormap2";
+const DUNGEON_ATLAS_KEY = "colormap3";
+const DEFAULT_ATLAS_KEY = ARENA_ATLAS_KEY;
+const MODEL_ATLAS_KEY_BY_FILE_BASENAME = Object.freeze({
+  "altar-stone": GRAVEYARD_ATLAS_KEY,
+  "altar-wood": GRAVEYARD_ATLAS_KEY,
+  "character-ghost": GRAVEYARD_ATLAS_KEY,
+  "character-skeleton": GRAVEYARD_ATLAS_KEY,
+  "character-vampire": GRAVEYARD_ATLAS_KEY,
+  "character-zombie": GRAVEYARD_ATLAS_KEY,
+  "coffin-old": GRAVEYARD_ATLAS_KEY,
+  coffin: GRAVEYARD_ATLAS_KEY,
+  "column-large": GRAVEYARD_ATLAS_KEY,
+  "cross-column": GRAVEYARD_ATLAS_KEY,
+  "cross-wood": GRAVEYARD_ATLAS_KEY,
+  cross: GRAVEYARD_ATLAS_KEY,
+  "crypt-a": GRAVEYARD_ATLAS_KEY,
+  "crypt-b": GRAVEYARD_ATLAS_KEY,
+  "debris-wood": GRAVEYARD_ATLAS_KEY,
+  debris: GRAVEYARD_ATLAS_KEY,
+  "grave-border": GRAVEYARD_ATLAS_KEY,
+  grave: GRAVEYARD_ATLAS_KEY,
+  "gravestone-broken": GRAVEYARD_ATLAS_KEY,
+  "gravestone-cross-large": GRAVEYARD_ATLAS_KEY,
+  "gravestone-cross": GRAVEYARD_ATLAS_KEY,
+  "gravestone-debris": GRAVEYARD_ATLAS_KEY,
+  "gravestone-decorative": GRAVEYARD_ATLAS_KEY,
+  "gravestone-roof": GRAVEYARD_ATLAS_KEY,
+  "gravestone-round": GRAVEYARD_ATLAS_KEY,
+  "gravestone-wide": GRAVEYARD_ATLAS_KEY,
+  "pine-crooked": GRAVEYARD_ATLAS_KEY,
+  pine: GRAVEYARD_ATLAS_KEY,
+  road: GRAVEYARD_ATLAS_KEY,
+  rocks: GRAVEYARD_ATLAS_KEY,
+  "rocks-tall": GRAVEYARD_ATLAS_KEY,
+  "shovel-dirt": GRAVEYARD_ATLAS_KEY,
+  "trunk-long": GRAVEYARD_ATLAS_KEY,
+  trunk: GRAVEYARD_ATLAS_KEY,
+  barrel: DUNGEON_ATLAS_KEY,
+  "character-human": DUNGEON_ATLAS_KEY,
+  "character-orc": DUNGEON_ATLAS_KEY,
+  chest: DUNGEON_ATLAS_KEY,
+  coin: DUNGEON_ATLAS_KEY,
+  gate: DUNGEON_ATLAS_KEY,
+  stairs: DUNGEON_ATLAS_KEY,
+  stones: DUNGEON_ATLAS_KEY,
+  wall: DUNGEON_ATLAS_KEY,
+  "wood-structure": DUNGEON_ATLAS_KEY,
+});
+const MODEL_UV_FIXES_BY_FILE_BASENAME = Object.freeze({
+  pine: [
+    {
+      matchU: 0.46875,
+      setU: 0.71875,
+      addV: 0.25,
+    },
+  ],
+  "pine-crooked": [
+    {
+      matchU: 0.46875,
+      setU: 0.71875,
+      addV: 0.25,
+    },
+  ],
+  "column-large": [
+    {
+      matchU: 0.21875,
+      setU: 0.96875,
+      addV: -0.3,
+    },
+  ],
+});
 const OBJ_MODEL_URLS = import.meta.glob("../models/*.obj", {
   eager: true,
   import: "default",
@@ -110,7 +183,11 @@ function createObjModelDefinition(fileBasename) {
   if (!objUrl) {
     throw new Error(`[KenneyModels] Missing OBJ asset URL for '${fileBasename}.obj'.`);
   }
-  return { objUrl };
+  return {
+    objUrl,
+    atlasKey: MODEL_ATLAS_KEY_BY_FILE_BASENAME[fileBasename] ?? DEFAULT_ATLAS_KEY,
+    uvFixes: MODEL_UV_FIXES_BY_FILE_BASENAME[fileBasename] ?? null,
+  };
 }
 
 const MODEL_DEFINITIONS = {
@@ -130,6 +207,9 @@ const MODEL_DEFINITIONS = {
 
 const assetDescriptors = new Map();
 let sharedAtlasTexture = null;
+let sharedAtlasTexture2 = null;
+let sharedAtlasTexture3 = null;
+const atlasTextureByKey = new Map();
 let preloadPromise = null;
 let preloadFailed = false;
 const sharedWallBottomCapMaterials = new Map();
@@ -176,6 +256,76 @@ function cloneColor(value, fallback = 0xffffff) {
     return new THREE.Color(Number(value));
   }
   return new THREE.Color(fallback);
+}
+
+function applyUvFixes(root, uvFixes = null) {
+  if (!root || !Array.isArray(uvFixes) || uvFixes.length === 0) {
+    return;
+  }
+  const processedGeometries = new Set();
+  const UV_EPSILON = 1e-5;
+  root.traverse((child) => {
+    const geometry = child?.isMesh ? child.geometry : null;
+    const uvAttribute = geometry?.attributes?.uv;
+    if (!uvAttribute || processedGeometries.has(geometry)) {
+      return;
+    }
+    processedGeometries.add(geometry);
+    for (let index = 0; index < uvAttribute.count; index += 1) {
+      let nextU = uvAttribute.getX(index);
+      let nextV = uvAttribute.getY(index);
+      let changed = false;
+      for (const fix of uvFixes) {
+        if (!fix || Math.abs(nextU - fix.matchU) > UV_EPSILON) {
+          continue;
+        }
+        if (Number.isFinite(Number(fix.setU))) {
+          nextU = Number(fix.setU);
+          changed = true;
+        }
+        if (Number.isFinite(Number(fix.addV))) {
+          nextV += Number(fix.addV);
+          changed = true;
+        }
+      }
+      if (changed) {
+        uvAttribute.setXY(index, nextU, nextV);
+      }
+    }
+    uvAttribute.needsUpdate = true;
+  });
+}
+
+function configureAtlasTexture(texture) {
+  if (!texture) {
+    return texture;
+  }
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.flipY = true;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  markKenneyManaged(texture, { shared: true });
+  return texture;
+}
+
+function getAtlasTexture(atlasKey = DEFAULT_ATLAS_KEY) {
+  return atlasTextureByKey.get(atlasKey) ?? atlasTextureByKey.get(DEFAULT_ATLAS_KEY) ?? null;
+}
+
+function assignAtlasTexture(material, atlasTexture) {
+  if (!material) {
+    return material;
+  }
+  material.userData = {
+    ...(material.userData || {}),
+    kenneyAtlasTexture: atlasTexture ?? null,
+  };
+  if ("map" in material) {
+    material.map = atlasTexture ?? null;
+  }
+  return material;
 }
 
 function hasFiniteNumber(value) {
@@ -308,7 +458,9 @@ function applyMaterialStyle(material, {
     material.metalness = THREE.MathUtils.clamp(Number(metalness), 0, 1);
   }
   if (typeof useMap === "boolean" && "map" in material) {
-    material.map = useMap ? sharedAtlasTexture : null;
+    material.map = useMap
+      ? (material.userData?.kenneyAtlasTexture ?? sharedAtlasTexture)
+      : null;
   }
   if (hasFiniteNumber(opacity) && "opacity" in material) {
     const safeOpacity = THREE.MathUtils.clamp(Number(opacity), 0, 1);
@@ -334,6 +486,7 @@ function buildSharedMaterialVariant(descriptor, variantKey, style = {}) {
   const materialMap = new Map();
   for (const baseMaterial of descriptor.baseMaterials) {
     const variantMaterial = baseMaterial.clone();
+    assignAtlasTexture(variantMaterial, descriptor.atlasTexture ?? baseMaterial.userData?.kenneyAtlasTexture ?? sharedAtlasTexture);
     applyMaterialStyle(variantMaterial, style);
     markKenneyManaged(variantMaterial, { shared: true });
     materialMap.set(baseMaterial.uuid, variantMaterial);
@@ -369,6 +522,10 @@ function cloneMaterialsForInstance(root, style = {}) {
         let clonedMaterial = materialMap.get(sourceMaterial.uuid);
         if (!clonedMaterial) {
           clonedMaterial = sourceMaterial.clone();
+          assignAtlasTexture(
+            clonedMaterial,
+            sourceMaterial.userData?.kenneyAtlasTexture ?? sourceMaterial.map ?? sharedAtlasTexture
+          );
           applyMaterialStyle(clonedMaterial, style);
           materialMap.set(sourceMaterial.uuid, clonedMaterial);
         }
@@ -380,6 +537,10 @@ function cloneMaterialsForInstance(root, style = {}) {
     let clonedMaterial = materialMap.get(sourceMaterial.uuid);
     if (!clonedMaterial) {
       clonedMaterial = sourceMaterial.clone();
+      assignAtlasTexture(
+        clonedMaterial,
+        sourceMaterial.userData?.kenneyAtlasTexture ?? sourceMaterial.map ?? sharedAtlasTexture
+      );
       applyMaterialStyle(clonedMaterial, style);
       materialMap.set(sourceMaterial.uuid, clonedMaterial);
     }
@@ -387,22 +548,23 @@ function cloneMaterialsForInstance(root, style = {}) {
   });
 }
 
-function createPreparedStandardMaterial() {
+function createPreparedStandardMaterial(atlasTexture = sharedAtlasTexture) {
   const material = new THREE.MeshLambertMaterial({
     color: 0xffffff,
     emissive: 0x000000,
     emissiveIntensity: 0,
-    map: sharedAtlasTexture,
+    map: atlasTexture,
     side: THREE.DoubleSide,
     flatShading: true,
   });
   material.toneMapped = false;
   material.fog = false;
+  assignAtlasTexture(material, atlasTexture);
   markKenneyManaged(material, { shared: true });
   return material;
 }
 
-function replaceLoaderMaterials(root) {
+function replaceLoaderMaterials(root, atlasTexture = sharedAtlasTexture) {
   const materialByName = new Map();
   root.traverse((child) => {
     if (!child?.isMesh) {
@@ -416,7 +578,7 @@ function replaceLoaderMaterials(root) {
     const nextMaterials = sourceMaterials.map((sourceMaterial, index) => {
       const materialKey = `${sourceMaterial?.name || "default"}:${index}`;
       if (!materialByName.has(materialKey)) {
-        materialByName.set(materialKey, createPreparedStandardMaterial());
+        materialByName.set(materialKey, createPreparedStandardMaterial(atlasTexture));
       }
       return materialByName.get(materialKey);
     });
@@ -577,10 +739,14 @@ function createCloneRoot(descriptor, {
 }
 
 async function loadTemplate(key, definition) {
+  const atlasTexture = getAtlasTexture(definition.atlasKey);
   const loaded = await OBJ_LOADER.loadAsync(definition.objUrl);
-  replaceLoaderMaterials(loaded);
+  applyUvFixes(loaded, definition.uvFixes);
+  replaceLoaderMaterials(loaded, atlasTexture);
   const descriptor = {
     key,
+    atlasKey: definition.atlasKey ?? DEFAULT_ATLAS_KEY,
+    atlasTexture,
     template: loaded,
     bounds: computeBounds(loaded),
     baseMaterials: collectUniqueMaterials(loaded),
@@ -605,13 +771,18 @@ export async function preloadKenneyModels() {
   }
   preloadPromise = (async () => {
     try {
-      sharedAtlasTexture = await TEXTURE_LOADER.loadAsync(new URL("../models/Textures/colormap.png", import.meta.url).href);
-      sharedAtlasTexture.colorSpace = THREE.SRGBColorSpace;
-      sharedAtlasTexture.flipY = true;
-      sharedAtlasTexture.magFilter = THREE.NearestFilter;
-      sharedAtlasTexture.minFilter = THREE.NearestMipmapNearestFilter;
-      sharedAtlasTexture.needsUpdate = true;
-      markKenneyManaged(sharedAtlasTexture, { shared: true });
+      sharedAtlasTexture = configureAtlasTexture(
+        await TEXTURE_LOADER.loadAsync(new URL("../models/Textures/colormap.png", import.meta.url).href)
+      );
+      sharedAtlasTexture2 = configureAtlasTexture(
+        await TEXTURE_LOADER.loadAsync(new URL("../models/Textures/colormap2.png", import.meta.url).href)
+      );
+      sharedAtlasTexture3 = configureAtlasTexture(
+        await TEXTURE_LOADER.loadAsync(new URL("../models/Textures/colormap3.png", import.meta.url).href)
+      );
+      atlasTextureByKey.set(ARENA_ATLAS_KEY, sharedAtlasTexture);
+      atlasTextureByKey.set(GRAVEYARD_ATLAS_KEY, sharedAtlasTexture2);
+      atlasTextureByKey.set(DUNGEON_ATLAS_KEY, sharedAtlasTexture3);
       await Promise.all(
         Object.entries(MODEL_DEFINITIONS).map(([key, definition]) => loadTemplate(key, definition))
       );
@@ -619,6 +790,8 @@ export async function preloadKenneyModels() {
       logKenneyDebug("Preload completed", {
         loadedKeys: Array.from(assetDescriptors.keys()),
         atlasLoaded: !!sharedAtlasTexture,
+        atlas2Loaded: !!sharedAtlasTexture2,
+        atlas3Loaded: !!sharedAtlasTexture3,
       });
       return true;
     } catch (error) {
@@ -857,6 +1030,18 @@ function createMergedEnemyPart(entries, meshName) {
   return partMesh;
 }
 
+function getEnemyMaterialStyle(modelKey) {
+  void modelKey;
+  return {
+    color: 0xffffff,
+    emissive: 0x000000,
+    emissiveIntensity: 0,
+    roughness: 0.82,
+    metalness: 0.02,
+    useMap: true,
+  };
+}
+
 function createPreparedEnemyBatchRoot(modelKey, targetHeight) {
   const descriptor = getDescriptor(modelKey);
   if (!descriptor) {
@@ -867,14 +1052,7 @@ function createPreparedEnemyBatchRoot(modelKey, targetHeight) {
     targetHeight,
     anchorY: "bottom",
     sharedMaterialVariantKey: `enemy:${modelKey}:live`,
-    sharedMaterialStyle: {
-      color: 0xffffff,
-      emissive: 0x000000,
-      emissiveIntensity: 0,
-      roughness: 0.82,
-      metalness: 0.02,
-      useMap: true,
-    },
+    sharedMaterialStyle: getEnemyMaterialStyle(modelKey),
   });
   if (!sourceRoot) {
     return null;
@@ -913,14 +1091,7 @@ export function createEnemyVisual(enemyType = null, enemyTypeId = null) {
     fit: "height",
     targetHeight,
     anchorY: "bottom",
-    instanceMaterialStyle: {
-      color: 0xffffff,
-      emissive: 0x000000,
-      emissiveIntensity: 0,
-      roughness: 0.82,
-      metalness: 0.02,
-      useMap: true,
-    },
+    instanceMaterialStyle: getEnemyMaterialStyle(modelKey),
   });
   if (root) {
     root.rotation.y = ENEMY_VISUAL_YAW_CORRECTION;
@@ -1239,9 +1410,12 @@ export function getKenneyDebugSnapshot() {
     debugEnabled: KENNEY_DEBUG_ENABLED,
     preloadFailed,
     atlasLoaded: !!sharedAtlasTexture,
+    atlas2Loaded: !!sharedAtlasTexture2,
+    atlas3Loaded: !!sharedAtlasTexture3,
     loadedKeys: Array.from(assetDescriptors.keys()),
     descriptors: Array.from(assetDescriptors.values()).map((descriptor) => ({
       key: descriptor.key,
+      atlasKey: descriptor.atlasKey ?? DEFAULT_ATLAS_KEY,
       baseMaterialCount: descriptor.baseMaterials.length,
       bounds: {
         min: descriptor.bounds.min.toArray(),
