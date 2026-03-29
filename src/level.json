@@ -1810,6 +1810,258 @@
    "rotation": 0
   },
   {
+   "type": "pathBlocker",
+   "position": {
+    "x": 11,
+    "y": 0,
+    "z": 23
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 10,
+    "y": 0,
+    "z": 23
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 9,
+    "y": 0,
+    "z": 23
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 8,
+    "y": 0,
+    "z": 23
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 7,
+    "y": 0,
+    "z": 23
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 7,
+    "y": 0,
+    "z": 24
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 7,
+    "y": 0,
+    "z": 25
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 7,
+    "y": 0,
+    "z": 26
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 8,
+    "y": 0,
+    "z": 27
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 7,
+    "y": 0,
+    "z": 27
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 9,
+    "y": 0,
+    "z": 27
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 10,
+    "y": 0,
+    "z": 27
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 11,
+    "y": 0,
+    "z": 27
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 11,
+    "y": 0,
+    "z": 26
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 11,
+    "y": 0,
+    "z": 25
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 11,
+    "y": 0,
+    "z": 24
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 22,
+    "y": 0,
+    "z": 25
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 22,
+    "y": 0,
+    "z": 26
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 22,
+    "y": 0,
+    "z": 27
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 22,
+    "y": 0,
+    "z": 28
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 23,
+    "y": 0,
+    "z": 25
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 24,
+    "y": 0,
+    "z": 25
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 25,
+    "y": 0,
+    "z": 25
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 25,
+    "y": 0,
+    "z": 26
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 25,
+    "y": 0,
+    "z": 27
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 25,
+    "y": 0,
+    "z": 28
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 24,
+    "y": 0,
+    "z": 28
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pathBlocker",
+   "position": {
+    "x": 23,
+    "y": 0,
+    "z": 28
+   },
+   "rotation": 0
+  },
+  {
    "type": "barrel",
    "position": {
     "x": -9.096892005102575,
@@ -2348,6 +2600,312 @@
     "z": 18
    },
    "rotation": 0
+  },
+  {
+   "type": "altar-stone",
+   "position": {
+    "x": -27.55625247276017,
+    "y": 0,
+    "z": 24.970110104883442
+   },
+   "rotation": 270
+  },
+  {
+   "type": "coffin-old",
+   "position": {
+    "x": -29.871895095890103,
+    "y": 0,
+    "z": 31.002256969019573
+   },
+   "rotation": 345
+  },
+  {
+   "type": "coffin-old",
+   "position": {
+    "x": -34.03556934072952,
+    "y": 0,
+    "z": 30.038323144665206
+   },
+   "rotation": 345
+  },
+  {
+   "type": "coffin",
+   "position": {
+    "x": -32.79907156829869,
+    "y": 0,
+    "z": 24.76966194016787
+   },
+   "rotation": 345
+  },
+  {
+   "type": "cross-column",
+   "position": {
+    "x": -30.48811479765282,
+    "y": 0,
+    "z": 27.090005683939125
+   },
+   "rotation": 345
+  },
+  {
+   "type": "cross",
+   "position": {
+    "x": -34.75743535369579,
+    "y": 0,
+    "z": 32.2069281119505
+   },
+   "rotation": 345
+  },
+  {
+   "type": "gravestone-round",
+   "position": {
+    "x": -30.441833816580406,
+    "y": 0,
+    "z": 33.36611679383106
+   },
+   "rotation": 345
+  },
+  {
+   "type": "pine-crooked",
+   "position": {
+    "x": -26.22061128685037,
+    "y": 0,
+    "z": 33.75168617635009
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pine-crooked",
+   "position": {
+    "x": -39.71520390450907,
+    "y": 0,
+    "z": 26.860381397813157
+   },
+   "rotation": 0
+  },
+  {
+   "type": "pine",
+   "position": {
+    "x": -37.823185256882326,
+    "y": 0,
+    "z": 34.635694429764314
+   },
+   "rotation": 0
+  },
+  {
+   "type": "tree",
+   "position": {
+    "x": -31.949969773671263,
+    "y": 0,
+    "z": 35.45149953512304
+   },
+   "rotation": 0
+  },
+  {
+   "type": "tree",
+   "position": {
+    "x": -35.324878337974866,
+    "y": 0,
+    "z": 25.892980370139128
+   },
+   "rotation": 0
+  },
+  {
+   "type": "trunk",
+   "position": {
+    "x": -38.33698255479456,
+    "y": 0,
+    "z": 30.58093231793604
+   },
+   "rotation": 30
+  },
+  {
+   "type": "grave",
+   "position": {
+    "x": -38.174893033984624,
+    "y": 0,
+    "z": 22.92849706551483
+   },
+   "rotation": 0
+  },
+  {
+   "type": "gravestone-roof",
+   "position": {
+    "x": 27.467771427822882,
+    "y": 0,
+    "z": -5.443193707839663
+   },
+   "rotation": 285
+  },
+  {
+   "type": "gravestone-roof",
+   "position": {
+    "x": 27.51078105826275,
+    "y": 0,
+    "z": -0.8884892700255316
+   },
+   "rotation": 270
+  },
+  {
+   "type": "gravestone-decorative",
+   "position": {
+    "x": 27.45345194282464,
+    "y": 0,
+    "z": 4.979219894155833
+   },
+   "rotation": 270
+  },
+  {
+   "type": "weapon-rack",
+   "position": {
+    "x": 27.101445033526783,
+    "y": 0,
+    "z": 1.9742920115220712
+   },
+   "rotation": 270
+  },
+  {
+   "type": "road",
+   "position": {
+    "x": 5.368525336764678,
+    "y": 0,
+    "z": -9.994867987373276
+   },
+   "rotation": 315
+  },
+  {
+   "type": "pine",
+   "position": {
+    "x": 21.50325228785632,
+    "y": 0,
+    "z": 32.1552029732345
+   },
+   "rotation": 315
+  },
+  {
+   "type": "pine",
+   "position": {
+    "x": 19.281806916697235,
+    "y": 0,
+    "z": 36.57382910547979
+   },
+   "rotation": 300
+  },
+  {
+   "type": "pine",
+   "position": {
+    "x": 23.736156684600125,
+    "y": 0,
+    "z": 38.01013995708557
+   },
+   "rotation": 285
+  },
+  {
+   "type": "pine",
+   "position": {
+    "x": 30.6705628430392,
+    "y": 0,
+    "z": 32.6546311514622
+   },
+   "rotation": 255
+  },
+  {
+   "type": "pine-crooked",
+   "position": {
+    "x": 25.124955170779558,
+    "y": 0,
+    "z": 32.383343147466334
+   },
+   "rotation": 30
+  },
+  {
+   "type": "pine-crooked",
+   "position": {
+    "x": 20.094463883194287,
+    "y": 0,
+    "z": 42.93436587862888
+   },
+   "rotation": 30
+  },
+  {
+   "type": "tree",
+   "position": {
+    "x": 18.674707032455295,
+    "y": 0,
+    "z": 33.29262690503729
+   },
+   "rotation": 0
+  },
+  {
+   "type": "tree",
+   "position": {
+    "x": 23.64084453243242,
+    "y": 0,
+    "z": 42.37660502647865
+   },
+   "rotation": 0
+  },
+  {
+   "type": "tree",
+   "position": {
+    "x": 27.779172638451733,
+    "y": 0,
+    "z": 37.32356034238734
+   },
+   "rotation": 0
+  },
+  {
+   "type": "stones",
+   "position": {
+    "x": -9.39717749398162,
+    "y": 0,
+    "z": 19.1005850222271
+   },
+   "rotation": 15
+  },
+  {
+   "type": "stones",
+   "position": {
+    "x": 26.507949545983504,
+    "y": 0,
+    "z": 21.63691567171276
+   },
+   "rotation": 30
+  },
+  {
+   "type": "stones",
+   "position": {
+    "x": 28.438422179974552,
+    "y": 0,
+    "z": -21.526277694060497
+   },
+   "rotation": 30
+  },
+  {
+   "type": "gravestone-broken",
+   "position": {
+    "x": 26.8632189028722,
+    "y": 0,
+    "z": 8.205129260610802
+   },
+   "rotation": 270
+  },
+  {
+   "type": "debris",
+   "position": {
+    "x": -13.205255001834356,
+    "y": 0,
+    "z": -16.881709092722932
+   },
+   "rotation": 15
+  },
+  {
+   "type": "cross-wood",
+   "position": {
+    "x": -9.073433841483002,
+    "y": 0,
+    "z": -14.976747058414556
+   },
+   "rotation": 285
   }
  ]
 }
