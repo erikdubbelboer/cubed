@@ -16,7 +16,7 @@ const PREVIEW_ROTATION_SPEED = Math.PI * 0.18;
 const CAMERA_VIEW_DIRECTION = new THREE.Vector3(1.08, 0.8, 1.14).normalize();
 const EDITOR_TOOL_PREVIEW_PREFIX = "editor-tool:";
 const EDITOR_DOODAD_PREVIEW_PREFIX = "editor-doodad:";
-const EDITOR_TOOL_TYPES = ["eraser", "wall", "spawn", "end", "ramp", "playerSpawn", "doodads"];
+const EDITOR_TOOL_TYPES = ["eraser", "wall", "spawn", "end", "ramp", "playerSpawn", "doodads", "pathBlocker"];
 const EMPTY_PREVIEW_IDS = Object.freeze([]);
 
 function normalizePreviewType(value) {
@@ -153,6 +153,13 @@ function createPreviewObject(previewId) {
       });
     case "doodads":
       return createGenericDoodadPreview();
+    case "pathBlocker":
+      return createPreviewMarker({
+        color: 0xd8e9ff,
+        emissive: 0x274056,
+        emissiveIntensity: 0.24,
+        opacity: 0.2,
+      });
     default:
       return null;
   }

@@ -774,6 +774,12 @@ const EDITOR_TOOL_INVENTORY = [
     iconId: "editor_doodad",
     hotkey: "7",
   },
+  {
+    type: "pathBlocker",
+    label: "Path Blocker",
+    iconId: "editor_path_blocker",
+    hotkey: "8",
+  },
 ];
 
 function buildEditorToolInventory() {
@@ -6567,6 +6573,12 @@ window.addEventListener("keydown", (event) => {
 
   if (waveState === "EDITOR") {
     const doodadMenuOpen = levelEditor?.isDoodadMenuOpen?.() === true;
+    if (event.code === "KeyQ" && !event.repeat) {
+      levelEditor?.clearSelectedTool?.();
+      levelEditor?.update?.();
+      event.preventDefault();
+      return;
+    }
     if (event.code.startsWith("Digit")) {
       const rawDigit = Number(event.code.slice(5));
       if (!Number.isNaN(rawDigit)) {

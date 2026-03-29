@@ -213,6 +213,9 @@ export function createEnemySystem(scene, grid, options = {}) {
     ? grid.spawnCells.map((cell) => cloneCell(cell))
     : [];
   const endCell = grid?.endCell ? cloneCell(grid.endCell) : null;
+  const configuredStaticBlockedCells = Array.isArray(grid?.pathBlockerCells)
+    ? grid.pathBlockerCells.map((cell) => cloneCell(cell))
+    : [];
 
   if (spawnCells.length === 0 || !endCell) {
     throw new Error("Enemy system requires at least one spawn cell and one end cell.");
@@ -252,11 +255,15 @@ export function createEnemySystem(scene, grid, options = {}) {
   let spawnCellCursor = 0;
 
   const blockedCellKeys = new Set();
+  const staticBlockedCellKeys = new Set();
+  const dynamicBlockedCellKeys = new Set();
   const spawnCellSet = new Set(spawnCells.map((cell) => cellKey(cell.x, cell.z)));
   const endCellKey = cellKey(endCell.x, endCell.z);
   const routePoolsBySpawnIndex = new Map();
 
   const totalNodeCount = gridSize * gridSize;
+  const staticBlockedByNode = new Uint8Array(totalNodeCount);
+  const dynamicBlockedByNode = new Uint8Array(totalNodeCount);
   const blockedByNode = new Uint8Array(totalNodeCount);
   const distanceToEnd = new Int32Array(totalNodeCount);
   const scratchDistanceToEnd = new Int32Array(totalNodeCount);
@@ -1102,12 +1109,40 @@ function createEnemyBatchedMesh(material, maxVertexCount, maxIndexCount) {
     return true;
   }
 
-  function applyBlockedState(mask, keys) {
-    blockedByNode.set(mask);
+  function rebuildCombinedBlockedState() {
+    for (let i = 0; i < totalNodeCount; i += 1) {
+      blockedByNode[i] = staticBlockedByNode[i] || dynamicBlockedByNode[i] ? 1 : 0;
+    }
     blockedCellKeys.clear();
-    for (const key of keys) {
+    for (const key of staticBlockedCellKeys) {
       blockedCellKeys.add(key);
     }
+    for (const key of dynamicBlockedCellKeys) {
+      blockedCellKeys.add(key);
+    }
+  }
+
+  function applyStaticBlockedState(mask, keys) {
+    staticBlockedByNode.set(mask);
+    staticBlockedCellKeys.clear();
+    for (const key of keys) {
+      staticBlockedCellKeys.add(key);
+    }
+    rebuildCombinedBlockedState();
+  }
+
+  function applyDynamicBlockedState(mask, keys) {
+    dynamicBlockedByNode.set(mask);
+    dynamicBlockedCellKeys.clear();
+    for (const key of keys) {
+      dynamicBlockedCellKeys.add(key);
+    }
+    rebuildCombinedBlockedState();
+  }
+
+  function initializeStaticBlockedState() {
+    const nextStaticBlocked = sanitizeBlockedCellList(configuredStaticBlockedCells);
+    applyStaticBlockedState(nextStaticBlocked.mask, nextStaticBlocked.keys);
   }
 
   function canBlockCells(cells) {
@@ -1231,20 +1266,20 @@ function createEnemyBatchedMesh(material, maxVertexCount, maxIndexCount) {
     pathPerfStats.setBlockedCalls += 1;
 
     const nextBlocked = sanitizeBlockedCellList(cells);
-    if (blockedCellMasksEqual(blockedByNode, nextBlocked.mask)) {
+    if (blockedCellMasksEqual(dynamicBlockedByNode, nextBlocked.mask)) {
       pathPerfStats.setBlockedLastMs = getNowMs() - startMs;
       pathPerfStats.setBlockedTotalMs += pathPerfStats.setBlockedLastMs;
       return true;
     }
 
-    const previousBlockedMask = blockedByNode.slice();
-    const previousBlockedKeys = new Set(blockedCellKeys);
+    const previousBlockedMask = dynamicBlockedByNode.slice();
+    const previousBlockedKeys = new Set(dynamicBlockedCellKeys);
     const previousRoutePools = cloneRoutePoolMap(routePoolsBySpawnIndex);
     const previousDistanceField = distanceToEnd.slice();
     const previousVariantQueue = variantBuildQueue.map((task) => ({ ...task }));
     const previousRevision = blockedRevision;
 
-    applyBlockedState(nextBlocked.mask, nextBlocked.keys);
+    applyDynamicBlockedState(nextBlocked.mask, nextBlocked.keys);
     blockedRevision += 1;
     canBlockCacheByNode.clear();
     canBlockCacheByFootprint.clear();
@@ -1253,7 +1288,7 @@ function createEnemyBatchedMesh(material, maxVertexCount, maxIndexCount) {
     const reachable = rebuiltDistance && areAllSpawnsReachable(distanceToEnd);
     const rebuiltPools = reachable && rebuildSpawnRoutePools();
     if (!rebuiltPools) {
-      applyBlockedState(previousBlockedMask, previousBlockedKeys);
+      applyDynamicBlockedState(previousBlockedMask, previousBlockedKeys);
       routePoolsBySpawnIndex.clear();
       for (const [spawnIndex, pool] of previousRoutePools.entries()) {
         routePoolsBySpawnIndex.set(spawnIndex, pool);
@@ -3575,6 +3610,7 @@ function createEnemyBatchedMesh(material, maxVertexCount, maxIndexCount) {
 
   function initializePathfindingState() {
     buildNavigationGraph();
+    initializeStaticBlockedState();
     spawnNodeIds.length = 0;
     for (const spawnCell of spawnCells) {
       const spawnNodeId = nodeIdFromCell(spawnCell.x, spawnCell.z);

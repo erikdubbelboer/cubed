@@ -17,9 +17,10 @@ const TOOL_BY_DIGIT = {
   5: "ramp",
   6: "playerSpawn",
   7: "doodads",
+  8: "pathBlocker",
 };
 
-const TOOL_ORDER = ["eraser", "wall", "spawn", "end", "ramp", "playerSpawn", "doodads"];
+const TOOL_ORDER = ["eraser", "wall", "spawn", "end", "ramp", "playerSpawn", "doodads", "pathBlocker"];
 const TOOL_COLORS = {
   eraser: 0xff8b8b,
   wall: 0x7db9ff,
@@ -28,6 +29,7 @@ const TOOL_COLORS = {
   ramp: 0xa0d8ff,
   playerSpawn: 0x60ff7f,
   doodads: 0xc7bb8a,
+  pathBlocker: 0xd8e9ff,
 };
 const DECORATION_MATCH_EPSILON = 0.08;
 const DECORATION_ROTATION_STEP_DEGREES = 15;
@@ -208,6 +210,7 @@ function getEditorHitFromIntersection(intersection) {
     editorRamp: object.userData.editorRamp ?? null,
     editorMarker: object.userData.editorMarker ?? null,
     editorDecoration: object.userData.editorDecoration ?? null,
+    editorPathBlocker: object.userData.editorPathBlocker ?? null,
   };
 }
 
@@ -246,6 +249,7 @@ export function createLevelEditor({
   const wallMap = new Map();
   const spawnMap = new Map();
   const rampMap = new Map();
+  const pathBlockerMap = new Map();
   const decorationObjects = [];
   let endMarker = null;
   let playerSpawnMarker = null;
@@ -454,6 +458,7 @@ export function createLevelEditor({
     wallMap.clear();
     spawnMap.clear();
     rampMap.clear();
+    pathBlockerMap.clear();
     decorationObjects.length = 0;
     endMarker = null;
     playerSpawnMarker = null;
@@ -515,6 +520,15 @@ export function createLevelEditor({
           entry.rotation
         );
         rampMap.set(key3(rampObject.position.x, rampObject.position.y, rampObject.position.z), rampObject);
+      } else if (type === "pathBlocker") {
+        const pathBlockerObject = createToolObject(
+          "pathBlocker",
+          entry.position.x,
+          entry.position.y,
+          entry.position.z,
+          0
+        );
+        pathBlockerMap.set(key2(pathBlockerObject.position.x, pathBlockerObject.position.z), pathBlockerObject);
       }
     }
   }
@@ -569,6 +583,43 @@ export function createLevelEditor({
     }
 
     return !doesRampConflictWithExistingRampEnds(layout, ignoreRampKey);
+  }
+
+  function getTraversableSurfaceLevelAt(x, z) {
+    if (!isInsideBounds(x, z) || typeof grid?.getCellHeight !== "function") {
+      return null;
+    }
+    const surfaceLevel = Number(grid.getCellHeight(x, z));
+    return Number.isInteger(surfaceLevel) ? surfaceLevel : null;
+  }
+
+  function hasPathBlockerAt(x, z) {
+    return pathBlockerMap.has(key2(x, z));
+  }
+
+  function canPlacePathBlockerAt(x, y, z) {
+    if (!isInsideBounds(x, z) || y < 0) {
+      return false;
+    }
+    const surfaceLevel = getTraversableSurfaceLevelAt(x, z);
+    if (!Number.isInteger(surfaceLevel) || y !== surfaceLevel) {
+      return false;
+    }
+    if (hasPathBlockerAt(x, z)) {
+      return false;
+    }
+    if (spawnMap.has(key3(x, y, z))) {
+      return false;
+    }
+    if (
+      endMarker
+      && endMarker.position.x === x
+      && endMarker.position.y === y
+      && endMarker.position.z === z
+    ) {
+      return false;
+    }
+    return true;
   }
 
   function toCellAndLevelAtPoint(worldPoint) {
@@ -641,6 +692,9 @@ export function createLevelEditor({
     if (doodadMenuOpen) {
       return { valid: false, mode: "doodad_menu", target: null };
     }
+    if (!selectedTool) {
+      return { valid: false, mode: null, target: null };
+    }
     raycaster.setFromCamera(aimPoint, camera);
 
     const targets = typeof grid?.getEditorRaycastTargets === "function"
@@ -688,6 +742,13 @@ export function createLevelEditor({
           target: { type: firstHit.editorType, ...firstHit.editorMarker },
         };
       }
+      if (firstHit.editorType === "pathBlocker" && firstHit.editorPathBlocker) {
+        return {
+          valid: true,
+          mode: "eraser",
+          target: { type: "pathBlocker", ...firstHit.editorPathBlocker },
+        };
+      }
       return { valid: false, mode: "eraser", target: null };
     }
 
@@ -712,6 +773,24 @@ export function createLevelEditor({
         valid: findDecorationIndexMatchingTarget(target) === -1,
         mode: selectedTool,
         target,
+      };
+    }
+
+    if (selectedTool === "pathBlocker") {
+      const didHitSurface = typeof grid?.raycastBuildSurface === "function"
+        ? grid.raycastBuildSurface(raycaster.ray, floorHitPoint)
+        : false;
+      if (!didHitSurface) {
+        return { valid: false, mode: "pathBlocker", target: null };
+      }
+      const placement = toCellAndLevelAtPoint(floorHitPoint);
+      if (!placement) {
+        return { valid: false, mode: "pathBlocker", target: null };
+      }
+      return {
+        valid: canPlacePathBlockerAt(placement.x, placement.y, placement.z),
+        mode: "pathBlocker",
+        target: placement,
       };
     }
 
@@ -767,7 +846,8 @@ export function createLevelEditor({
     if (selectedTool === "spawn") {
       const valid = isInsideBounds(placement.x, placement.z)
         && placement.y >= 0
-        && !spawnMap.has(key3(placement.x, placement.y, placement.z));
+        && !spawnMap.has(key3(placement.x, placement.y, placement.z))
+        && !hasPathBlockerAt(placement.x, placement.z);
       return {
         valid,
         mode: "spawn",
@@ -778,6 +858,7 @@ export function createLevelEditor({
     if (selectedTool === "end") {
       const valid = isInsideBounds(placement.x, placement.z)
         && placement.y >= 0
+        && !hasPathBlockerAt(placement.x, placement.z)
         && (!endMarker || key3(endMarker.position.x, endMarker.position.y, endMarker.position.z) !== key3(placement.x, placement.y, placement.z));
       return {
         valid,
@@ -828,9 +909,13 @@ export function createLevelEditor({
       ? 0xff6c6c
       : (isValid ? getToolColor(selectedTool) : 0xff6c6c);
     previewMaterial.color.setHex(previewColor);
-    previewMaterial.opacity = candidate.mode === "eraser"
-      ? 0.28
-      : (isValid ? 0.38 : 0.23);
+    if (candidate.mode === "pathBlocker") {
+      previewMaterial.opacity = 0.8;
+    } else {
+      previewMaterial.opacity = candidate.mode === "eraser"
+        ? 0.28
+        : (isValid ? 0.38 : 0.23);
+    }
 
     if (candidate.mode === "eraser") {
       previewFacingArrow.visible = false;
@@ -965,6 +1050,9 @@ export function createLevelEditor({
     if (target.type === "spawn") {
       return spawnMap.delete(key3(target.x, target.y, target.z));
     }
+    if (target.type === "pathBlocker") {
+      return pathBlockerMap.delete(key2(target.x, target.z));
+    }
     if (target.type === "end") {
       if (!endMarker) {
         return false;
@@ -1031,6 +1119,14 @@ export function createLevelEditor({
       spawnMap.set(key, createToolObject("spawn", x, y, z, 0));
       return true;
     }
+    if (candidate.mode === "pathBlocker") {
+      const blockerKey = key2(x, z);
+      if (!canPlacePathBlockerAt(x, y, z)) {
+        return false;
+      }
+      pathBlockerMap.set(blockerKey, createToolObject("pathBlocker", x, y, z, 0));
+      return true;
+    }
     if (candidate.mode === "end") {
       const next = createToolObject("end", x, y, z, 0);
       if (endMarker && key3(endMarker.position.x, endMarker.position.y, endMarker.position.z) === key3(x, y, z)) {
@@ -1085,6 +1181,9 @@ export function createLevelEditor({
     }
     for (const ramp of rampMap.values()) {
       objects.push(cloneLevelObject(ramp));
+    }
+    for (const pathBlocker of pathBlockerMap.values()) {
+      objects.push(cloneLevelObject(pathBlocker));
     }
     for (const decoration of decorationObjects) {
       objects.push(cloneLevelObject(decoration));
@@ -1281,6 +1380,9 @@ export function createLevelEditor({
   }
 
   function setSelectedTool(nextTool) {
+    if (nextTool == null) {
+      return clearSelectedTool();
+    }
     if (nextTool === "doodads") {
       openDoodadMenu();
       return true;
@@ -1298,6 +1400,13 @@ export function createLevelEditor({
       playerSpawnRotation = normalizeCardinalRotation(playerSpawnMarker.rotation);
     }
     return true;
+  }
+
+  function clearSelectedTool() {
+    const didChange = selectedTool !== null || doodadMenuOpen;
+    selectedTool = null;
+    doodadMenuOpen = false;
+    return didChange;
   }
 
   function rotateDecoration(step = 1) {
@@ -1417,6 +1526,7 @@ export function createLevelEditor({
     applyPrimaryAction,
     selectToolByDigit,
     setSelectedTool,
+    clearSelectedTool,
     rotateRamp,
     rotatePlayerSpawn,
     rotateSelectedTool,

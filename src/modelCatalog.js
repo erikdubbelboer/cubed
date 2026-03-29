@@ -1,3 +1,96 @@
+function createCollisionRatioBox(minX, minY, minZ, maxX, maxY, maxZ) {
+  return Object.freeze({
+    minRatio: Object.freeze({ x: minX, y: minY, z: minZ }),
+    maxRatio: Object.freeze({ x: maxX, y: maxY, z: maxZ }),
+  });
+}
+
+const NON_COLLIDING_DECORATIVE_TYPES = new Set([
+  "road",
+  "grave-border",
+  "grave",
+  "debris",
+  "debris-wood",
+  "gravestone-debris",
+  "shovel-dirt",
+]);
+
+const DECORATIVE_COLLISION_BOXES_BY_TYPE = Object.freeze({
+  banner: Object.freeze([
+    createCollisionRatioBox(0.42, 0.0, 0.42, 0.58, 1.0, 0.58),
+  ]),
+  gate: Object.freeze([
+    createCollisionRatioBox(0.08, 0.0, 0.14, 0.24, 1.0, 0.86),
+    createCollisionRatioBox(0.76, 0.0, 0.14, 0.92, 1.0, 0.86),
+    createCollisionRatioBox(0.24, 0.0, 0.24, 0.76, 0.82, 0.76),
+  ]),
+  pine: Object.freeze([
+    createCollisionRatioBox(0.38, 0.0, 0.38, 0.62, 0.6, 0.62),
+  ]),
+  "pine-crooked": Object.freeze([
+    createCollisionRatioBox(0.34, 0.0, 0.36, 0.62, 0.62, 0.62),
+  ]),
+  tree: Object.freeze([
+    createCollisionRatioBox(0.38, 0.0, 0.38, 0.62, 0.58, 0.62),
+  ]),
+  "trunk-long": Object.freeze([
+    createCollisionRatioBox(0.14, 0.0, 0.32, 0.86, 0.42, 0.68),
+    createCollisionRatioBox(0.22, 0.3, 0.24, 0.78, 0.62, 0.76),
+  ]),
+  "weapon-rack": Object.freeze([
+    createCollisionRatioBox(0.18, 0.0, 0.28, 0.82, 0.78, 0.72),
+  ]),
+  "wood-structure": Object.freeze([
+    createCollisionRatioBox(0.16, 0.0, 0.16, 0.36, 1.0, 0.36),
+    createCollisionRatioBox(0.64, 0.0, 0.16, 0.84, 1.0, 0.36),
+    createCollisionRatioBox(0.18, 0.0, 0.58, 0.82, 0.5, 0.84),
+  ]),
+});
+
+const DEFAULT_DECORATIVE_COLLISION = Object.freeze({
+  blocksPlayer: true,
+  blocksProjectiles: true,
+  supportsPlayer: false,
+});
+
+function cloneCollisionBoxes(boxes) {
+  if (!Array.isArray(boxes) || boxes.length === 0) {
+    return null;
+  }
+  return Object.freeze(boxes.map((box) => Object.freeze({
+    minRatio: Object.freeze({
+      x: Number(box?.minRatio?.x) || 0,
+      y: Number(box?.minRatio?.y) || 0,
+      z: Number(box?.minRatio?.z) || 0,
+    }),
+    maxRatio: Object.freeze({
+      x: Number(box?.maxRatio?.x) || 0,
+      y: Number(box?.maxRatio?.y) || 0,
+      z: Number(box?.maxRatio?.z) || 0,
+    }),
+  })));
+}
+
+function buildDecorativeCollision(entry) {
+  if (entry?.collision === false || NON_COLLIDING_DECORATIVE_TYPES.has(entry.type)) {
+    return null;
+  }
+  const configuredCollision = entry?.collision && typeof entry.collision === "object"
+    ? entry.collision
+    : {};
+  const boxes = cloneCollisionBoxes(
+    Array.isArray(configuredCollision.boxes) && configuredCollision.boxes.length > 0
+      ? configuredCollision.boxes
+      : DECORATIVE_COLLISION_BOXES_BY_TYPE[entry.type]
+  );
+  return Object.freeze({
+    ...DEFAULT_DECORATIVE_COLLISION,
+    ...configuredCollision,
+    supportsPlayer: configuredCollision.supportsPlayer === true,
+    boxes,
+  });
+}
+
 const DECORATIVE_MODEL_BASE_DEFS = [
   { type: "chest", targetHeightCells: 0.42 },
   { type: "barrel", targetHeightCells: 0.36 },
@@ -64,9 +157,7 @@ function humanizeTypeLabel(type) {
 export const DECORATIVE_MODEL_SPECS = Object.freeze(
   DECORATIVE_MODEL_BASE_DEFS.map((entry) => Object.freeze({
     ...entry,
-    collision: entry.collision && typeof entry.collision === "object"
-      ? Object.freeze({ ...entry.collision })
-      : null,
+    collision: buildDecorativeCollision(entry),
     label: humanizeTypeLabel(entry.type),
   }))
 );

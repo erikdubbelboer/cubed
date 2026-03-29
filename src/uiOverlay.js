@@ -1093,6 +1093,28 @@ function drawIconEditorPlayerSpawn(ctx, x, y, size) {
   ctx.fillRect(x + size * 0.47, y + size * 0.53, size * 0.06, size * 0.17);
 }
 
+function drawIconEditorPathBlocker(ctx, x, y, size) {
+  drawPanel(
+    ctx,
+    x + size * 0.2,
+    y + size * 0.2,
+    size * 0.6,
+    size * 0.6,
+    size * 0.07,
+    "rgba(216, 233, 255, 0.16)",
+    "rgba(216, 233, 255, 0.86)",
+    Math.max(1.2, size * 0.045)
+  );
+  ctx.strokeStyle = "rgba(122, 163, 204, 0.72)";
+  ctx.lineWidth = Math.max(1.1, size * 0.035);
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.2, y + size * 0.5);
+  ctx.lineTo(x + size * 0.8, y + size * 0.5);
+  ctx.moveTo(x + size * 0.5, y + size * 0.2);
+  ctx.lineTo(x + size * 0.5, y + size * 0.8);
+  ctx.stroke();
+}
+
 function drawIconEditorChest(ctx, x, y, size) {
   drawPanel(
     ctx,
@@ -1537,6 +1559,9 @@ export function drawIconById(ctx, iconId, x, y, size) {
       return;
     case "editor_player_spawn":
       drawIconEditorPlayerSpawn(ctx, x, y, size);
+      return;
+    case "editor_path_blocker":
+      drawIconEditorPathBlocker(ctx, x, y, size);
       return;
     case "editor_chest":
       drawIconEditorChest(ctx, x, y, size);

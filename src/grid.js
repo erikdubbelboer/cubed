@@ -30,7 +30,7 @@ const OUTER_EMPTY_SPACE_RINGS = Math.max(
 );
 const LEGACY_PATH_MARKERS = new Set(["P"]);
 const DECORATIVE_OBJECT_TYPES = new Set(DECORATIVE_MODEL_TYPES);
-const LEVEL_OBJECT_TYPES = new Set(["wall", "spawn", "end", "playerspawn", "ramp", "path", ...DECORATIVE_OBJECT_TYPES]);
+const LEVEL_OBJECT_TYPES = new Set(["wall", "spawn", "end", "playerspawn", "ramp", "path", "pathblocker", ...DECORATIVE_OBJECT_TYPES]);
 const LEVEL_MARKER_TYPES = new Set(["spawn", "end", "playerspawn", "path"]);
 const RAMP_ROTATION_TO_DIRECTION = new Map([
   [0, { x: 0, z: 1 }],
@@ -275,6 +275,9 @@ function normalizeLevelObjectTypeForExport(type) {
   if (type === "playerspawn") {
     return "playerSpawn";
   }
+  if (type === "pathblocker") {
+    return "pathBlocker";
+  }
   return type;
 }
 
@@ -342,6 +345,7 @@ function parseLevelLayout(levelObjects, options = {}) {
   const ramps = [];
   const decorativeObjects = [];
   const rawDecorativeEntries = [];
+  const rawPathBlockerEntries = [];
   const rampCellsByKey = new Map();
   const rampOccupiedSurfaceMap = new Map();
   const rampOuterSurfaceMap = new Map();
@@ -363,6 +367,10 @@ function parseLevelLayout(levelObjects, options = {}) {
   for (const entry of parsedEntries) {
     if (isDecorativeObjectType(entry.type)) {
       rawDecorativeEntries.push(entry);
+      continue;
+    }
+    if (entry.type === "pathblocker") {
+      rawPathBlockerEntries.push(entry);
       continue;
     }
     if (!LEVEL_MARKER_TYPES.has(entry.type)) {
@@ -514,6 +522,8 @@ function parseLevelLayout(levelObjects, options = {}) {
   }
 
   const heights = createHeightMatrix();
+  const pathBlockerCells = [];
+  const pathBlockerCellKeySet = new Set();
   for (let cellZ = 0; cellZ < GRID_SIZE; cellZ += 1) {
     for (let cellX = 0; cellX < GRID_SIZE; cellX += 1) {
       let supportedHeight = 0;
@@ -534,6 +544,31 @@ function parseLevelLayout(levelObjects, options = {}) {
     );
   }
 
+  for (const entry of rawPathBlockerEntries) {
+    const { x, y, z } = entry.position;
+    if (spawnCellKeySet.has(`${x},${y},${z}`)) {
+      throw new Error(`grid.levelObjects[${entry.index}] pathBlocker cannot overlap a spawn marker.`);
+    }
+    if (endCell && endCell.x === x && endCell.y === y && endCell.z === z) {
+      throw new Error(`grid.levelObjects[${entry.index}] pathBlocker cannot overlap the end marker.`);
+    }
+    const expectedSurfaceLevel = heights[z]?.[x];
+    if (!Number.isInteger(expectedSurfaceLevel)) {
+      throw new Error(`grid.levelObjects[${entry.index}] pathBlocker must be on a traversable surface.`);
+    }
+    if (y !== expectedSurfaceLevel) {
+      throw new Error(
+        `grid.levelObjects[${entry.index}] pathBlocker at (${x},${y},${z}) must be on surface y=${expectedSurfaceLevel}.`
+      );
+    }
+    const blockerKey = cellKey(x, z);
+    if (pathBlockerCellKeySet.has(blockerKey)) {
+      throw new Error(`grid.levelObjects[${entry.index}] duplicates another pathBlocker at (${x},${z}).`);
+    }
+    pathBlockerCellKeySet.add(blockerKey);
+    pathBlockerCells.push({ x, y, z });
+  }
+
   return {
     heights,
     wallHeights,
@@ -543,6 +578,7 @@ function parseLevelLayout(levelObjects, options = {}) {
     endCell,
     playerSpawnCell,
     playerSpawnRotation,
+    pathBlockerCells,
     ramps,
     decorativeObjects,
     rampCellsByKey,
@@ -749,13 +785,22 @@ export function createGrid(scene, options = {}) {
   const wallAnchorRaycastBestNormal = new THREE.Vector3();
   const tempDecorationBounds = new THREE.Box3();
   const tempDecorationRemovalBounds = new THREE.Box3();
+  const tempDecorativeCollisionBounds = new THREE.Box3();
   const tempDecorativeObstacleSize = new THREE.Vector3();
   const tempDecorativeObstacleCenter = new THREE.Vector3();
+  const tempDecorativeLocalSize = new THREE.Vector3();
+  const tempDecorativeLocalMin = new THREE.Vector3();
+  const tempDecorativeLocalMax = new THREE.Vector3();
+  const tempDecorativeCorner = new THREE.Vector3();
+  const tempDecorativeWorldCorner = new THREE.Vector3();
+  const tempDecorativeBoundsMin = new THREE.Vector3();
+  const tempDecorativeBoundsMax = new THREE.Vector3();
   const staticBatchInstanceMatrix = new THREE.Matrix4();
   const staticBatchPartMatrix = new THREE.Matrix4();
   const staticBatchQuaternion = new THREE.Quaternion();
   const staticBatchScale = new THREE.Vector3(1, 1, 1);
   const staticBatchPosition = new THREE.Vector3();
+  const decorativeObstacleTransform = new THREE.Matrix4();
   const staticVisualRoot = new THREE.Group();
   staticVisualRoot.name = "GridStaticVisualRoot";
   gridRoot.add(staticVisualRoot);
@@ -766,6 +811,9 @@ export function createGrid(scene, options = {}) {
     wallVoxels
       .map((voxel) => `${Number(voxel?.x)},${Number(voxel?.y)},${Number(voxel?.z)}`)
   );
+  const pathBlockerCells = Array.isArray(levelLayout.pathBlockerCells)
+    ? levelLayout.pathBlockerCells.map((cell) => cloneCell(cell))
+    : [];
   const decorativeObjects = Array.isArray(levelLayout.decorativeObjects) ? levelLayout.decorativeObjects : [];
   const decorativeEntries = [];
   const decorativeEntriesByChunk = new Map();
@@ -777,8 +825,7 @@ export function createGrid(scene, options = {}) {
     decorativeChunkCount: 0,
   };
 
-  function createDecorativeObstacleFromBounds(type, bounds) {
-    const collision = getDecorativeModelSpec(type)?.collision;
+  function createDecorativeObstacleFromBounds(type, bounds, collision = getDecorativeModelSpec(type)?.collision) {
     const blocksPlayer = collision?.blocksPlayer === true;
     const blocksProjectiles = collision?.blocksProjectiles === true;
     if (!bounds || (!blocksPlayer && !blocksProjectiles)) {
@@ -809,6 +856,92 @@ export function createGrid(scene, options = {}) {
       supportsPlayer: collision?.supportsPlayer !== false,
       blocksProjectiles,
     };
+  }
+
+  function fillLocalDecorativeCollisionBounds(sourceBounds, ratioBox, outBounds) {
+    if (!sourceBounds || sourceBounds.isEmpty() || !ratioBox || !outBounds) {
+      return false;
+    }
+    sourceBounds.getSize(tempDecorativeLocalSize);
+    const minRatioX = THREE.MathUtils.clamp(Number(ratioBox?.minRatio?.x), 0, 1);
+    const minRatioY = THREE.MathUtils.clamp(Number(ratioBox?.minRatio?.y), 0, 1);
+    const minRatioZ = THREE.MathUtils.clamp(Number(ratioBox?.minRatio?.z), 0, 1);
+    const maxRatioX = THREE.MathUtils.clamp(Number(ratioBox?.maxRatio?.x), 0, 1);
+    const maxRatioY = THREE.MathUtils.clamp(Number(ratioBox?.maxRatio?.y), 0, 1);
+    const maxRatioZ = THREE.MathUtils.clamp(Number(ratioBox?.maxRatio?.z), 0, 1);
+    tempDecorativeLocalMin.set(
+      sourceBounds.min.x + (tempDecorativeLocalSize.x * Math.min(minRatioX, maxRatioX)),
+      sourceBounds.min.y + (tempDecorativeLocalSize.y * Math.min(minRatioY, maxRatioY)),
+      sourceBounds.min.z + (tempDecorativeLocalSize.z * Math.min(minRatioZ, maxRatioZ))
+    );
+    tempDecorativeLocalMax.set(
+      sourceBounds.min.x + (tempDecorativeLocalSize.x * Math.max(minRatioX, maxRatioX)),
+      sourceBounds.min.y + (tempDecorativeLocalSize.y * Math.max(minRatioY, maxRatioY)),
+      sourceBounds.min.z + (tempDecorativeLocalSize.z * Math.max(minRatioZ, maxRatioZ))
+    );
+    if (
+      tempDecorativeLocalMax.x <= tempDecorativeLocalMin.x + GRID_CONFIG.rayParallelEpsilon
+      || tempDecorativeLocalMax.y <= tempDecorativeLocalMin.y + GRID_CONFIG.rayParallelEpsilon
+      || tempDecorativeLocalMax.z <= tempDecorativeLocalMin.z + GRID_CONFIG.rayParallelEpsilon
+    ) {
+      return false;
+    }
+    outBounds.min.copy(tempDecorativeLocalMin);
+    outBounds.max.copy(tempDecorativeLocalMax);
+    return true;
+  }
+
+  function createDecorativeObstacleFromLocalBounds(type, localBounds, worldMatrix, collision = getDecorativeModelSpec(type)?.collision) {
+    if (!localBounds || localBounds.isEmpty() || !worldMatrix) {
+      return null;
+    }
+    tempDecorativeBoundsMin.set(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
+    tempDecorativeBoundsMax.set(Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY);
+    const xs = [localBounds.min.x, localBounds.max.x];
+    const ys = [localBounds.min.y, localBounds.max.y];
+    const zs = [localBounds.min.z, localBounds.max.z];
+    for (const x of xs) {
+      for (const y of ys) {
+        for (const z of zs) {
+          tempDecorativeCorner.set(x, y, z);
+          tempDecorativeWorldCorner.copy(tempDecorativeCorner).applyMatrix4(worldMatrix);
+          tempDecorativeBoundsMin.min(tempDecorativeWorldCorner);
+          tempDecorativeBoundsMax.max(tempDecorativeWorldCorner);
+        }
+      }
+    }
+    tempDecorativeCollisionBounds.min.copy(tempDecorativeBoundsMin);
+    tempDecorativeCollisionBounds.max.copy(tempDecorativeBoundsMax);
+    return createDecorativeObstacleFromBounds(type, tempDecorativeCollisionBounds, collision);
+  }
+
+  function createDecorativeObstaclesFromPreparedBounds(type, preparedBounds, worldX, worldY, worldZ, rotationDegrees) {
+    const collision = getDecorativeModelSpec(type)?.collision;
+    if (!collision || !preparedBounds || preparedBounds.isEmpty()) {
+      return [];
+    }
+    staticBatchQuaternion.setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0),
+      THREE.MathUtils.degToRad(Number(rotationDegrees) || 0)
+    );
+    staticBatchPosition.set(worldX, worldY, worldZ);
+    decorativeObstacleTransform.compose(staticBatchPosition, staticBatchQuaternion, staticBatchScale);
+    const configuredBoxes = Array.isArray(collision.boxes) && collision.boxes.length > 0
+      ? collision.boxes
+      : [null];
+    const obstacles = [];
+    for (const ratioBox of configuredBoxes) {
+      const localBounds = ratioBox
+        ? (fillLocalDecorativeCollisionBounds(preparedBounds, ratioBox, tempDecorativeCollisionBounds)
+          ? tempDecorativeCollisionBounds
+          : null)
+        : preparedBounds;
+      const obstacle = createDecorativeObstacleFromLocalBounds(type, localBounds, decorativeObstacleTransform, collision);
+      if (obstacle) {
+        obstacles.push(obstacle);
+      }
+    }
+    return obstacles;
   }
 
   function getChunkKeyFromWorld(worldX, worldZ) {
@@ -1039,6 +1172,15 @@ export function createGrid(scene, options = {}) {
       continue;
     }
     const normalizedRotation = Number(decoration.rotation) || 0;
+    const preparedDecoration = getPreparedDecorationBatchParts(decoration.type);
+    const collisionObstacles = createDecorativeObstaclesFromPreparedBounds(
+      decoration.type,
+      preparedDecoration?.bounds ?? null,
+      worldX,
+      worldY,
+      worldZ,
+      normalizedRotation
+    );
     if (editorMode) {
       const decorationVisual = createDecorationVisual(decoration.type);
       if (!decorationVisual) {
@@ -1059,17 +1201,16 @@ export function createGrid(scene, options = {}) {
         rotation: normalizedRotation,
         mesh: decorationVisual,
         bounds: tempDecorationBounds.clone(),
-        collisionObstacle: createDecorativeObstacleFromBounds(decoration.type, tempDecorationBounds),
+        collisionObstacles,
       });
-      const collisionObstacle = decorativeEntries[decorativeEntries.length - 1]?.collisionObstacle ?? null;
-      if (collisionObstacle) {
-        decorativeObstacles.push(collisionObstacle);
+      const entryCollisionObstacles = decorativeEntries[decorativeEntries.length - 1]?.collisionObstacles ?? [];
+      if (entryCollisionObstacles.length > 0) {
+        decorativeObstacles.push(...entryCollisionObstacles);
       }
       editorRaycastTargets.push(decorationVisual);
       gridRoot.add(decorationVisual);
       continue;
     }
-    const preparedDecoration = getPreparedDecorationBatchParts(decoration.type);
     if (!preparedDecoration) {
       continue;
     }
@@ -1087,13 +1228,13 @@ export function createGrid(scene, options = {}) {
       rotation: normalizedRotation,
       mesh: null,
       bounds: tempDecorationBounds.clone(),
-      collisionObstacle: createDecorativeObstacleFromBounds(decoration.type, tempDecorationBounds),
+      collisionObstacles,
       chunkKey,
       removed: false,
     };
     decorativeEntries.push(entry);
-    if (entry.collisionObstacle) {
-      decorativeObstacles.push(entry.collisionObstacle);
+    if (entry.collisionObstacles.length > 0) {
+      decorativeObstacles.push(...entry.collisionObstacles);
     }
     let chunkEntries = decorativeEntriesByChunk.get(chunkKey);
     if (!chunkEntries) {
@@ -1466,6 +1607,36 @@ export function createGrid(scene, options = {}) {
     };
     editorRaycastTargets.push(playerSpawnMarker);
     gridRoot.add(playerSpawnMarker);
+  }
+
+  if (editorMode && pathBlockerCells.length > 0) {
+    const pathBlockerGeometry = new THREE.BoxGeometry(CELL_SIZE, CELL_SIZE, CELL_SIZE);
+    const pathBlockerMaterial = new THREE.MeshStandardMaterial({
+      color: 0xd8e9ff,
+      emissive: 0x274056,
+      emissiveIntensity: 0.24,
+      roughness: 0.62,
+      metalness: 0.08,
+      transparent: true,
+      opacity: 0.1,
+      depthWrite: false,
+    });
+    for (const pathBlockerCell of pathBlockerCells) {
+      const blockerMesh = new THREE.Mesh(pathBlockerGeometry, pathBlockerMaterial);
+      const blockerBaseY = FLOOR_Y + ((Number.isFinite(Number(pathBlockerCell?.y)) ? Number(pathBlockerCell.y) : 0) * CELL_SIZE);
+      const blockerCenter = cellToWorld(pathBlockerCell.x, pathBlockerCell.z, blockerBaseY + (CELL_SIZE * 0.5));
+      blockerMesh.position.copy(blockerCenter);
+      blockerMesh.castShadow = false;
+      blockerMesh.receiveShadow = false;
+      blockerMesh.userData.editorObjectType = "pathBlocker";
+      blockerMesh.userData.editorPathBlocker = {
+        x: pathBlockerCell.x,
+        y: pathBlockerCell.y ?? 0,
+        z: pathBlockerCell.z,
+      };
+      editorRaycastTargets.push(blockerMesh);
+      gridRoot.add(blockerMesh);
+    }
   }
 
   const moveInset = CELL_SIZE * GRID_CONFIG.moveInsetCellScale;
@@ -2280,10 +2451,12 @@ export function createGrid(scene, options = {}) {
       }
       decorativeEntries.splice(i, 1);
       entry.removed = true;
-      if (entry.collisionObstacle) {
-        const collisionIndex = decorativeObstacles.indexOf(entry.collisionObstacle);
-        if (collisionIndex >= 0) {
-          decorativeObstacles.splice(collisionIndex, 1);
+      if (Array.isArray(entry.collisionObstacles)) {
+        for (const collisionObstacle of entry.collisionObstacles) {
+          const collisionIndex = decorativeObstacles.indexOf(collisionObstacle);
+          if (collisionIndex >= 0) {
+            decorativeObstacles.splice(collisionIndex, 1);
+          }
         }
       }
       if (typeof entry.chunkKey === "string" && entry.chunkKey.length > 0) {
@@ -2334,6 +2507,7 @@ export function createGrid(scene, options = {}) {
     endCell,
     playerSpawnCell,
     playerSpawnRotation,
+    pathBlockerCells,
     spawnMarkers,
     endMarker,
     playerSpawnMarker,

@@ -20,8 +20,10 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Co-op uses the Kenney human model for the remote peer only; the local player remains first-person.
 - Money drops use the Kenney coin model, ramp visuals use Kenney stairs attached to the existing ramp helper mesh, and both terrain wall voxels and placed block towers use the Kenney wall model.
 - Terrain wall voxels must keep their hidden cube helper meshes authoritative for collision, build surfaces, LOS, and editor raycasts; the Kenney wall model is a visual child only.
-- Decorative editor props use the Kenney OBJ doodad catalog (`chest`, `barrel`, `stones`, plus the graveyard/environment doodads in `src/modelCatalog.js`) and remain visual-only by default.
-- Exception: the `gate` doodad snaps to grid cell centers with 90-degree rotation steps and contributes numeric blockers for player movement and projectile collision only; it must never affect enemy pathing, build surfaces, or LOS/build obstacle sets beyond projectile blocking.
+- Decorative editor props use the Kenney OBJ doodad catalog (`chest`, `barrel`, `stones`, plus the graveyard/environment doodads in `src/modelCatalog.js`).
+- Solid doodads now contribute numeric blocker boxes for player movement and projectile/LOS obstruction through `src/modelCatalog.js` collision metadata, but remain non-walkable and must never affect enemy pathing or build-surface queries.
+- Flat ground-detail doodads (`road`, grave/debris border detail, shovel dirt, etc.) remain non-blocking visual dressing.
+- `gate` still snaps to grid cell centers with 90-degree rotation steps and blocks only players/projectiles; it must never affect enemy pathing or build-surface logic.
 - Decorative props are culled automatically when a placed tower's world bounds overlap them; they are dressing, not protected gameplay geometry.
 - Block build preview stays procedural/abstract on purpose; do not replace the green/red preview validity mesh with the imported wall art unless the preview readability problem is solved first.
 
@@ -131,7 +133,7 @@ Capture project decisions that are easy to regress but not always obvious from l
 ## Grid, Pathfinding, and Blocking Contracts
 - Level source is sparse object data in [`src/level.json`](/Users/erik/Desktop/webgame/src/level.json), imported into `GAME_CONFIG.grid.levelObjects`; the file may be either `{ "levelObjects": [...] }` or a raw `[...]` array for paste-from-export convenience.
 - Object schema: `{ type, position: { x, y, z }, rotation }`.
-- Supported marker/object types: `wall`, `spawn`, `end`, `playerSpawn`, `ramp`, and every decorative doodad type listed in `src/modelCatalog.js` (`path` allowed as legacy visual marker).
+- Supported marker/object types: `wall`, `spawn`, `end`, `playerSpawn`, `ramp`, `pathBlocker`, and every decorative doodad type listed in `src/modelCatalog.js` (`path` allowed as legacy visual marker).
 - Ramp rotation mapping (low -> high): `0:+Z`, `90:+X`, `180:-Z`, `270:-X`; ramp anchor is low-end cell.
 - Grid-snapped gameplay objects continue to use integer cell coordinates in `position`; decorative props use world-space `position` coordinates and arbitrary numeric yaw in `rotation`, except `gate`, which still serializes as world-space coordinates but snaps only its X/Z to cell centers and uses cardinal rotation.
 - Grid exposes marker-centric/runtime helpers (spawn/end/player spawn, buildability, ramp data, world<->cell mapping).
@@ -145,7 +147,8 @@ Capture project decisions that are easy to regress but not always obvious from l
   - A ramp's front/back outer entry cells must remain non-ramp surfaces at the matching level; a ramp cell cannot double as another ramp's entry/exit cell.
 - Blocking contract:
   - `canBlockCell`/`canBlockCells` must preserve at least one route from every spawn to `end`.
-  - `setBlockedCells` commits blockers and reroutes active enemies immediately.
+  - Static `pathBlocker` cells are merged into enemy blocking state before dynamic tower blockers; `setBlockedCells` only updates the dynamic portion and reroutes active enemies immediately.
+- `pathBlocker` is a grid-aligned, runtime-invisible blocker that affects enemy navigation only; it must not affect player collision, projectile collision, LOS/build surfaces, or buildability queries.
 - Enemy completion at endpoint currently despawns when the enemy route center reaches the end marker center; there is no lives/game-over handling yet.
 - Tower placement is grid-snapped; spawn/end/ramp cells are not buildable.
 
@@ -179,6 +182,8 @@ Capture project decisions that are easy to regress but not always obvious from l
 - Decorative editor props place freely on world surfaces via editor raycasts rather than voxel snapping, but remain serialized into `levelObjects` alongside the snapped gameplay objects; `gate` is the exception and snaps to the targeted grid cell center/surface instead.
 - Decorative editor props support arbitrary yaw rotation via the editor scroll-wheel tool rotation path rather than cardinal-only ramp/player-start rotation; `gate` is the exception and rotates in 90-degree steps.
 - Editor toolbar buttons and the doodad picker render through shared canvas-drawn 3D previews from `src/editorModelPreviews.js`; the doodad toolbar slot mirrors the currently selected doodad type, and the UI must fall back to legacy icons if a preview cannot be produced.
+- `pathBlocker` is a dedicated editor toolbar tool (hotkey `8`), serializes as `{ type: "pathBlocker", position, rotation: 0 }`, and must sit on the traversable surface `y` for its cell.
+- `pathBlocker` renders as a 90% transparent cube in editor only and remains completely invisible outside editor mode.
 - Marker `y` values are authoritative and must match traversable surface; invalid markers fail path system validation.
 - Player spawn facing uses `playerSpawn.rotation` cardinal mapping (same mapping as ramp cardinal conventions).
 - Exiting editor validates playability before returning to gameplay.
