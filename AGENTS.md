@@ -18,13 +18,15 @@ Capture project decisions that are easy to regress but not always obvious from l
 - These imported models are visual-only. Gameplay/pathing/collision/hitboxes remain numeric in `grid`, `player`, `enemies`, and `towers`; do not move gameplay authority onto imported mesh geometry.
 - Enemy visuals now map existing enemy tiers onto the Kenney `character-ghost`, `character-skeleton`, `character-vampire`, and `character-zombie` models; they still keep explicit hidden hit proxies for sniper/headshot raycasts and preserve the existing collision-box contract.
 - Co-op uses the Kenney human model for the remote peer only; the local player remains first-person.
-- Money drops use the Kenney coin model, ramp visuals use Kenney stairs attached to the existing ramp helper mesh, and both terrain wall voxels and placed block towers use the Kenney wall model.
-- Terrain wall voxels must keep their hidden cube helper meshes authoritative for collision, build surfaces, LOS, and editor raycasts; the Kenney wall model is a visual child only.
+- Money drops use the Kenney coin model and ramp visuals use Kenney stairs attached to the existing ramp helper mesh; terrain wall voxels and placed block towers now render as plain gray cubes using the block tower palette instead of the Kenney wall mesh.
+- Terrain wall voxels must keep their hidden cube helper meshes authoritative for collision, build surfaces, LOS, and editor raycasts; the visible cube shell is presentation only.
 - Decorative editor props use the Kenney OBJ doodad catalog (`chest`, `barrel`, `stones`, plus the graveyard/environment doodads in `src/modelCatalog.js`).
-- Solid doodads now contribute numeric blocker boxes for player movement and projectile/LOS obstruction through `src/modelCatalog.js` collision metadata, but remain non-walkable and must never affect enemy pathing or build-surface queries.
+- Solid doodads now contribute numeric blocker boxes for player movement and projectile/LOS obstruction through `src/modelCatalog.js` collision metadata, but remain non-walkable and must never affect enemy pathing or build-surface queries unless a doodad explicitly opts into full-cell authority.
+- `wall-block` is the exception: it reuses the Kenney `wall.obj` art as a grid-snapped doodad, exposes a full-cell walkable/support surface and wall-anchor sides like a terrain cube, and must not be culled by tower overlap cleanup.
+- Enemy pathing only treats a `wall-block` doodad as blocking when it occupies that cell's current traversable surface level; elevated `wall-block`s above the traversable surface may be used as overhead/support geometry that enemies can path underneath.
 - Flat ground-detail doodads (`road`, grave/debris border detail, shovel dirt, etc.) remain non-blocking visual dressing.
 - `gate` still snaps to grid cell centers with 90-degree rotation steps and blocks only players/projectiles; it must never affect enemy pathing or build-surface logic.
-- Decorative props are culled automatically when a placed tower's world bounds overlap them; they are dressing, not protected gameplay geometry.
+- Decorative props are culled automatically when a placed tower's world bounds overlap them unless their spec explicitly preserves them; ordinary dressing remains disposable.
 - Block build preview stays procedural/abstract on purpose; do not replace the green/red preview validity mesh with the imported wall art unless the preview readability problem is solved first.
 
 ## Multiplayer Contracts (Co-op)

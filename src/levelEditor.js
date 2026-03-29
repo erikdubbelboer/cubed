@@ -219,6 +219,7 @@ export function createLevelEditor({
   camera,
   grid,
   initialLevelObjects = [],
+  validateLevelObjects = null,
 } = {}) {
   const raycaster = new THREE.Raycaster();
   const aimPoint = new THREE.Vector2(0, 0);
@@ -570,6 +571,9 @@ export function createLevelEditor({
     if (!isInsideBounds(highCell.x, highCell.z)) {
       return false;
     }
+    if (hasWallBlockAtCell(lowCell.x, lowCell.z) || hasWallBlockAtCell(highCell.x, highCell.z)) {
+      return false;
+    }
 
     const occupiedRampCells = getRampCellOccupancyMap(ignoreRampKey);
     if (occupiedRampCells.has(key2(lowCell.x, lowCell.z)) || occupiedRampCells.has(key2(highCell.x, highCell.z))) {
@@ -597,12 +601,87 @@ export function createLevelEditor({
     return pathBlockerMap.has(key2(x, z));
   }
 
+  function getGridSnappedDecorationCell(type, position) {
+    if (!isGridSnappedDecorationType(type) || typeof grid?.worldToCell !== "function") {
+      return null;
+    }
+    const worldX = Number(position?.x);
+    const worldZ = Number(position?.z);
+    if (!Number.isFinite(worldX) || !Number.isFinite(worldZ)) {
+      return null;
+    }
+    return grid.worldToCell(worldX, worldZ);
+  }
+
+  function hasWallBlockAtCell(x, z) {
+    return decorationObjects.some((entry) => {
+      if (entry?.type !== "wall-block") {
+        return false;
+      }
+      const cell = getGridSnappedDecorationCell(entry.type, entry.position);
+      return !!cell && cell.x === x && cell.z === z;
+    });
+  }
+
+  function hasWallBlockAtCellLevel(x, y, z) {
+    const targetWorldY = Number(y);
+    return decorationObjects.some((entry) => {
+      if (entry?.type !== "wall-block") {
+        return false;
+      }
+      const cell = getGridSnappedDecorationCell(entry.type, entry.position);
+      if (!cell || cell.x !== x || cell.z !== z) {
+        return false;
+      }
+      return Math.abs(Number(entry.position?.y) - targetWorldY) <= DECORATION_MATCH_EPSILON;
+    });
+  }
+
+  function canPlaceDecorationTarget(target) {
+    if (!target || !isDecorationTool(target.type)) {
+      return false;
+    }
+    if (findDecorationIndexMatchingTarget(target) !== -1) {
+      return false;
+    }
+    const authoritativeCellObstacle = getDecorativeModelSpec(target.type)?.authoritativeCellObstacle ?? null;
+    if (!authoritativeCellObstacle) {
+      return true;
+    }
+    const cell = getGridSnappedDecorationCell(target.type, target.position);
+    if (!cell) {
+      return false;
+    }
+    if (target.type === "wall-block") {
+      if (hasWallBlockAtCellLevel(cell.x, Number(target.position?.y), cell.z)) {
+        return false;
+      }
+    } else if (hasWallBlockAtCell(cell.x, cell.z)) {
+      return false;
+    }
+    if (hasPathBlockerAt(cell.x, cell.z)) {
+      return false;
+    }
+    if (findRampOccupyingCell(cell.x, cell.z)) {
+      return false;
+    }
+    for (const spawn of spawnMap.values()) {
+      if (spawn.position.x === cell.x && spawn.position.z === cell.z) {
+        return false;
+      }
+    }
+    return !endMarker || endMarker.position.x !== cell.x || endMarker.position.z !== cell.z;
+  }
+
   function canPlacePathBlockerAt(x, y, z) {
     if (!isInsideBounds(x, z) || y < 0) {
       return false;
     }
     const surfaceLevel = getTraversableSurfaceLevelAt(x, z);
     if (!Number.isInteger(surfaceLevel) || y !== surfaceLevel) {
+      return false;
+    }
+    if (hasWallBlockAtCell(x, z)) {
       return false;
     }
     if (hasPathBlockerAt(x, z)) {
@@ -770,7 +849,7 @@ export function createLevelEditor({
         rotation,
       };
       return {
-        valid: findDecorationIndexMatchingTarget(target) === -1,
+        valid: canPlaceDecorationTarget(target),
         mode: selectedTool,
         target,
       };
@@ -847,6 +926,7 @@ export function createLevelEditor({
       const valid = isInsideBounds(placement.x, placement.z)
         && placement.y >= 0
         && !spawnMap.has(key3(placement.x, placement.y, placement.z))
+        && !hasWallBlockAtCell(placement.x, placement.z)
         && !hasPathBlockerAt(placement.x, placement.z);
       return {
         valid,
@@ -858,6 +938,7 @@ export function createLevelEditor({
     if (selectedTool === "end") {
       const valid = isInsideBounds(placement.x, placement.z)
         && placement.y >= 0
+        && !hasWallBlockAtCell(placement.x, placement.z)
         && !hasPathBlockerAt(placement.x, placement.z)
         && (!endMarker || key3(endMarker.position.x, endMarker.position.y, endMarker.position.z) !== key3(placement.x, placement.y, placement.z));
       return {
@@ -1029,6 +1110,32 @@ export function createLevelEditor({
     }
   }
 
+  function validateCurrentLevelObjects() {
+    if (typeof validateLevelObjects !== "function") {
+      return true;
+    }
+    try {
+      return validateLevelObjects(getLevelObjects()) !== false;
+    } catch (error) {
+      console.warn("[LevelEditor] Level mutation rejected during validation.", error);
+      return false;
+    }
+  }
+
+  function commitValidatedMutation(applyMutation, revertMutation) {
+    if (typeof applyMutation !== "function") {
+      return false;
+    }
+    applyMutation();
+    if (validateCurrentLevelObjects()) {
+      return true;
+    }
+    if (typeof revertMutation === "function") {
+      revertMutation();
+    }
+    return false;
+  }
+
   function removeTarget(target) {
     if (!target || typeof target !== "object") {
       return false;
@@ -1096,11 +1203,20 @@ export function createLevelEditor({
         Number(candidate.target.position?.z) || 0,
         candidate.target.rotation ?? 0
       );
-      if (findDecorationIndexMatchingTarget(next) !== -1) {
+      if (!canPlaceDecorationTarget(next)) {
         return false;
       }
-      decorationObjects.push(next);
-      return true;
+      return commitValidatedMutation(
+        () => {
+          decorationObjects.push(next);
+        },
+        () => {
+          const index = decorationObjects.lastIndexOf(next);
+          if (index >= 0) {
+            decorationObjects.splice(index, 1);
+          }
+        }
+      );
     }
     const { x, y, z } = candidate.target;
     if (candidate.mode === "wall") {
@@ -1108,32 +1224,63 @@ export function createLevelEditor({
       if (wallMap.has(key)) {
         return false;
       }
-      wallMap.set(key, createToolObject("wall", x, y, z, 0));
-      return true;
+      const next = createToolObject("wall", x, y, z, 0);
+      return commitValidatedMutation(
+        () => {
+          wallMap.set(key, next);
+        },
+        () => {
+          wallMap.delete(key);
+        }
+      );
     }
     if (candidate.mode === "spawn") {
       const key = key3(x, y, z);
-      if (spawnMap.has(key)) {
+      if (spawnMap.has(key) || hasWallBlockAtCell(x, z)) {
         return false;
       }
-      spawnMap.set(key, createToolObject("spawn", x, y, z, 0));
-      return true;
+      const next = createToolObject("spawn", x, y, z, 0);
+      return commitValidatedMutation(
+        () => {
+          spawnMap.set(key, next);
+        },
+        () => {
+          spawnMap.delete(key);
+        }
+      );
     }
     if (candidate.mode === "pathBlocker") {
       const blockerKey = key2(x, z);
       if (!canPlacePathBlockerAt(x, y, z)) {
         return false;
       }
-      pathBlockerMap.set(blockerKey, createToolObject("pathBlocker", x, y, z, 0));
-      return true;
+      const next = createToolObject("pathBlocker", x, y, z, 0);
+      return commitValidatedMutation(
+        () => {
+          pathBlockerMap.set(blockerKey, next);
+        },
+        () => {
+          pathBlockerMap.delete(blockerKey);
+        }
+      );
     }
     if (candidate.mode === "end") {
       const next = createToolObject("end", x, y, z, 0);
-      if (endMarker && key3(endMarker.position.x, endMarker.position.y, endMarker.position.z) === key3(x, y, z)) {
+      if (
+        hasWallBlockAtCell(x, z)
+        || (endMarker && key3(endMarker.position.x, endMarker.position.y, endMarker.position.z) === key3(x, y, z))
+      ) {
         return false;
       }
-      endMarker = next;
-      return true;
+      const previousEndMarker = endMarker;
+      return commitValidatedMutation(
+        () => {
+          endMarker = next;
+        },
+        () => {
+          endMarker = previousEndMarker;
+        }
+      );
     }
     if (candidate.mode === "playerSpawn") {
       const nextRotation = normalizeCardinalRotation(candidate.target.rotation);
@@ -1145,9 +1292,18 @@ export function createLevelEditor({
       ) {
         return false;
       }
-      playerSpawnMarker = next;
-      playerSpawnRotation = nextRotation;
-      return true;
+      const previousPlayerSpawnMarker = playerSpawnMarker;
+      const previousPlayerSpawnRotation = playerSpawnRotation;
+      return commitValidatedMutation(
+        () => {
+          playerSpawnMarker = next;
+          playerSpawnRotation = nextRotation;
+        },
+        () => {
+          playerSpawnMarker = previousPlayerSpawnMarker;
+          playerSpawnRotation = previousPlayerSpawnRotation;
+        }
+      );
     }
     if (candidate.mode === "ramp") {
       const key = key3(x, y, z);
@@ -1159,8 +1315,19 @@ export function createLevelEditor({
       if (previous && previous.rotation === nextRotation) {
         return false;
       }
-      rampMap.set(key, createToolObject("ramp", x, y, z, nextRotation));
-      return true;
+      const next = createToolObject("ramp", x, y, z, nextRotation);
+      return commitValidatedMutation(
+        () => {
+          rampMap.set(key, next);
+        },
+        () => {
+          if (previous) {
+            rampMap.set(key, previous);
+            return;
+          }
+          rampMap.delete(key);
+        }
+      );
     }
     return false;
   }

@@ -4,6 +4,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { GAME_CONFIG } from "./config.js";
 import {
   DECORATIVE_MODEL_SPECS,
+  getDecorativeModelAssetKey,
   getDecorativeModelSpec,
   getEnemyModelProfile,
   resolveEnemyModelKey,
@@ -139,6 +140,7 @@ const OBJ_MODEL_URLS = import.meta.glob("../models/*.obj", {
 const KENNEY_MANAGED_FLAG = "kenneyManaged";
 const KENNEY_SHARED_FLAG = "kenneyShared";
 const WALL_BOTTOM_CAP_GEOMETRY = markKenneyManaged(new THREE.PlaneGeometry(1, 1), { shared: true });
+const SHARED_PLAIN_CUBE_GEOMETRY = markKenneyManaged(new THREE.BoxGeometry(1, 1, 1), { shared: true });
 const KENNEY_DEBUG_ENABLED = (() => {
   if (typeof window === "undefined" || typeof window.location?.search !== "string") {
     return false;
@@ -201,7 +203,11 @@ const MODEL_DEFINITIONS = {
   stairs: createObjModelDefinition("stairs"),
   wall: createObjModelDefinition("wall"),
   ...Object.fromEntries(
-    DECORATIVE_MODEL_SPECS.map((entry) => [entry.type, createObjModelDefinition(entry.type)])
+    Array.from(
+      new Set(
+        DECORATIVE_MODEL_SPECS.map((entry) => getDecorativeModelAssetKey(entry.type)).filter((key) => key.length > 0)
+      )
+    ).map((assetKey) => [assetKey, createObjModelDefinition(assetKey)])
   ),
 };
 
@@ -738,6 +744,52 @@ function createCloneRoot(descriptor, {
   return root;
 }
 
+function createCubeVisualRoot({
+  width = GRID_CELL_SIZE,
+  height = GRID_CELL_SIZE,
+  depth = GRID_CELL_SIZE,
+  color = 0xffffff,
+  emissive = 0x000000,
+  emissiveIntensity = 0,
+  roughness = 0.76,
+  metalness = 0.12,
+  opacity = 1,
+  transparent = false,
+  managedMaterial = false,
+  modelKey = "cube",
+} = {}) {
+  const safeOpacity = THREE.MathUtils.clamp(Number(opacity) || 1, 0.05, 1);
+  const material = new THREE.MeshStandardMaterial({
+    color,
+    emissive,
+    emissiveIntensity: Math.max(0, Number(emissiveIntensity) || 0),
+    roughness: THREE.MathUtils.clamp(Number(roughness) || 0, 0, 1),
+    metalness: THREE.MathUtils.clamp(Number(metalness) || 0, 0, 1),
+    opacity: safeOpacity,
+    transparent: transparent || safeOpacity < 0.999,
+    depthWrite: !transparent && safeOpacity >= 0.999,
+  });
+  if (managedMaterial) {
+    markKenneyManaged(material, { shared: true });
+  }
+
+  const mesh = new THREE.Mesh(SHARED_PLAIN_CUBE_GEOMETRY, material);
+  mesh.scale.set(
+    Math.max(0.01, Number(width) || GRID_CELL_SIZE),
+    Math.max(0.01, Number(height) || GRID_CELL_SIZE),
+    Math.max(0.01, Number(depth) || GRID_CELL_SIZE)
+  );
+  mesh.position.y = mesh.scale.y * 0.5;
+
+  const root = new THREE.Group();
+  root.add(mesh);
+  root.userData.materials = [material];
+  root.userData.kenneyVisual = true;
+  root.userData.kenneyModelKey = modelKey;
+  setShadowState(root);
+  return root;
+}
+
 async function loadTemplate(key, definition) {
   const atlasTexture = getAtlasTexture(definition.atlasKey);
   const loaded = await OBJ_LOADER.loadAsync(definition.objUrl);
@@ -1243,56 +1295,38 @@ export function getPreparedRampBatchParts() {
 }
 
 export function createTerrainWallVisual({ addBottomCap = false } = {}) {
-  const descriptor = getDescriptor("wall");
-  if (!descriptor) {
-    return null;
-  }
-  const root = createCloneRoot(descriptor, {
-    fit: "xyz",
-    targetWidth: GRID_CELL_SIZE,
-    targetHeight: GRID_CELL_SIZE,
-    targetDepth: GRID_CELL_SIZE,
-    anchorY: "bottom",
-    sharedMaterialVariantKey: "terrainWall:base",
-    sharedMaterialStyle: {
-      color: TERRAIN_WALL_BASE_COLOR,
-      emissive: TERRAIN_WALL_EMISSIVE,
-      emissiveIntensity: 0,
-      roughness: Number.isFinite(Number(GRID_CONFIG.altitudeRoughness))
-        ? Number(GRID_CONFIG.altitudeRoughness)
-        : 0.82,
-      metalness: Number.isFinite(Number(GRID_CONFIG.altitudeMetalness))
-        ? Number(GRID_CONFIG.altitudeMetalness)
-        : 0.04,
-      useMap: true,
-    },
-  });
-  if (root) {
-    const wallShell = root.children[0];
-    if (wallShell) {
-      wallShell.position.y += WALL_VISUAL_SURFACE_LIFT;
-    }
-    if (addBottomCap) {
-      addWallBottomCap(root, {
-        width: GRID_CELL_SIZE,
-        depth: GRID_CELL_SIZE,
-        materialKey: "terrainWall:bottomCap",
-        color: 0xd7d4e6,
-        emissive: 0x000000,
-        emissiveIntensity: 0,
-        roughness: Number.isFinite(Number(GRID_CONFIG.altitudeRoughness))
+  void addBottomCap;
+  const root = createCubeVisualRoot({
+    width: GRID_CELL_SIZE,
+    height: GRID_CELL_SIZE,
+    depth: GRID_CELL_SIZE,
+    color: GRID_CONFIG.terrainWallColor ?? BLOCK_TOWER_CONFIG.placedColor ?? TERRAIN_WALL_BASE_COLOR,
+    emissive: TERRAIN_WALL_EMISSIVE,
+    emissiveIntensity: 0,
+    roughness: Number.isFinite(Number(BLOCK_TOWER_CONFIG.roughness))
+      ? Number(BLOCK_TOWER_CONFIG.roughness)
+      : (
+        Number.isFinite(Number(GRID_CONFIG.altitudeRoughness))
           ? Number(GRID_CONFIG.altitudeRoughness)
-          : 0.82,
-        metalness: 0.02,
-      });
-    }
-  }
-  logKenneyDebug("Created terrain wall visual", { ok: !!root }, { onceKey: "create-terrain-wall" });
+          : 0.82
+      ),
+    metalness: Number.isFinite(Number(BLOCK_TOWER_CONFIG.metalness))
+      ? Number(BLOCK_TOWER_CONFIG.metalness)
+      : (
+        Number.isFinite(Number(GRID_CONFIG.altitudeMetalness))
+          ? Number(GRID_CONFIG.altitudeMetalness)
+          : 0.04
+      ),
+    managedMaterial: true,
+    modelKey: "terrain-wall-cube",
+  });
+  logKenneyDebug("Created terrain wall visual", { ok: !!root }, { onceKey: "create-terrain-wall:cube" });
   return root;
 }
 
 export function getPreparedTerrainWallBatchParts({ addBottomCap = false } = {}) {
-  return getPreparedVisualData(`terrainWall:${addBottomCap ? "bottomCap" : "plain"}`, () => (
+  void addBottomCap;
+  return getPreparedVisualData("terrainWall:cube", () => (
     createTerrainWallVisual({ addBottomCap })
   ));
 }
@@ -1318,22 +1352,37 @@ export function createDecorationVisual(type, options = {}) {
   if (!decorativeSpec) {
     return null;
   }
-  const descriptor = getDescriptor(normalizedType);
+  const descriptor = getDescriptor(getDecorativeModelAssetKey(normalizedType));
   if (!descriptor) {
     return null;
   }
+  const fitMode = decorativeSpec.fit === "xyz" ? "xyz" : "height";
   const targetHeight = Math.max(
     0.05,
     GRID_CELL_SIZE * Math.max(0.05, Number(decorativeSpec.targetHeightCells) || 0.25)
   );
+  const targetWidth = fitMode === "xyz"
+    ? Math.max(
+      0.05,
+      GRID_CELL_SIZE * Math.max(0.05, Number(decorativeSpec.targetWidthCells) || Number(decorativeSpec.targetHeightCells) || 0.25)
+    )
+    : null;
+  const targetDepth = fitMode === "xyz"
+    ? Math.max(
+      0.05,
+      GRID_CELL_SIZE * Math.max(0.05, Number(decorativeSpec.targetDepthCells) || Number(decorativeSpec.targetHeightCells) || 0.25)
+    )
+    : null;
   const instanceMaterialStyle = (
     options.instanceMaterialStyle && typeof options.instanceMaterialStyle === "object"
   )
     ? options.instanceMaterialStyle
     : null;
   const root = createCloneRoot(descriptor, {
-    fit: "height",
+    fit: fitMode,
+    targetWidth,
     targetHeight,
+    targetDepth,
     anchorY: "bottom",
     sharedMaterialVariantKey: instanceMaterialStyle
       ? null
@@ -1367,37 +1416,25 @@ export function getPreparedDecorationBatchParts(type) {
 }
 
 export function createBlockVisual({ opacity = 1 } = {}) {
-  const descriptor = getDescriptor("wall");
-  if (!descriptor) {
-    return null;
-  }
   const blockOpacity = THREE.MathUtils.clamp(Number(opacity) || 1, 0.05, 1);
-  const root = createCloneRoot(descriptor, {
-    fit: "xyz",
-    targetWidth: BLOCK_TARGET_WIDTH,
-    targetHeight: BLOCK_TARGET_HEIGHT,
-    targetDepth: BLOCK_TARGET_WIDTH,
-    anchorY: "bottom",
-    instanceMaterialStyle: {
-      color: mixColorWithWhite(BLOCK_TOWER_CONFIG.placedColor ?? 0xffffff, 0.16),
-      emissive: mixColorWithWhite(BLOCK_TOWER_CONFIG.placedGlow ?? 0x000000, 0.7),
-      emissiveIntensity: 0.28,
-      roughness: Number.isFinite(Number(BLOCK_TOWER_CONFIG.roughness))
-        ? Number(BLOCK_TOWER_CONFIG.roughness)
-        : 0.76,
-      metalness: Number.isFinite(Number(BLOCK_TOWER_CONFIG.metalness))
-        ? Number(BLOCK_TOWER_CONFIG.metalness)
-        : 0.12,
-      opacity: blockOpacity,
-      transparent: blockOpacity < 0.999,
-    },
+  const root = createCubeVisualRoot({
+    width: BLOCK_TARGET_WIDTH,
+    height: BLOCK_TARGET_HEIGHT,
+    depth: BLOCK_TARGET_WIDTH,
+    color: BLOCK_TOWER_CONFIG.placedColor ?? 0xffffff,
+    emissive: BLOCK_TOWER_CONFIG.placedGlow ?? 0x000000,
+    emissiveIntensity: 0.18,
+    roughness: Number.isFinite(Number(BLOCK_TOWER_CONFIG.roughness))
+      ? Number(BLOCK_TOWER_CONFIG.roughness)
+      : 0.76,
+    metalness: Number.isFinite(Number(BLOCK_TOWER_CONFIG.metalness))
+      ? Number(BLOCK_TOWER_CONFIG.metalness)
+      : 0.12,
+    opacity: blockOpacity,
+    transparent: blockOpacity < 0.999,
+    managedMaterial: false,
+    modelKey: "block-cube",
   });
-  if (root) {
-    const blockShell = root.children[0];
-    if (blockShell) {
-      blockShell.position.y += WALL_VISUAL_SURFACE_LIFT;
-    }
-  }
   logKenneyDebug("Created block visual", {
     opacity: blockOpacity,
     ok: !!root,

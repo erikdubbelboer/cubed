@@ -477,6 +477,7 @@ export function createTowerSystem({
   const terrainObstacles = Array.isArray(grid.heightObstacles) ? grid.heightObstacles : [];
   const rampObstacles = Array.isArray(grid.rampObstacles) ? grid.rampObstacles : [];
   const decorativeObstacles = Array.isArray(grid.decorativeObstacles) ? grid.decorativeObstacles : [];
+  const staticBlockedCells = Array.isArray(grid.staticBlockedCells) ? grid.staticBlockedCells : [];
   const spawnCells = Array.isArray(grid.spawnCells) ? grid.spawnCells : [];
   const endCell = grid.endCell ?? null;
   const gridCellSize = Math.max(0.01, Number(grid.cellSize) || 0);
@@ -910,6 +911,21 @@ export function createTowerSystem({
 
   function makeCellKey(cellX, cellZ) {
     return `${cellX},${cellZ}`;
+  }
+
+  let cachedStaticBlockedCellKeySet = null;
+  function getStaticBlockedCellKeySet() {
+    if (cachedStaticBlockedCellKeySet) {
+      return cachedStaticBlockedCellKeySet;
+    }
+    cachedStaticBlockedCellKeySet = new Set();
+    for (const cell of staticBlockedCells) {
+      if (!Number.isInteger(cell?.x) || !Number.isInteger(cell?.z)) {
+        continue;
+      }
+      cachedStaticBlockedCellKeySet.add(makeCellKey(cell.x, cell.z));
+    }
+    return cachedStaticBlockedCellKeySet;
   }
 
   function doesTowerTypeBlockPath(towerType) {
@@ -1350,6 +1366,9 @@ export function createTowerSystem({
       return [];
     }
     const existingBlockedKeys = getBlockedCellKeySet();
+    for (const blockedKey of getStaticBlockedCellKeySet()) {
+      existingBlockedKeys.add(blockedKey);
+    }
     return placement.occupiedCells.filter((cell) => !existingBlockedKeys.has(makeCellKey(cell.x, cell.z)));
   }
 

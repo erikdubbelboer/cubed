@@ -95,6 +95,26 @@ const DECORATIVE_MODEL_BASE_DEFS = [
   { type: "chest", targetHeightCells: 0.42 },
   { type: "barrel", targetHeightCells: 0.36 },
   { type: "stones", targetHeightCells: 0.22 },
+  {
+    type: "wall-block",
+    assetKey: "wall",
+    fit: "xyz",
+    targetWidthCells: 1,
+    targetHeightCells: 1,
+    targetDepthCells: 1,
+    placement: "grid",
+    rotationStepDegrees: 90,
+    collision: false,
+    authoritativeCellObstacle: {
+      blocksPlayer: true,
+      blocksProjectiles: true,
+      supportsPlayer: true,
+      topInsetFromRadius: 0,
+      heightCells: 1,
+    },
+    blocksEnemyPath: true,
+    preserveOnTowerOverlap: true,
+  },
   { type: "altar-stone", targetHeightCells: 0.44 },
   { type: "altar-wood", targetHeightCells: 0.48 },
   { type: "banner", targetHeightCells: 0.86 },
@@ -178,6 +198,12 @@ export function isDecorativeObjectType(type) {
 
 export function getDecorativeModelSpec(type) {
   return DECORATIVE_MODEL_SPEC_BY_TYPE.get(String(type ?? "").trim().toLowerCase()) ?? null;
+}
+
+export function getDecorativeModelAssetKey(type) {
+  const spec = getDecorativeModelSpec(type);
+  const assetKey = typeof spec?.assetKey === "string" ? spec.assetKey.trim().toLowerCase() : "";
+  return assetKey.length > 0 ? assetKey : String(type ?? "").trim().toLowerCase();
 }
 
 export const EDITOR_DOODAD_PAGE_COLUMNS = 5;

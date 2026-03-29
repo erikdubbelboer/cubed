@@ -8537,6 +8537,7 @@ function enterEditorMode() {
     camera,
     grid,
     initialLevelObjects: levelObjects,
+    validateLevelObjects: validateEditorLevelMutation,
   });
 
   waveState = "EDITOR";
@@ -8560,6 +8561,32 @@ function validateEditorLevelPlayable() {
       valid: false,
       error,
     };
+  }
+}
+
+function validateEditorLevelMutation(nextLevelObjects) {
+  let validationGrid = null;
+  let validationEnemySystem = null;
+  try {
+    validationGrid = createGrid(scene, {
+      levelObjects: nextLevelObjects,
+      allowIncompleteMarkers: true,
+      editorMode: false,
+    });
+    const hasSpawn = Array.isArray(validationGrid.spawnCells) && validationGrid.spawnCells.length > 0;
+    const hasEnd = !!validationGrid.endCell;
+    if (!hasSpawn || !hasEnd) {
+      return true;
+    }
+    validationEnemySystem = createEnemySystem(scene, validationGrid);
+    return true;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`[LevelEditor] Level mutation rejected: ${reason}`);
+    return false;
+  } finally {
+    validationEnemySystem?.dispose?.();
+    validationGrid?.dispose?.();
   }
 }
 

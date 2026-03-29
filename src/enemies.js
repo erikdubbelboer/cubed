@@ -213,9 +213,11 @@ export function createEnemySystem(scene, grid, options = {}) {
     ? grid.spawnCells.map((cell) => cloneCell(cell))
     : [];
   const endCell = grid?.endCell ? cloneCell(grid.endCell) : null;
-  const configuredStaticBlockedCells = Array.isArray(grid?.pathBlockerCells)
-    ? grid.pathBlockerCells.map((cell) => cloneCell(cell))
-    : [];
+  const configuredStaticBlockedCells = Array.isArray(grid?.staticBlockedCells)
+    ? grid.staticBlockedCells.map((cell) => cloneCell(cell))
+    : (Array.isArray(grid?.pathBlockerCells)
+      ? grid.pathBlockerCells.map((cell) => cloneCell(cell))
+      : []);
 
   if (spawnCells.length === 0 || !endCell) {
     throw new Error("Enemy system requires at least one spawn cell and one end cell.");
@@ -1084,6 +1086,16 @@ function createEnemyBatchedMesh(material, maxVertexCount, maxIndexCount) {
         continue;
       }
       if (isReservedEndpoint(x, z)) {
+        continue;
+      }
+      const traversableSurfaceLevel = getCellHeight(x, z);
+      if (!Number.isInteger(traversableSurfaceLevel)) {
+        continue;
+      }
+      const blockerLevel = Number.isInteger(cell?.y)
+        ? Number(cell.y)
+        : traversableSurfaceLevel;
+      if (blockerLevel > traversableSurfaceLevel) {
         continue;
       }
       const nodeId = nodeIdFromCell(x, z);

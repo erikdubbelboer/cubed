@@ -477,6 +477,7 @@ export const GAME_CONFIG = {
     platformMetalness: 0.0,
 
     // Raised block cube material.
+    terrainWallColor: 0x84899f,
     altitudeEmissiveScale: 0.28,
     altitudeEmissiveIntensity: 0.18,
     altitudeRoughness: 0.72,
@@ -503,8 +504,8 @@ export const GAME_CONFIG = {
     // type: wall | spawn | end | playerSpawn | ramp | decorative doodad type
     // Grid-snapped types use integer cell coordinates in position.
     // Decorative props use world-space position coordinates and do not affect gameplay collisions/pathing by default.
-    // Exception: gate serializes in world space, snaps only X/Z to cell centers with cardinal rotation,
-    // and blocks only players/projectiles.
+    // Exceptions: gate serializes in world space, snaps only X/Z to cell centers with cardinal rotation,
+    // and blocks only players/projectiles; wall-block also snaps to cell centers and acts as a full-cell static blocker.
     // rotation for ramps is low->high direction:
     // 0 => +Z, 90 => +X, 180 => -Z, 270 => -X.
     levelObjects: IMPORTED_LEVEL_OBJECTS,

@@ -285,6 +285,25 @@ function isGridSnappedDecorativeType(type) {
   return getDecorativeModelSpec(type)?.placement === "grid";
 }
 
+function getGridCellFromWorldPosition(worldX, worldZ) {
+  const half = (GRID_SIZE * CELL_SIZE) * 0.5;
+  const cellX = Math.floor((worldX + half) / CELL_SIZE);
+  const cellZ = Math.floor((worldZ + half) / CELL_SIZE);
+  if (!isMainGridCell(cellX, cellZ)) {
+    return null;
+  }
+  return { x: cellX, z: cellZ };
+}
+
+function getGridLevelFromWorldY(worldY) {
+  const rawLevel = (Number(worldY) - FLOOR_Y) / CELL_SIZE;
+  const roundedLevel = Math.round(rawLevel);
+  if (!Number.isFinite(rawLevel) || Math.abs(rawLevel - roundedLevel) > 1e-4) {
+    return null;
+  }
+  return Math.max(0, roundedLevel);
+}
+
 function normalizeDecorativePosition(type, position) {
   if (!isGridSnappedDecorativeType(type)) {
     return clonePosition(position);
@@ -292,13 +311,11 @@ function normalizeDecorativePosition(type, position) {
   const worldX = Number(position?.x);
   const worldY = Number(position?.y);
   const worldZ = Number(position?.z);
-  const half = (GRID_SIZE * CELL_SIZE) * 0.5;
-  const cellX = Math.floor((worldX + half) / CELL_SIZE);
-  const cellZ = Math.floor((worldZ + half) / CELL_SIZE);
-  if (!isMainGridCell(cellX, cellZ)) {
+  const cell = getGridCellFromWorldPosition(worldX, worldZ);
+  if (!cell) {
     return clonePosition(position);
   }
-  const center = cellToWorld(cellX, cellZ);
+  const center = cellToWorld(cell.x, cell.z);
   return {
     x: center.x,
     y: worldY,
@@ -344,6 +361,9 @@ function parseLevelLayout(levelObjects, options = {}) {
   let playerSpawnRotation = 0;
   const ramps = [];
   const decorativeObjects = [];
+  const wallBlockCells = [];
+  const wallBlockOccupiedCellKeySet = new Set();
+  const wallBlockLevelKeySet = new Set();
   const rawDecorativeEntries = [];
   const rawPathBlockerEntries = [];
   const rampCellsByKey = new Map();
@@ -502,26 +522,8 @@ function parseLevelLayout(levelObjects, options = {}) {
     });
   }
 
-  for (const entry of rawDecorativeEntries) {
-    entry.position = normalizeDecorativePosition(
-      entry.type,
-      entry.position
-    );
-    decorativeObjects.push({
-      type: entry.type,
-      position: clonePosition(entry.position),
-      rotation: entry.rotation,
-    });
-  }
-
-  if (!allowIncompleteMarkers && spawnCells.length === 0) {
-    throw new Error("grid.levelObjects must contain at least one spawn marker.");
-  }
-  if (!allowIncompleteMarkers && !endCell) {
-    throw new Error("grid.levelObjects must contain exactly one end marker.");
-  }
-
   const heights = createHeightMatrix();
+  const supportHeights = createHeightMatrix();
   const pathBlockerCells = [];
   const pathBlockerCellKeySet = new Set();
   for (let cellZ = 0; cellZ < GRID_SIZE; cellZ += 1) {
@@ -531,6 +533,7 @@ function parseLevelLayout(levelObjects, options = {}) {
         supportedHeight += 1;
       }
       heights[cellZ][cellX] = supportedHeight;
+      supportHeights[cellZ][cellX] = wallHeights[cellZ][cellX];
     }
   }
   for (const ramp of ramps) {
@@ -542,6 +545,121 @@ function parseLevelLayout(levelObjects, options = {}) {
       heights[ramp.highCell.z][ramp.highCell.x],
       ramp.highLevel
     );
+  }
+
+  function getAuthoritativeObstacleHeightLevels(config = null) {
+    const rawHeightLevels = Number(config?.heightCells);
+    if (!Number.isFinite(rawHeightLevels) || rawHeightLevels <= 0) {
+      return 1;
+    }
+    const roundedHeightLevels = Math.round(rawHeightLevels);
+    if (Math.abs(rawHeightLevels - roundedHeightLevels) > 1e-4) {
+      return 1;
+    }
+    return Math.max(1, roundedHeightLevels);
+  }
+
+  const authoritativeDecorativeCellDataByIndex = new Map();
+  const authoritativeDecorativeEntries = [];
+  for (const entry of rawDecorativeEntries) {
+    entry.position = normalizeDecorativePosition(
+      entry.type,
+      entry.position
+    );
+    const authoritativeCellObstacle = getDecorativeModelSpec(entry.type)?.authoritativeCellObstacle ?? null;
+    if (!authoritativeCellObstacle) {
+      continue;
+    }
+    const cell = getGridCellFromWorldPosition(entry.position.x, entry.position.z);
+    if (!cell) {
+      throw new Error(`grid.levelObjects[${entry.index}] ${entry.type} must snap to a valid grid cell.`);
+    }
+    const surfaceLevel = getGridLevelFromWorldY(entry.position.y);
+    if (!Number.isInteger(surfaceLevel)) {
+      throw new Error(`grid.levelObjects[${entry.index}] ${entry.type} y must align to the build surface grid.`);
+    }
+    authoritativeDecorativeEntries.push({
+      entry,
+      authoritativeCellObstacle,
+      cell,
+      surfaceLevel,
+    });
+  }
+
+  // Validate stacked wall-block-style doodads from the bottom up so support
+  // doesn't depend on the serialized order inside levelObjects.
+  authoritativeDecorativeEntries.sort((a, b) => {
+    if (a.cell.z !== b.cell.z) {
+      return a.cell.z - b.cell.z;
+    }
+    if (a.cell.x !== b.cell.x) {
+      return a.cell.x - b.cell.x;
+    }
+    if (a.surfaceLevel !== b.surfaceLevel) {
+      return a.surfaceLevel - b.surfaceLevel;
+    }
+    return a.entry.index - b.entry.index;
+  });
+
+  for (const { entry, authoritativeCellObstacle, cell, surfaceLevel } of authoritativeDecorativeEntries) {
+    const expectedSurfaceLevel = supportHeights[cell.z]?.[cell.x];
+    if (!Number.isInteger(expectedSurfaceLevel) || surfaceLevel !== expectedSurfaceLevel) {
+      throw new Error(
+        `grid.levelObjects[${entry.index}] ${entry.type} at (${cell.x},${surfaceLevel},${cell.z}) must be on surface y=${expectedSurfaceLevel}.`
+      );
+    }
+    const blockerKey = cellKey(cell.x, cell.z);
+    const blockerLevelKey = `${cell.x},${surfaceLevel},${cell.z}`;
+    if (spawnCells.some((spawnCell) => spawnCell.x === cell.x && spawnCell.z === cell.z)) {
+      throw new Error(`grid.levelObjects[${entry.index}] ${entry.type} cannot overlap a spawn marker.`);
+    }
+    if (endCell && endCell.x === cell.x && endCell.z === cell.z) {
+      throw new Error(`grid.levelObjects[${entry.index}] ${entry.type} cannot overlap the end marker.`);
+    }
+    if (rampCellsByKey.has(blockerKey)) {
+      throw new Error(`grid.levelObjects[${entry.index}] ${entry.type} cannot occupy a ramp cell.`);
+    }
+    if (wallBlockLevelKeySet.has(blockerLevelKey)) {
+      throw new Error(
+        `grid.levelObjects[${entry.index}] duplicates another ${entry.type} at (${cell.x},${surfaceLevel},${cell.z}).`
+      );
+    }
+    wallBlockOccupiedCellKeySet.add(blockerKey);
+    wallBlockLevelKeySet.add(blockerLevelKey);
+    wallBlockCells.push({ x: cell.x, y: surfaceLevel, z: cell.z });
+    authoritativeDecorativeCellDataByIndex.set(entry.index, {
+      cellX: cell.x,
+      cellY: surfaceLevel,
+      cellZ: cell.z,
+    });
+    if (authoritativeCellObstacle.supportsPlayer === true) {
+      supportHeights[cell.z][cell.x] = Math.max(
+        supportHeights[cell.z][cell.x],
+        surfaceLevel + getAuthoritativeObstacleHeightLevels(authoritativeCellObstacle)
+      );
+    }
+  }
+
+  for (const entry of rawDecorativeEntries) {
+    const decorativeObject = {
+      type: entry.type,
+      position: clonePosition(entry.position),
+      rotation: entry.rotation,
+    };
+    const cellData = authoritativeDecorativeCellDataByIndex.get(entry.index);
+    if (cellData) {
+      decorativeObject.cellX = cellData.cellX;
+      decorativeObject.cellY = cellData.cellY;
+      decorativeObject.cellZ = cellData.cellZ;
+    }
+    decorativeObjects.push(decorativeObject);
+  }
+
+  if (!allowIncompleteMarkers && spawnCells.length === 0) {
+    throw new Error("grid.levelObjects must contain at least one spawn marker.");
+  }
+  if (!allowIncompleteMarkers && !endCell) {
+    throw new Error("grid.levelObjects must contain exactly one end marker.");
   }
 
   for (const entry of rawPathBlockerEntries) {
@@ -562,6 +680,9 @@ function parseLevelLayout(levelObjects, options = {}) {
       );
     }
     const blockerKey = cellKey(x, z);
+    if (wallBlockOccupiedCellKeySet.has(blockerKey)) {
+      throw new Error(`grid.levelObjects[${entry.index}] pathBlocker cannot overlap a wall-block.`);
+    }
     if (pathBlockerCellKeySet.has(blockerKey)) {
       throw new Error(`grid.levelObjects[${entry.index}] duplicates another pathBlocker at (${x},${z}).`);
     }
@@ -579,8 +700,10 @@ function parseLevelLayout(levelObjects, options = {}) {
     playerSpawnCell,
     playerSpawnRotation,
     pathBlockerCells,
+    staticBlockedCells: [...pathBlockerCells.map((cell) => cloneCell(cell)), ...wallBlockCells.map((cell) => cloneCell(cell))],
     ramps,
     decorativeObjects,
+    wallBlockCells,
     rampCellsByKey,
     levelObjects: parsedEntries.map((entry) => ({
       type: normalizeLevelObjectTypeForExport(entry.type),
@@ -814,11 +937,15 @@ export function createGrid(scene, options = {}) {
   const pathBlockerCells = Array.isArray(levelLayout.pathBlockerCells)
     ? levelLayout.pathBlockerCells.map((cell) => cloneCell(cell))
     : [];
+  const staticBlockedCells = Array.isArray(levelLayout.staticBlockedCells)
+    ? levelLayout.staticBlockedCells.map((cell) => cloneCell(cell))
+    : pathBlockerCells.map((cell) => cloneCell(cell));
   const decorativeObjects = Array.isArray(levelLayout.decorativeObjects) ? levelLayout.decorativeObjects : [];
   const decorativeEntries = [];
   const decorativeEntriesByChunk = new Map();
   const decorativeChunkGroups = new Map();
   const staticVisualChunkKeys = new Set();
+  const wallBlockObstacles = [];
   const staticBatchStats = {
     mergedMeshCount: 0,
     staticChunkCount: 0,
@@ -855,6 +982,45 @@ export function createGrid(scene, options = {}) {
       collidesWithPlayer: blocksPlayer,
       supportsPlayer: collision?.supportsPlayer !== false,
       blocksProjectiles,
+    };
+  }
+
+  function createAuthoritativeDecorativeObstacle(type, decoration, config = {}) {
+    const worldX = Number(decoration?.position?.x);
+    const worldY = Number(decoration?.position?.y);
+    const worldZ = Number(decoration?.position?.z);
+    const cellX = Number.isInteger(decoration?.cellX) ? decoration.cellX : null;
+    const cellY = Number.isInteger(decoration?.cellY) ? decoration.cellY : null;
+    const cellZ = Number.isInteger(decoration?.cellZ) ? decoration.cellZ : null;
+    if (
+      !Number.isFinite(worldX)
+      || !Number.isFinite(worldY)
+      || !Number.isFinite(worldZ)
+      || !Number.isInteger(cellX)
+      || !Number.isInteger(cellY)
+      || !Number.isInteger(cellZ)
+    ) {
+      return null;
+    }
+    return {
+      kind: "decorative",
+      decorativeType: type,
+      authoritativeCellObstacle: true,
+      position: new THREE.Vector3(worldX, worldY, worldZ),
+      halfSize: CELL_SIZE * 0.5,
+      halfSizeX: CELL_SIZE * 0.5,
+      halfSizeZ: CELL_SIZE * 0.5,
+      height: CELL_SIZE * Math.max(0.01, Number(config?.heightCells) || 1),
+      baseY: worldY,
+      collidesWithPlayer: config?.blocksPlayer !== false,
+      supportsPlayer: config?.supportsPlayer === true,
+      topInsetFromRadius: Number.isFinite(Number(config?.topInsetFromRadius))
+        ? Number(config.topInsetFromRadius)
+        : undefined,
+      blocksProjectiles: config?.blocksProjectiles !== false,
+      cellX,
+      cellY,
+      cellZ,
     };
   }
 
@@ -1173,14 +1339,17 @@ export function createGrid(scene, options = {}) {
     }
     const normalizedRotation = Number(decoration.rotation) || 0;
     const preparedDecoration = getPreparedDecorationBatchParts(decoration.type);
-    const collisionObstacles = createDecorativeObstaclesFromPreparedBounds(
-      decoration.type,
-      preparedDecoration?.bounds ?? null,
-      worldX,
-      worldY,
-      worldZ,
-      normalizedRotation
-    );
+    const authoritativeCellObstacle = getDecorativeModelSpec(decoration.type)?.authoritativeCellObstacle ?? null;
+    const collisionObstacles = authoritativeCellObstacle
+      ? [createAuthoritativeDecorativeObstacle(decoration.type, decoration, authoritativeCellObstacle)].filter(Boolean)
+      : createDecorativeObstaclesFromPreparedBounds(
+        decoration.type,
+        preparedDecoration?.bounds ?? null,
+        worldX,
+        worldY,
+        worldZ,
+        normalizedRotation
+      );
     if (editorMode) {
       const decorationVisual = createDecorationVisual(decoration.type);
       if (!decorationVisual) {
@@ -1206,6 +1375,9 @@ export function createGrid(scene, options = {}) {
       const entryCollisionObstacles = decorativeEntries[decorativeEntries.length - 1]?.collisionObstacles ?? [];
       if (entryCollisionObstacles.length > 0) {
         decorativeObstacles.push(...entryCollisionObstacles);
+        if (authoritativeCellObstacle) {
+          wallBlockObstacles.push(...entryCollisionObstacles);
+        }
       }
       editorRaycastTargets.push(decorationVisual);
       gridRoot.add(decorationVisual);
@@ -1235,6 +1407,9 @@ export function createGrid(scene, options = {}) {
     decorativeEntries.push(entry);
     if (entry.collisionObstacles.length > 0) {
       decorativeObstacles.push(...entry.collisionObstacles);
+      if (authoritativeCellObstacle) {
+        wallBlockObstacles.push(...entry.collisionObstacles);
+      }
     }
     let chunkEntries = decorativeEntriesByChunk.get(chunkKey);
     if (!chunkEntries) {
@@ -1831,7 +2006,7 @@ export function createGrid(scene, options = {}) {
     const wallMinZ = levelBounds.minZ + safeInset;
     const wallMaxZ = levelBounds.maxZ - safeInset;
     const wallBaseY = FLOOR_Y + boundaryWallConfig.baseYOffset;
-    const maxTerrainTopY = [...altitudeObstacles, ...rampObstacles].reduce((maxTopY, obstacle) => {
+    const maxTerrainTopY = [...altitudeObstacles, ...wallBlockObstacles, ...rampObstacles].reduce((maxTopY, obstacle) => {
       const obstacleHeight = Number(obstacle?.height);
       const obstacleBaseY = Number.isFinite(Number(obstacle?.baseY))
         ? Number(obstacle.baseY)
@@ -2015,15 +2190,8 @@ export function createGrid(scene, options = {}) {
   }
 
   function getBuildSurfaceYAtWorld(worldX, worldZ) {
-    const cell = worldToCell(worldX, worldZ);
-    if (!cell) {
-      return FLOOR_Y;
-    }
-    const rampSurfaceY = getRampSurfaceYAtWorld(worldX, worldZ);
-    if (Number.isFinite(rampSurfaceY)) {
-      return rampSurfaceY;
-    }
-    return getCellSurfaceY(cell.x, cell.z);
+    const supportY = getSupportSurfaceYBelowWorld(worldX, Number.POSITIVE_INFINITY, worldZ);
+    return Number.isFinite(supportY) ? supportY : FLOOR_Y;
   }
 
   function getSupportSurfaceYBelowWorld(worldX, worldY, worldZ) {
@@ -2039,6 +2207,40 @@ export function createGrid(scene, options = {}) {
     let bestY = FLOOR_Y;
 
     for (const obstacle of altitudeObstacles) {
+      const obstaclePos = obstacle?.position;
+      const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
+        ? Number(obstacle.halfSizeX)
+        : Number(obstacle?.halfSize);
+      const obstacleHalfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
+        ? Number(obstacle.halfSizeZ)
+        : Number(obstacle?.halfSize);
+      const obstacleHeight = Number(obstacle?.height);
+      const obstacleBaseY = Number(obstacle?.baseY ?? 0);
+      if (
+        !obstaclePos
+        || obstacle?.supportsPlayer === false
+        || !Number.isFinite(obstacleHalfSizeX)
+        || !Number.isFinite(obstacleHalfSizeZ)
+        || !Number.isFinite(obstacleHeight)
+        || obstacleHeight <= 0
+      ) {
+        continue;
+      }
+      if (
+        worldX < (obstaclePos.x - obstacleHalfSizeX)
+        || worldX > (obstaclePos.x + obstacleHalfSizeX)
+        || worldZ < (obstaclePos.z - obstacleHalfSizeZ)
+        || worldZ > (obstaclePos.z + obstacleHalfSizeZ)
+      ) {
+        continue;
+      }
+      const topY = obstacleBaseY + obstacleHeight;
+      if (topY <= maxSurfaceY) {
+        bestY = Math.max(bestY, topY);
+      }
+    }
+
+    for (const obstacle of wallBlockObstacles) {
       const obstaclePos = obstacle?.position;
       const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
         ? Number(obstacle.halfSizeX)
@@ -2102,52 +2304,54 @@ export function createGrid(scene, options = {}) {
       }
     }
 
-    for (const obstacle of altitudeObstacles) {
-      const obstacleHeight = Number(obstacle?.height);
-      const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
-        ? Number(obstacle.halfSizeX)
-        : Number(obstacle?.halfSize);
-      const obstacleHalfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
-        ? Number(obstacle.halfSizeZ)
-        : Number(obstacle?.halfSize);
-      if (
-        !Number.isFinite(obstacleHeight)
-        || obstacleHeight <= 0
-        || !Number.isFinite(obstacleHalfSizeX)
-        || !Number.isFinite(obstacleHalfSizeZ)
-      ) {
-        continue;
-      }
+    for (const obstacleSet of [altitudeObstacles, wallBlockObstacles]) {
+      for (const obstacle of obstacleSet) {
+        const obstacleHeight = Number(obstacle?.height);
+        const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
+          ? Number(obstacle.halfSizeX)
+          : Number(obstacle?.halfSize);
+        const obstacleHalfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
+          ? Number(obstacle.halfSizeZ)
+          : Number(obstacle?.halfSize);
+        if (
+          !Number.isFinite(obstacleHeight)
+          || obstacleHeight <= 0
+          || !Number.isFinite(obstacleHalfSizeX)
+          || !Number.isFinite(obstacleHalfSizeZ)
+        ) {
+          continue;
+        }
 
-      const obstacleBaseY = Number(obstacle?.baseY);
-      const obstacleMinY = Number.isFinite(obstacleBaseY) ? obstacleBaseY : FLOOR_Y;
-      const obstaclePos = obstacle.position;
-      if (!obstaclePos) {
-        continue;
-      }
+        const obstacleBaseY = Number(obstacle?.baseY);
+        const obstacleMinY = Number.isFinite(obstacleBaseY) ? obstacleBaseY : FLOOR_Y;
+        const obstaclePos = obstacle.position;
+        if (!obstaclePos) {
+          continue;
+        }
 
-      buildRaycastObstacleBox.min.set(
-        obstaclePos.x - obstacleHalfSizeX,
-        obstacleMinY,
-        obstaclePos.z - obstacleHalfSizeZ
-      );
-      buildRaycastObstacleBox.max.set(
-        obstaclePos.x + obstacleHalfSizeX,
-        obstacleMinY + obstacleHeight,
-        obstaclePos.z + obstacleHalfSizeZ
-      );
+        buildRaycastObstacleBox.min.set(
+          obstaclePos.x - obstacleHalfSizeX,
+          obstacleMinY,
+          obstaclePos.z - obstacleHalfSizeZ
+        );
+        buildRaycastObstacleBox.max.set(
+          obstaclePos.x + obstacleHalfSizeX,
+          obstacleMinY + obstacleHeight,
+          obstaclePos.z + obstacleHalfSizeZ
+        );
 
-      const obstacleHit = ray.intersectBox(buildRaycastObstacleBox, buildRaycastHitPoint);
-      if (!obstacleHit) {
-        continue;
-      }
+        const obstacleHit = ray.intersectBox(buildRaycastObstacleBox, buildRaycastHitPoint);
+        if (!obstacleHit) {
+          continue;
+        }
 
-      const hitDistanceSq = obstacleHit.distanceToSquared(origin);
-      if (hitDistanceSq >= bestDistanceSq) {
-        continue;
+        const hitDistanceSq = obstacleHit.distanceToSquared(origin);
+        if (hitDistanceSq >= bestDistanceSq) {
+          continue;
+        }
+        bestDistanceSq = hitDistanceSq;
+        buildRaycastBestPoint.copy(obstacleHit);
       }
-      bestDistanceSq = hitDistanceSq;
-      buildRaycastBestPoint.copy(obstacleHit);
     }
 
     for (const rampSurface of rampTopSurfaces) {
@@ -2193,140 +2397,142 @@ export function createGrid(scene, options = {}) {
     let bestCellY = null;
     let bestCellZ = null;
 
-    for (const obstacle of altitudeObstacles) {
-      const obstaclePos = obstacle?.position;
-      const obstacleHeight = Number(obstacle?.height);
-      const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
-        ? Number(obstacle.halfSizeX)
-        : Number(obstacle?.halfSize);
-      const obstacleHalfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
-        ? Number(obstacle.halfSizeZ)
-        : Number(obstacle?.halfSize);
-      const obstacleBaseY = Number(obstacle?.baseY);
-      if (
-        !obstaclePos
-        || !Number.isFinite(obstacleHalfSizeX)
-        || !Number.isFinite(obstacleHalfSizeZ)
-        || !Number.isFinite(obstacleHeight)
-        || !Number.isFinite(obstacleBaseY)
-      ) {
-        continue;
-      }
-
-      buildRaycastObstacleBox.min.set(
-        obstaclePos.x - obstacleHalfSizeX,
-        obstacleBaseY,
-        obstaclePos.z - obstacleHalfSizeZ
-      );
-      buildRaycastObstacleBox.max.set(
-        obstaclePos.x + obstacleHalfSizeX,
-        obstacleBaseY + obstacleHeight,
-        obstaclePos.z + obstacleHalfSizeZ
-      );
-
-      const hitPoint = ray.intersectBox(buildRaycastObstacleBox, buildRaycastHitPoint);
-      if (!hitPoint) {
-        continue;
-      }
-
-      const minX = buildRaycastObstacleBox.min.x;
-      const maxX = buildRaycastObstacleBox.max.x;
-      const minY = buildRaycastObstacleBox.min.y;
-      const maxY = buildRaycastObstacleBox.max.y;
-      const minZ = buildRaycastObstacleBox.min.z;
-      const maxZ = buildRaycastObstacleBox.max.z;
-      const direction = ray.direction;
-      const sidePlaneEpsilon = 1e-4;
-      const sideRayParallelEpsilon = Math.max(1e-6, Number(GRID_CONFIG.rayParallelEpsilon) || 1e-6);
-      let localBestDistanceSq = Number.POSITIVE_INFINITY;
-      let localBestX = 0;
-      let localBestY = 0;
-      let localBestZ = 0;
-      let localBestNormalX = 0;
-      let localBestNormalZ = 0;
-
-      if (Math.abs(direction.x) > sideRayParallelEpsilon) {
-        const testXPlanes = [
-          { value: minX, normalX: -1 },
-          { value: maxX, normalX: 1 },
-        ];
-        for (const plane of testXPlanes) {
-          const t = (plane.value - origin.x) / direction.x;
-          if (t < 0) {
-            continue;
-          }
-          const hitY = origin.y + (direction.y * t);
-          const hitZ = origin.z + (direction.z * t);
-          if (
-            hitY < (minY - sidePlaneEpsilon)
-            || hitY > (maxY + sidePlaneEpsilon)
-            || hitZ < (minZ - sidePlaneEpsilon)
-            || hitZ > (maxZ + sidePlaneEpsilon)
-          ) {
-            continue;
-          }
-          const hitX = plane.value;
-          const distanceSq = ((hitX - origin.x) ** 2) + ((hitY - origin.y) ** 2) + ((hitZ - origin.z) ** 2);
-          if (distanceSq >= localBestDistanceSq) {
-            continue;
-          }
-          localBestDistanceSq = distanceSq;
-          localBestX = hitX;
-          localBestY = hitY;
-          localBestZ = hitZ;
-          localBestNormalX = plane.normalX;
-          localBestNormalZ = 0;
+    for (const obstacleSet of [altitudeObstacles, wallBlockObstacles]) {
+      for (const obstacle of obstacleSet) {
+        const obstaclePos = obstacle?.position;
+        const obstacleHeight = Number(obstacle?.height);
+        const obstacleHalfSizeX = Number.isFinite(Number(obstacle?.halfSizeX))
+          ? Number(obstacle.halfSizeX)
+          : Number(obstacle?.halfSize);
+        const obstacleHalfSizeZ = Number.isFinite(Number(obstacle?.halfSizeZ))
+          ? Number(obstacle.halfSizeZ)
+          : Number(obstacle?.halfSize);
+        const obstacleBaseY = Number(obstacle?.baseY);
+        if (
+          !obstaclePos
+          || !Number.isFinite(obstacleHalfSizeX)
+          || !Number.isFinite(obstacleHalfSizeZ)
+          || !Number.isFinite(obstacleHeight)
+          || !Number.isFinite(obstacleBaseY)
+        ) {
+          continue;
         }
-      }
 
-      if (Math.abs(direction.z) > sideRayParallelEpsilon) {
-        const testZPlanes = [
-          { value: minZ, normalZ: -1 },
-          { value: maxZ, normalZ: 1 },
-        ];
-        for (const plane of testZPlanes) {
-          const t = (plane.value - origin.z) / direction.z;
-          if (t < 0) {
-            continue;
-          }
-          const hitX = origin.x + (direction.x * t);
-          const hitY = origin.y + (direction.y * t);
-          if (
-            hitX < (minX - sidePlaneEpsilon)
-            || hitX > (maxX + sidePlaneEpsilon)
-            || hitY < (minY - sidePlaneEpsilon)
-            || hitY > (maxY + sidePlaneEpsilon)
-          ) {
-            continue;
-          }
-          const hitZ = plane.value;
-          const distanceSq = ((hitX - origin.x) ** 2) + ((hitY - origin.y) ** 2) + ((hitZ - origin.z) ** 2);
-          if (distanceSq >= localBestDistanceSq) {
-            continue;
-          }
-          localBestDistanceSq = distanceSq;
-          localBestX = hitX;
-          localBestY = hitY;
-          localBestZ = hitZ;
-          localBestNormalX = 0;
-          localBestNormalZ = plane.normalZ;
+        buildRaycastObstacleBox.min.set(
+          obstaclePos.x - obstacleHalfSizeX,
+          obstacleBaseY,
+          obstaclePos.z - obstacleHalfSizeZ
+        );
+        buildRaycastObstacleBox.max.set(
+          obstaclePos.x + obstacleHalfSizeX,
+          obstacleBaseY + obstacleHeight,
+          obstaclePos.z + obstacleHalfSizeZ
+        );
+
+        const hitPoint = ray.intersectBox(buildRaycastObstacleBox, buildRaycastHitPoint);
+        if (!hitPoint) {
+          continue;
         }
-      }
 
-      if (!Number.isFinite(localBestDistanceSq)) {
-        continue;
-      }
+        const minX = buildRaycastObstacleBox.min.x;
+        const maxX = buildRaycastObstacleBox.max.x;
+        const minY = buildRaycastObstacleBox.min.y;
+        const maxY = buildRaycastObstacleBox.max.y;
+        const minZ = buildRaycastObstacleBox.min.z;
+        const maxZ = buildRaycastObstacleBox.max.z;
+        const direction = ray.direction;
+        const sidePlaneEpsilon = 1e-4;
+        const sideRayParallelEpsilon = Math.max(1e-6, Number(GRID_CONFIG.rayParallelEpsilon) || 1e-6);
+        let localBestDistanceSq = Number.POSITIVE_INFINITY;
+        let localBestX = 0;
+        let localBestY = 0;
+        let localBestZ = 0;
+        let localBestNormalX = 0;
+        let localBestNormalZ = 0;
 
-      if (localBestDistanceSq >= bestDistanceSq) {
-        continue;
-      }
+        if (Math.abs(direction.x) > sideRayParallelEpsilon) {
+          const testXPlanes = [
+            { value: minX, normalX: -1 },
+            { value: maxX, normalX: 1 },
+          ];
+          for (const plane of testXPlanes) {
+            const t = (plane.value - origin.x) / direction.x;
+            if (t < 0) {
+              continue;
+            }
+            const hitY = origin.y + (direction.y * t);
+            const hitZ = origin.z + (direction.z * t);
+            if (
+              hitY < (minY - sidePlaneEpsilon)
+              || hitY > (maxY + sidePlaneEpsilon)
+              || hitZ < (minZ - sidePlaneEpsilon)
+              || hitZ > (maxZ + sidePlaneEpsilon)
+            ) {
+              continue;
+            }
+            const hitX = plane.value;
+            const distanceSq = ((hitX - origin.x) ** 2) + ((hitY - origin.y) ** 2) + ((hitZ - origin.z) ** 2);
+            if (distanceSq >= localBestDistanceSq) {
+              continue;
+            }
+            localBestDistanceSq = distanceSq;
+            localBestX = hitX;
+            localBestY = hitY;
+            localBestZ = hitZ;
+            localBestNormalX = plane.normalX;
+            localBestNormalZ = 0;
+          }
+        }
 
-      bestDistanceSq = localBestDistanceSq;
-      wallAnchorRaycastBestPoint.set(localBestX, localBestY, localBestZ);
-      wallAnchorRaycastBestNormal.set(localBestNormalX, 0, localBestNormalZ);
-      bestCellX = Number.isInteger(obstacle?.cellX) ? obstacle.cellX : null;
-      bestCellY = Number.isInteger(obstacle?.cellY) ? obstacle.cellY : null;
-      bestCellZ = Number.isInteger(obstacle?.cellZ) ? obstacle.cellZ : null;
+        if (Math.abs(direction.z) > sideRayParallelEpsilon) {
+          const testZPlanes = [
+            { value: minZ, normalZ: -1 },
+            { value: maxZ, normalZ: 1 },
+          ];
+          for (const plane of testZPlanes) {
+            const t = (plane.value - origin.z) / direction.z;
+            if (t < 0) {
+              continue;
+            }
+            const hitX = origin.x + (direction.x * t);
+            const hitY = origin.y + (direction.y * t);
+            if (
+              hitX < (minX - sidePlaneEpsilon)
+              || hitX > (maxX + sidePlaneEpsilon)
+              || hitY < (minY - sidePlaneEpsilon)
+              || hitY > (maxY + sidePlaneEpsilon)
+            ) {
+              continue;
+            }
+            const hitZ = plane.value;
+            const distanceSq = ((hitX - origin.x) ** 2) + ((hitY - origin.y) ** 2) + ((hitZ - origin.z) ** 2);
+            if (distanceSq >= localBestDistanceSq) {
+              continue;
+            }
+            localBestDistanceSq = distanceSq;
+            localBestX = hitX;
+            localBestY = hitY;
+            localBestZ = hitZ;
+            localBestNormalX = 0;
+            localBestNormalZ = plane.normalZ;
+          }
+        }
+
+        if (!Number.isFinite(localBestDistanceSq)) {
+          continue;
+        }
+
+        if (localBestDistanceSq >= bestDistanceSq) {
+          continue;
+        }
+
+        bestDistanceSq = localBestDistanceSq;
+        wallAnchorRaycastBestPoint.set(localBestX, localBestY, localBestZ);
+        wallAnchorRaycastBestNormal.set(localBestNormalX, 0, localBestNormalZ);
+        bestCellX = Number.isInteger(obstacle?.cellX) ? obstacle.cellX : null;
+        bestCellY = Number.isInteger(obstacle?.cellY) ? obstacle.cellY : null;
+        bestCellZ = Number.isInteger(obstacle?.cellZ) ? obstacle.cellZ : null;
+      }
     }
 
     if (!Number.isFinite(bestDistanceSq)) {
@@ -2443,6 +2649,9 @@ export function createGrid(scene, options = {}) {
       if (!entry?.bounds) {
         continue;
       }
+      if (getDecorativeModelSpec(entry.type)?.preserveOnTowerOverlap === true) {
+        continue;
+      }
       if (!entry.bounds.intersectsBox(tempDecorationRemovalBounds)) {
         continue;
       }
@@ -2456,6 +2665,10 @@ export function createGrid(scene, options = {}) {
           const collisionIndex = decorativeObstacles.indexOf(collisionObstacle);
           if (collisionIndex >= 0) {
             decorativeObstacles.splice(collisionIndex, 1);
+          }
+          const wallBlockIndex = wallBlockObstacles.indexOf(collisionObstacle);
+          if (wallBlockIndex >= 0) {
+            wallBlockObstacles.splice(wallBlockIndex, 1);
           }
         }
       }
@@ -2508,6 +2721,7 @@ export function createGrid(scene, options = {}) {
     playerSpawnCell,
     playerSpawnRotation,
     pathBlockerCells,
+    staticBlockedCells,
     spawnMarkers,
     endMarker,
     playerSpawnMarker,
