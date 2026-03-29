@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import rpgSheetUrl from "../kenney_ui-pack-rpg-expansion/Spritesheet/uipack_rpg_sheet.png";
+import rpgSheetUrl from "./assets/uipack_rpg_sheet.png";
 
 const rpgSheet = new Image();
 let rpgSheetReady = false;
