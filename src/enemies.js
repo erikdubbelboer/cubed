@@ -501,10 +501,12 @@ function createEnemyBatchedMesh(material, maxVertexCount, maxIndexCount) {
   }
 
   function getSurfaceYAtWorld(worldX, worldZ) {
-    if (typeof grid?.getBuildSurfaceYAtWorld === "function") {
-      const surfaceY = Number(grid.getBuildSurfaceYAtWorld(worldX, worldZ));
-      if (Number.isFinite(surfaceY)) {
-        return surfaceY;
+    if (Array.isArray(grid?.rampObstacles)) {
+      for (const rampObstacle of grid.rampObstacles) {
+        const rampSurfaceY = rampObstacle?.getSurfaceYAtWorld?.(worldX, worldZ);
+        if (Number.isFinite(rampSurfaceY)) {
+          return rampSurfaceY;
+        }
       }
     }
     if (typeof grid?.worldToCell === "function") {

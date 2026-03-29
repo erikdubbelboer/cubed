@@ -2699,7 +2699,7 @@ function refreshMenuUi() {
     mouseSensitivity: mouseSensitivityToSliderUnit(mouseSensitivitySetting),
     mouseSensitivityVisible,
     mainMenu: {
-      title: "Cube Command",
+      title: "Coop TD",
       subtitle: "Start a run, stage co-op, or tune your settings.",
       status: mainStatus,
       startLabel,

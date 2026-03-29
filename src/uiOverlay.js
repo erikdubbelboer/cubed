@@ -1,4 +1,146 @@
 import * as THREE from "three";
+import rpgSheetUrl from "../kenney_ui-pack-rpg-expansion/Spritesheet/uipack_rpg_sheet.png";
+
+const rpgSheet = new Image();
+let rpgSheetReady = false;
+rpgSheet.onload = () => { rpgSheetReady = true; };
+rpgSheet.src = rpgSheetUrl;
+
+const RPG = {
+  panel_brown:                { x: 0,   y: 376, w: 100, h: 100 },
+  panel_beige:                { x: 190, y: 100, w: 100, h: 100 },
+  panel_beigeLight:           { x: 100, y: 376, w: 100, h: 100 },
+  panel_blue:                 { x: 190, y: 0,   w: 100, h: 100 },
+  panelInset_brown:           { x: 283, y: 200, w: 93,  h: 94  },
+  panelInset_beige:           { x: 200, y: 294, w: 93,  h: 94  },
+  panelInset_beigeLight:      { x: 190, y: 200, w: 93,  h: 94  },
+  panelInset_blue:            { x: 200, y: 388, w: 93,  h: 94  },
+  buttonLong_brown:           { x: 0,   y: 49,  w: 190, h: 49  },
+  buttonLong_brown_pressed:   { x: 0,   y: 98,  w: 190, h: 45  },
+  buttonLong_beige:           { x: 0,   y: 282, w: 190, h: 49  },
+  buttonLong_beige_pressed:   { x: 0,   y: 237, w: 190, h: 45  },
+  buttonLong_blue:            { x: 0,   y: 188, w: 190, h: 49  },
+  buttonLong_blue_pressed:    { x: 0,   y: 143, w: 190, h: 45  },
+  buttonLong_grey:            { x: 0,   y: 0,   w: 190, h: 49  },
+  buttonLong_grey_pressed:    { x: 0,   y: 331, w: 190, h: 45  },
+  buttonSquare_brown:         { x: 293, y: 343, w: 45,  h: 49  },
+  buttonSquare_brown_pressed: { x: 293, y: 392, w: 45,  h: 45  },
+  buttonSquare_beige:         { x: 293, y: 294, w: 45,  h: 49  },
+  buttonSquare_blue:          { x: 290, y: 0,   w: 45,  h: 49  },
+  buttonSquare_grey:          { x: 293, y: 437, w: 45,  h: 49  },
+  barBack_hL:  { x: 372, y: 330, w: 9,  h: 18 },
+  barBack_hM:  { x: 338, y: 386, w: 18, h: 18 },
+  barBack_hR:  { x: 190, y: 294, w: 9,  h: 18 },
+  barBack_vT:  { x: 338, y: 440, w: 18, h: 9  },
+  barBack_vM:  { x: 338, y: 404, w: 18, h: 18 },
+  barBack_vB:  { x: 290, y: 189, w: 18, h: 9  },
+  barBlue_hL:  { x: 372, y: 294, w: 9,  h: 18 },
+  barBlue_hM:  { x: 356, y: 431, w: 18, h: 18 },
+  barBlue_hR:  { x: 372, y: 312, w: 9,  h: 18 },
+  barBlue_vT:  { x: 356, y: 404, w: 18, h: 9  },
+  barBlue_vM:  { x: 356, y: 386, w: 18, h: 18 },
+  barBlue_vB:  { x: 344, y: 189, w: 18, h: 9  },
+  barGreen_hL: { x: 370, y: 108, w: 9,  h: 18 },
+  barGreen_hM: { x: 338, y: 368, w: 18, h: 18 },
+  barGreen_hR: { x: 190, y: 312, w: 9,  h: 18 },
+  barRed_hL:   { x: 370, y: 90,  w: 9,  h: 18 },
+  barRed_hM:   { x: 356, y: 368, w: 18, h: 18 },
+  barRed_hR:   { x: 190, y: 348, w: 9,  h: 18 },
+  barRed_vT:   { x: 338, y: 476, w: 18, h: 9  },
+  barRed_vM:   { x: 347, y: 485, w: 18, h: 18 },
+  barRed_vB:   { x: 347, y: 503, w: 18, h: 9  },
+  barYellow_hL:{ x: 370, y: 126, w: 9,  h: 18 },
+  barYellow_hM:{ x: 338, y: 449, w: 18, h: 18 },
+  barYellow_hR:{ x: 190, y: 330, w: 9,  h: 18 },
+  arrowBrown_left:  { x: 237, y: 486, w: 22, h: 21 },
+  arrowBrown_right: { x: 325, y: 486, w: 22, h: 21 },
+  arrowBeige_left:  { x: 303, y: 486, w: 22, h: 21 },
+  arrowBeige_right: { x: 171, y: 486, w: 22, h: 21 },
+  cursorSword_gold: { x: 338, y: 294, w: 34, h: 37 },
+};
+
+const THEME = {
+  panelBg:       "rgba(42, 30, 20, 0.94)",
+  panelBorder:   "rgba(139, 109, 72, 0.55)",
+  panelBgLight:  "rgba(58, 44, 30, 0.92)",
+  buttonBg:      "rgba(62, 44, 28, 0.94)",
+  buttonBorder:  "rgba(160, 120, 70, 0.6)",
+  buttonPrimary: "rgba(55, 90, 140, 0.94)",
+  buttonPrimaryBorder: "rgba(130, 175, 230, 0.6)",
+  textPrimary:   "rgba(255, 245, 225, 0.98)",
+  textSecondary: "rgba(210, 195, 170, 0.88)",
+  textDisabled:  "rgba(160, 145, 125, 0.6)",
+  textGold:      "rgba(255, 215, 80, 0.98)",
+  textMoney:     "rgba(255, 220, 90, 0.98)",
+  selectedGlow:  "rgba(100, 200, 255, 0.85)",
+  sliderFill:    "rgba(120, 180, 80, 0.95)",
+  sliderTrack:   "rgba(25, 18, 12, 0.8)",
+  dimOverlay:    "rgba(10, 6, 3, 0.65)",
+  hudBg:         "rgba(35, 25, 18, 0.82)",
+  hudBorder:     "rgba(120, 95, 60, 0.55)",
+  towerSelected: "rgba(40, 75, 110, 0.92)",
+  towerSelectedBorder: "rgba(100, 210, 160, 0.85)",
+  towerDepleted: "rgba(40, 35, 28, 0.78)",
+  towerDepletedBorder: "rgba(100, 90, 70, 0.35)",
+};
+
+function drawSprite(ctx, sprite, dx, dy, dw, dh) {
+  if (!rpgSheetReady) return false;
+  ctx.drawImage(rpgSheet, sprite.x, sprite.y, sprite.w, sprite.h, dx, dy, dw, dh);
+  return true;
+}
+
+function draw9Slice(ctx, sprite, dx, dy, dw, dh, inset) {
+  if (!rpgSheetReady) return false;
+  const sx = sprite.x, sy = sprite.y, sw = sprite.w, sh = sprite.h;
+  const i = Math.min(inset, Math.floor(sw * 0.45), Math.floor(sh * 0.45));
+  const ci = Math.min(i, Math.floor(dw * 0.45), Math.floor(dh * 0.45));
+  const midSW = sw - i * 2, midSH = sh - i * 2;
+  const midDW = dw - ci * 2, midDH = dh - ci * 2;
+  // corners
+  ctx.drawImage(rpgSheet, sx, sy, i, i, dx, dy, ci, ci);
+  ctx.drawImage(rpgSheet, sx + sw - i, sy, i, i, dx + dw - ci, dy, ci, ci);
+  ctx.drawImage(rpgSheet, sx, sy + sh - i, i, i, dx, dy + dh - ci, ci, ci);
+  ctx.drawImage(rpgSheet, sx + sw - i, sy + sh - i, i, i, dx + dw - ci, dy + dh - ci, ci, ci);
+  // edges
+  if (midDW > 0) {
+    ctx.drawImage(rpgSheet, sx + i, sy, midSW, i, dx + ci, dy, midDW, ci);
+    ctx.drawImage(rpgSheet, sx + i, sy + sh - i, midSW, i, dx + ci, dy + dh - ci, midDW, ci);
+  }
+  if (midDH > 0) {
+    ctx.drawImage(rpgSheet, sx, sy + i, i, midSH, dx, dy + ci, ci, midDH);
+    ctx.drawImage(rpgSheet, sx + sw - i, sy + i, i, midSH, dx + dw - ci, dy + ci, ci, midDH);
+  }
+  // center
+  if (midDW > 0 && midDH > 0) {
+    ctx.drawImage(rpgSheet, sx + i, sy + i, midSW, midSH, dx + ci, dy + ci, midDW, midDH);
+  }
+  return true;
+}
+
+function draw3SliceH(ctx, sprL, sprM, sprR, dx, dy, dw, dh) {
+  if (!rpgSheetReady) return false;
+  const capW = Math.min(sprL.w, Math.floor(dw * 0.4));
+  const midW = Math.max(0, dw - capW * 2);
+  ctx.drawImage(rpgSheet, sprL.x, sprL.y, sprL.w, sprL.h, dx, dy, capW, dh);
+  if (midW > 0) {
+    ctx.drawImage(rpgSheet, sprM.x, sprM.y, sprM.w, sprM.h, dx + capW, dy, midW, dh);
+  }
+  ctx.drawImage(rpgSheet, sprR.x, sprR.y, sprR.w, sprR.h, dx + dw - capW, dy, capW, dh);
+  return true;
+}
+
+function draw3SliceV(ctx, sprT, sprM, sprB, dx, dy, dw, dh) {
+  if (!rpgSheetReady) return false;
+  const capH = Math.min(sprT.h, Math.floor(dh * 0.4));
+  const midH = Math.max(0, dh - capH * 2);
+  ctx.drawImage(rpgSheet, sprT.x, sprT.y, sprT.w, sprT.h, dx, dy, dw, capH);
+  if (midH > 0) {
+    ctx.drawImage(rpgSheet, sprM.x, sprM.y, sprM.w, sprM.h, dx, dy + capH, dw, midH);
+  }
+  ctx.drawImage(rpgSheet, sprB.x, sprB.y, sprB.w, sprB.h, dx, dy + dh - capH, dw, capH);
+  return true;
+}
 
 const FONT_STACK = "\"Segoe UI\", sans-serif";
 const MOBILE_UI_DEFAULTS = {
@@ -1760,7 +1902,7 @@ export function createUiOverlay({
       mouseSensitivity: 0.5,
       mouseSensitivityVisible: false,
       mainMenu: {
-        title: "Cube Command",
+        title: "Coop TD",
         subtitle: "",
         status: "",
         startLabel: "Start",
@@ -2138,7 +2280,7 @@ export function createUiOverlay({
     const arm = clamp(Math.min(viewportWidth, viewportHeight) * 0.012, 6, 11);
     const gap = clamp(arm * 0.45, 3, 5);
 
-    drawCtx.strokeStyle = "rgba(24, 34, 48, 0.95)";
+    drawCtx.strokeStyle = "rgba(255, 240, 200, 0.82)";
     drawCtx.lineWidth = 2;
     drawCtx.lineCap = "round";
     drawCtx.beginPath();
@@ -2173,19 +2315,10 @@ export function createUiOverlay({
         84,
         Math.max(84, viewportHeight - trackHeight - 24)
       );
-      const radius = trackWidth * 0.5;
 
-      drawPanel(
-        drawCtx,
-        trackX,
-        trackY,
-        trackWidth,
-        trackHeight,
-        radius,
-        "rgba(10, 20, 34, 0.56)",
-        "rgba(152, 212, 255, 0.5)",
-        1.1
-      );
+      if (!draw3SliceV(drawCtx, RPG.barBack_vT, RPG.barBack_vM, RPG.barBack_vB, trackX, trackY, trackWidth, trackHeight)) {
+        drawPanel(drawCtx, trackX, trackY, trackWidth, trackHeight, trackWidth * 0.5, THEME.sliderTrack, THEME.hudBorder, 1.1);
+      }
 
       const innerPadding = 2;
       const innerX = trackX + innerPadding;
@@ -2195,19 +2328,20 @@ export function createUiOverlay({
       const fillHeight = Math.max(0, innerHeight * fuelRatio);
       if (fillHeight > 0.5) {
         const fillY = innerY + (innerHeight - fillHeight);
-        const gradient = drawCtx.createLinearGradient(innerX, innerY + innerHeight, innerX, innerY);
-        gradient.addColorStop(0, fuelRatio < 0.22 ? "#ff8a5b" : "#5cbcff");
-        gradient.addColorStop(1, fuelRatio < 0.22 ? "#ffc59a" : "#66fff2");
-        drawPanel(
-          drawCtx,
-          innerX,
-          fillY,
-          innerWidth,
-          fillHeight,
-          innerWidth * 0.5,
-          gradient,
-          null
-        );
+        drawCtx.save();
+        drawCtx.beginPath();
+        drawCtx.rect(innerX, fillY, innerWidth, fillHeight);
+        drawCtx.clip();
+        const fillSprT = fuelRatio < 0.22 ? RPG.barRed_vT : RPG.barBlue_vT;
+        const fillSprM = fuelRatio < 0.22 ? RPG.barRed_vM : RPG.barBlue_vM;
+        const fillSprB = fuelRatio < 0.22 ? RPG.barRed_vB : RPG.barBlue_vB;
+        if (!draw3SliceV(drawCtx, fillSprT, fillSprM, fillSprB, innerX, innerY, innerWidth, innerHeight)) {
+          const gradient = drawCtx.createLinearGradient(innerX, innerY + innerHeight, innerX, innerY);
+          gradient.addColorStop(0, fuelRatio < 0.22 ? "#cc5533" : "#5580aa");
+          gradient.addColorStop(1, fuelRatio < 0.22 ? "#ee8855" : "#6699cc");
+          drawPanel(drawCtx, innerX, fillY, innerWidth, fillHeight, innerWidth * 0.5, gradient, null);
+        }
+        drawCtx.restore();
       }
 
       pushTouchBlockedRect(trackX - 6, trackY - 6, trackWidth + 12, trackHeight + 12);
@@ -2215,36 +2349,29 @@ export function createUiOverlay({
     }
 
     const trackWidth = clamp(viewportWidth * 0.16, 92, 168);
-    const trackHeight = clamp(viewportHeight * 0.015, 8, 12);
+    const trackHeight = clamp(viewportHeight * 0.016, 10, 14);
     const trackX = clamp(viewportWidth * 0.02, 12, 22);
     const trackY = clamp(viewportHeight * 0.02, 12, 20);
-    drawPanel(
-      drawCtx,
-      trackX,
-      trackY,
-      trackWidth,
-      trackHeight,
-      999,
-      "rgba(10, 16, 28, 0.72)",
-      "rgba(170, 220, 255, 0.45)",
-      1
-    );
+    if (!draw3SliceH(drawCtx, RPG.barBack_hL, RPG.barBack_hM, RPG.barBack_hR, trackX, trackY, trackWidth, trackHeight)) {
+      drawPanel(drawCtx, trackX, trackY, trackWidth, trackHeight, 999, THEME.sliderTrack, THEME.hudBorder, 1);
+    }
 
     const fillWidth = Math.max(0, (trackWidth - 2) * fuelRatio);
     if (fillWidth > 0.5) {
-      const gradient = drawCtx.createLinearGradient(trackX, trackY, trackX + trackWidth, trackY);
-      gradient.addColorStop(0, fuelRatio < 0.22 ? "#ff8a5b" : "#58f3ff");
-      gradient.addColorStop(1, fuelRatio < 0.22 ? "#ffc59a" : "#5fb6ff");
-      drawPanel(
-        drawCtx,
-        trackX + 1,
-        trackY + 1,
-        fillWidth,
-        Math.max(1, trackHeight - 2),
-        999,
-        gradient,
-        null
-      );
+      drawCtx.save();
+      drawCtx.beginPath();
+      drawCtx.rect(trackX + 1, trackY + 1, fillWidth, Math.max(1, trackHeight - 2));
+      drawCtx.clip();
+      const fSprL = fuelRatio < 0.22 ? RPG.barRed_hL : RPG.barBlue_hL;
+      const fSprM = fuelRatio < 0.22 ? RPG.barRed_hM : RPG.barBlue_hM;
+      const fSprR = fuelRatio < 0.22 ? RPG.barRed_hR : RPG.barBlue_hR;
+      if (!draw3SliceH(drawCtx, fSprL, fSprM, fSprR, trackX, trackY, trackWidth, trackHeight)) {
+        const gradient = drawCtx.createLinearGradient(trackX, trackY, trackX + trackWidth, trackY);
+        gradient.addColorStop(0, fuelRatio < 0.22 ? "#cc5533" : "#5580aa");
+        gradient.addColorStop(1, fuelRatio < 0.22 ? "#ee8855" : "#6699cc");
+        drawPanel(drawCtx, trackX + 1, trackY + 1, fillWidth, Math.max(1, trackHeight - 2), 999, gradient, null);
+      }
+      drawCtx.restore();
     }
 
     pushTouchBlockedRect(trackX, trackY, trackWidth, trackHeight);
@@ -2276,19 +2403,11 @@ export function createUiOverlay({
     } = getMoneyPanelRect();
     const moneyText = `$${Math.max(0, Math.floor(state.money))}`;
 
-    drawPanel(
-      drawCtx,
-      panelX,
-      panelY,
-      panelWidth,
-      panelHeight,
-      11,
-      "rgba(12, 28, 18, 0.78)",
-      "rgba(132, 232, 158, 0.52)",
-      1.2
-    );
+    if (!draw9Slice(drawCtx, RPG.panelInset_brown, panelX, panelY, panelWidth, panelHeight, 8)) {
+      drawPanel(drawCtx, panelX, panelY, panelWidth, panelHeight, 11, THEME.hudBg, THEME.hudBorder, 1.2);
+    }
 
-    drawCtx.fillStyle = "rgba(169, 255, 184, 0.98)";
+    drawCtx.fillStyle = THEME.textMoney;
     drawCtx.textAlign = "center";
     drawCtx.textBaseline = "middle";
     const fittedMoney = fitLabelText(
@@ -2375,19 +2494,11 @@ export function createUiOverlay({
 
     const label = `Wave ${Math.max(1, Math.floor(state.waveNumber || 1))}`;
 
-    drawPanel(
-      drawCtx,
-      panelX,
-      panelY,
-      panelWidth,
-      panelHeight,
-      clamp(panelHeight * 0.32, 7, 11),
-      "rgba(12, 23, 37, 0.78)",
-      "rgba(154, 214, 255, 0.54)",
-      1.1
-    );
+    if (!draw9Slice(drawCtx, RPG.panelInset_brown, panelX, panelY, panelWidth, panelHeight, 8)) {
+      drawPanel(drawCtx, panelX, panelY, panelWidth, panelHeight, clamp(panelHeight * 0.32, 7, 11), THEME.hudBg, THEME.hudBorder, 1.1);
+    }
 
-    drawCtx.fillStyle = "rgba(228, 244, 255, 0.97)";
+    drawCtx.fillStyle = THEME.textPrimary;
     drawCtx.textAlign = "center";
     drawCtx.textBaseline = "middle";
     const fittedText = fitLabelText(
@@ -2476,19 +2587,11 @@ export function createUiOverlay({
 
     const label = `Build: ${formatTimerSeconds(state.buildPhaseRemainingSeconds)}`;
 
-    drawPanel(
-      drawCtx,
-      panelX,
-      panelY,
-      panelWidth,
-      panelHeight,
-      10,
-      "rgba(18, 28, 42, 0.78)",
-      "rgba(162, 210, 255, 0.55)",
-      1.2
-    );
+    if (!draw9Slice(drawCtx, RPG.panelInset_beige, panelX, panelY, panelWidth, panelHeight, 8)) {
+      drawPanel(drawCtx, panelX, panelY, panelWidth, panelHeight, 10, THEME.panelBgLight, THEME.panelBorder, 1.2);
+    }
 
-    drawCtx.fillStyle = "rgba(224, 241, 255, 0.98)";
+    drawCtx.fillStyle = THEME.textPrimary;
     drawCtx.textAlign = "center";
     drawCtx.textBaseline = "middle";
     const fittedText = fitLabelText(
@@ -2585,25 +2688,13 @@ export function createUiOverlay({
 
     drawCtx.font = `700 ${labelFontSize}px ${FONT_STACK}`;
     function drawHudButton(button, x, y, buttonWidth) {
-      const fillStyle = button.active
-        ? "rgba(44, 92, 128, 0.9)"
-        : "rgba(14, 30, 45, 0.76)";
-      const strokeStyle = button.active
-        ? "rgba(147, 228, 255, 0.92)"
-        : "rgba(152, 214, 255, 0.48)";
-
-      drawPanel(
-        drawCtx,
-        x,
-        y,
-        buttonWidth,
-        buttonHeight,
-        buttonRadius,
-        fillStyle,
-        strokeStyle,
-        button.active ? 1.6 : 1.2
-      );
-      drawCtx.fillStyle = "rgba(233, 247, 255, 0.96)";
+      const btnSprite = button.active ? RPG.buttonLong_blue : RPG.buttonLong_brown;
+      if (!draw9Slice(drawCtx, btnSprite, x, y, buttonWidth, buttonHeight, 10)) {
+        const fillStyle = button.active ? THEME.towerSelected : THEME.hudBg;
+        const strokeStyle = button.active ? THEME.selectedGlow : THEME.hudBorder;
+        drawPanel(drawCtx, x, y, buttonWidth, buttonHeight, buttonRadius, fillStyle, strokeStyle, button.active ? 1.6 : 1.2);
+      }
+      drawCtx.fillStyle = THEME.textPrimary;
       drawCtx.textAlign = "center";
       drawCtx.textBaseline = "middle";
       drawCtx.font = `700 ${labelFontSize}px ${FONT_STACK}`;
@@ -2704,25 +2795,14 @@ export function createUiOverlay({
       const y = mobileTowerColumn ? baseY + (slotSize + slotGap) * i : baseY;
       const isSelected = item.type === state.selectedTowerType;
       const isDepleted = !item.affordable;
-      const slotFill = isDepleted
-        ? "rgba(28, 34, 44, 0.78)"
-        : (isSelected ? "rgba(26, 55, 72, 0.92)" : "rgba(14, 23, 38, 0.82)");
-      const slotStroke = isDepleted
-        ? "rgba(128, 140, 156, 0.32)"
-        : (isSelected ? "rgba(110, 244, 173, 0.9)" : "rgba(155, 202, 255, 0.26)");
-      const slotLineWidth = isDepleted ? 1 : (isSelected ? 2 : 1.3);
-
-      drawPanel(
-        drawCtx,
-        x,
-        y,
-        slotSize,
-        slotSize,
-        clamp(slotSize * 0.11, 8, 14),
-        slotFill,
-        slotStroke,
-        slotLineWidth
-      );
+      const slotSprite = isDepleted
+        ? RPG.panelInset_brown
+        : (isSelected ? RPG.panelInset_blue : RPG.panelInset_brown);
+      if (!draw9Slice(drawCtx, slotSprite, x, y, slotSize, slotSize, 8)) {
+        const slotFill = isDepleted ? THEME.towerDepleted : (isSelected ? THEME.towerSelected : THEME.hudBg);
+        const slotStroke = isDepleted ? THEME.towerDepletedBorder : (isSelected ? THEME.towerSelectedBorder : THEME.hudBorder);
+        drawPanel(drawCtx, x, y, slotSize, slotSize, clamp(slotSize * 0.11, 8, 14), slotFill, slotStroke, isDepleted ? 1 : (isSelected ? 2 : 1.3));
+      }
 
       const iconSize = slotSize * 0.9;
       const iconX = x + (slotSize - iconSize) * 0.5;
@@ -2746,11 +2826,11 @@ export function createUiOverlay({
           keyBoxW,
           keyBoxH,
           clamp(keyBoxH * 0.28, 4, 8),
-          isDepleted ? "rgba(28, 34, 42, 0.88)" : "rgba(7, 16, 26, 0.9)",
-          isDepleted ? "rgba(160, 172, 188, 0.4)" : "rgba(191, 239, 255, 0.7)",
+          isDepleted ? "rgba(40, 35, 28, 0.88)" : "rgba(30, 22, 14, 0.9)",
+          isDepleted ? "rgba(120, 105, 80, 0.4)" : "rgba(180, 155, 100, 0.7)",
           1
         );
-        drawCtx.fillStyle = isDepleted ? "rgba(173, 184, 198, 0.82)" : "rgba(233, 246, 255, 0.95)";
+        drawCtx.fillStyle = isDepleted ? THEME.textDisabled : THEME.textPrimary;
         drawCtx.textAlign = "center";
         drawCtx.textBaseline = "middle";
         drawCtx.font = `700 ${clamp(slotSize * 0.14, 10, 14)}px ${FONT_STACK}`;
@@ -2775,11 +2855,11 @@ export function createUiOverlay({
           badgeWidth,
           badgeHeight,
           clamp(badgeHeight * 0.36, 4, 8),
-          isDepleted ? "rgba(26, 34, 44, 0.9)" : "rgba(12, 28, 18, 0.9)",
-          isDepleted ? "rgba(141, 153, 166, 0.6)" : "rgba(124, 255, 205, 0.82)",
+          isDepleted ? "rgba(40, 35, 28, 0.9)" : "rgba(35, 28, 12, 0.9)",
+          isDepleted ? "rgba(120, 105, 80, 0.6)" : "rgba(220, 190, 80, 0.82)",
           1.2
         );
-        drawCtx.fillStyle = isDepleted ? "rgba(171, 182, 196, 0.92)" : "rgba(122, 255, 215, 0.98)";
+        drawCtx.fillStyle = isDepleted ? THEME.textDisabled : THEME.textMoney;
         drawCtx.textAlign = "center";
         drawCtx.textBaseline = "middle";
         drawCtx.fillText(
@@ -2810,7 +2890,7 @@ export function createUiOverlay({
       return;
     }
 
-    drawCtx.fillStyle = "rgba(3, 8, 15, 0.56)";
+    drawCtx.fillStyle = THEME.dimOverlay;
     drawCtx.fillRect(0, 0, viewportWidth, viewportHeight);
 
     const panelWidth = clamp(viewportWidth * 0.74, 400, 940);
@@ -2833,26 +2913,18 @@ export function createUiOverlay({
     const cellWidth = Math.max(44, (gridWidth - (gridGap * (columns - 1))) / columns);
     const cellHeight = Math.max(56, (gridHeight - (gridGap * (rows - 1))) / rows);
 
-    drawPanel(
-      drawCtx,
-      panelX,
-      panelY,
-      panelWidth,
-      panelHeight,
-      clamp(panelHeight * 0.05, 12, 18),
-      "rgba(10, 18, 30, 0.96)",
-      "rgba(182, 214, 240, 0.74)",
-      1.6
-    );
+    if (!draw9Slice(drawCtx, RPG.panel_brown, panelX, panelY, panelWidth, panelHeight, 12)) {
+      drawPanel(drawCtx, panelX, panelY, panelWidth, panelHeight, clamp(panelHeight * 0.05, 12, 18), THEME.panelBg, THEME.panelBorder, 1.6);
+    }
 
     drawCtx.textAlign = "left";
     drawCtx.textBaseline = "top";
-    drawCtx.fillStyle = "rgba(239, 246, 255, 0.98)";
+    drawCtx.fillStyle = THEME.textGold;
     drawCtx.font = `700 ${titleFontSize}px ${FONT_STACK}`;
     drawCtx.fillText(state.editorDoodadMenu.title, panelX + innerPaddingX, panelY + innerPaddingY);
 
     const pageLabel = `Page ${state.editorDoodadMenu.pageIndex + 1}/${state.editorDoodadMenu.pageCount}`;
-    drawCtx.fillStyle = "rgba(163, 197, 226, 0.92)";
+    drawCtx.fillStyle = THEME.textSecondary;
     drawCtx.font = `600 ${subtitleFontSize}px ${FONT_STACK}`;
     drawCtx.textAlign = "right";
     drawCtx.fillText(pageLabel, panelX + panelWidth - innerPaddingX, panelY + innerPaddingY + 4);
@@ -2863,24 +2935,14 @@ export function createUiOverlay({
       const row = Math.floor(i / columns);
       const x = gridX + (col * (cellWidth + gridGap));
       const y = gridY + (row * (cellHeight + gridGap));
-      const fill = item.focused
-        ? "rgba(29, 61, 86, 0.98)"
-        : (item.selected ? "rgba(27, 52, 42, 0.94)" : "rgba(17, 28, 43, 0.88)");
-      const stroke = item.focused
-        ? "rgba(127, 224, 255, 0.94)"
-        : (item.selected ? "rgba(137, 255, 186, 0.84)" : "rgba(137, 164, 193, 0.46)");
-
-      drawPanel(
-        drawCtx,
-        x,
-        y,
-        cellWidth,
-        cellHeight,
-        clamp(cellHeight * 0.14, 8, 12),
-        fill,
-        stroke,
-        item.focused ? 1.8 : 1.2
-      );
+      const fill = item.focused ? THEME.towerSelected : (item.selected ? THEME.panelBgLight : THEME.hudBg);
+      const cellSprite = item.focused ? RPG.panelInset_blue : (item.selected ? RPG.panelInset_beige : RPG.panelInset_brown);
+      if (!draw9Slice(drawCtx, cellSprite, x, y, cellWidth, cellHeight, 8)) {
+        const stroke = item.focused
+          ? THEME.selectedGlow
+          : (item.selected ? THEME.towerSelectedBorder : THEME.hudBorder);
+        drawPanel(drawCtx, x, y, cellWidth, cellHeight, clamp(cellHeight * 0.14, 8, 12), fill, stroke, item.focused ? 1.8 : 1.2);
+      }
 
       const iconSize = Math.min(cellWidth * 0.52, cellHeight * 0.46);
       const iconX = x + (cellWidth - iconSize) * 0.5;
@@ -2892,9 +2954,7 @@ export function createUiOverlay({
       const labelBoxY = y + cellHeight - clamp(cellHeight * 0.34, 22, 36);
       drawCtx.textAlign = "center";
       drawCtx.textBaseline = "middle";
-      drawCtx.fillStyle = item.focused
-        ? "rgba(243, 251, 255, 0.99)"
-        : "rgba(220, 234, 247, 0.95)";
+      drawCtx.fillStyle = item.focused ? THEME.textPrimary : THEME.textSecondary;
       const fittedLabel = fitLabelText(
         drawCtx,
         item.label,
@@ -2921,7 +2981,7 @@ export function createUiOverlay({
 
     drawCtx.textAlign = "left";
     drawCtx.textBaseline = "middle";
-    drawCtx.fillStyle = "rgba(182, 205, 226, 0.92)";
+    drawCtx.fillStyle = THEME.textSecondary;
     drawCtx.font = `600 ${subtitleFontSize}px ${FONT_STACK}`;
     drawCtx.fillText(
       "Arrows move  Enter select  Wheel page  Esc close",
@@ -2962,19 +3022,11 @@ export function createUiOverlay({
       y = Math.max(10, trayTop - hintHeight - clamp(viewportHeight * 0.012, 7, 12));
     }
 
-    drawPanel(
-      drawCtx,
-      x,
-      y,
-      hintWidth,
-      hintHeight,
-      clamp(hintHeight * 0.3, 8, 12),
-      "rgba(10, 21, 33, 0.84)",
-      "rgba(110, 244, 173, 0.62)",
-      1.2
-    );
+    if (!draw9Slice(drawCtx, RPG.panelInset_beige, x, y, hintWidth, hintHeight, 8)) {
+      drawPanel(drawCtx, x, y, hintWidth, hintHeight, clamp(hintHeight * 0.3, 8, 12), THEME.panelBgLight, THEME.panelBorder, 1.2);
+    }
 
-    drawCtx.fillStyle = "rgba(229, 245, 255, 0.96)";
+    drawCtx.fillStyle = THEME.textPrimary;
     drawCtx.textAlign = "center";
     drawCtx.textBaseline = "middle";
     drawCtx.font = `600 ${clamp(hintHeight * 0.45, 12, 18)}px ${FONT_STACK}`;
@@ -3051,18 +3103,18 @@ export function createUiOverlay({
 
     drawCtx.beginPath();
     drawCtx.arc(movePadCenterX, movePadCenterY, movePadActivationRadius, 0, Math.PI * 2);
-    drawCtx.fillStyle = "rgba(6, 18, 30, 0.16)";
+    drawCtx.fillStyle = "rgba(20, 12, 6, 0.16)";
     drawCtx.fill();
     drawCtx.lineWidth = 1.4;
-    drawCtx.strokeStyle = "rgba(155, 202, 255, 0.24)";
+    drawCtx.strokeStyle = "rgba(160, 130, 80, 0.24)";
     drawCtx.stroke();
 
     drawCtx.beginPath();
     drawCtx.arc(movePadCenterX, movePadCenterY, movePadRadius, 0, Math.PI * 2);
-    drawCtx.fillStyle = "rgba(11, 28, 44, 0.56)";
+    drawCtx.fillStyle = "rgba(42, 28, 16, 0.58)";
     drawCtx.fill();
     drawCtx.lineWidth = 1.8;
-    drawCtx.strokeStyle = "rgba(155, 223, 255, 0.52)";
+    drawCtx.strokeStyle = "rgba(180, 148, 90, 0.52)";
     drawCtx.stroke();
 
     const stickMagnitude = Math.hypot(state.moveStickX, state.moveStickY);
@@ -3074,10 +3126,10 @@ export function createUiOverlay({
 
     drawCtx.beginPath();
     drawCtx.arc(knobX, knobY, knobRadius, 0, Math.PI * 2);
-    drawCtx.fillStyle = "rgba(130, 236, 255, 0.74)";
+    drawCtx.fillStyle = "rgba(200, 165, 90, 0.76)";
     drawCtx.fill();
     drawCtx.lineWidth = 1.4;
-    drawCtx.strokeStyle = "rgba(214, 248, 255, 0.96)";
+    drawCtx.strokeStyle = "rgba(255, 235, 180, 0.96)";
     drawCtx.stroke();
 
     pushTouchBlockedRect(
@@ -3134,15 +3186,15 @@ export function createUiOverlay({
       const isPressed = !!state.pressedActions?.[action];
       drawCtx.beginPath();
       drawCtx.arc(cx, cy, radius, 0, Math.PI * 2);
-      drawCtx.fillStyle = isPressed ? "rgba(72, 196, 255, 0.72)" : "rgba(16, 36, 56, 0.64)";
+      drawCtx.fillStyle = isPressed ? "rgba(160, 120, 55, 0.76)" : "rgba(42, 28, 16, 0.66)";
       drawCtx.fill();
       drawCtx.lineWidth = isPressed ? 2.4 : 1.6;
-      drawCtx.strokeStyle = isPressed ? "rgba(198, 244, 255, 0.98)" : "rgba(163, 218, 255, 0.54)";
+      drawCtx.strokeStyle = isPressed ? "rgba(255, 225, 150, 0.98)" : "rgba(180, 148, 90, 0.54)";
       drawCtx.stroke();
 
       if (action === "primary" || action === "primaryAlt") {
         if (state.buildMode) {
-          drawCtx.strokeStyle = "rgba(220, 255, 236, 0.96)";
+          drawCtx.strokeStyle = "rgba(220, 255, 200, 0.96)";
           drawCtx.lineWidth = Math.max(2, radius * 0.095);
           drawCtx.lineCap = "round";
           drawCtx.lineJoin = "round";
@@ -3156,7 +3208,7 @@ export function createUiOverlay({
           const gap = radius * 0.11;
           drawCtx.lineWidth = Math.max(2, radius * 0.09);
           drawCtx.lineCap = "round";
-          drawCtx.strokeStyle = "rgba(226, 248, 255, 0.95)";
+          drawCtx.strokeStyle = "rgba(255, 240, 200, 0.95)";
           drawCtx.beginPath();
           drawCtx.moveTo(cx - arm, cy);
           drawCtx.lineTo(cx - gap, cy);
@@ -3169,7 +3221,7 @@ export function createUiOverlay({
           drawCtx.stroke();
         }
       } else if (action === "jump") {
-        drawCtx.strokeStyle = "rgba(224, 246, 255, 0.96)";
+        drawCtx.strokeStyle = "rgba(255, 245, 210, 0.96)";
         drawCtx.lineWidth = Math.max(2, radius * 0.11);
         drawCtx.lineCap = "round";
         drawCtx.lineJoin = "round";
@@ -3179,7 +3231,7 @@ export function createUiOverlay({
         drawCtx.lineTo(cx + radius * 0.32, cy + radius * 0.16);
         drawCtx.stroke();
       } else if (action === "cancel") {
-        drawCtx.strokeStyle = "rgba(246, 222, 231, 0.96)";
+        drawCtx.strokeStyle = "rgba(255, 210, 170, 0.96)";
         drawCtx.lineWidth = Math.max(2, radius * 0.14);
         drawCtx.lineCap = "round";
         drawCtx.beginPath();
@@ -3240,15 +3292,15 @@ export function createUiOverlay({
 
     drawCtx.beginPath();
     drawCtx.arc(cx, cy, radius, 0, Math.PI * 2);
-    drawCtx.fillStyle = pressed ? "rgba(123, 76, 46, 0.88)" : "rgba(28, 38, 52, 0.8)";
+    drawCtx.fillStyle = pressed ? "rgba(100, 65, 35, 0.88)" : "rgba(42, 30, 20, 0.82)";
     drawCtx.fill();
     drawCtx.lineWidth = pressed ? 2.8 : 1.8;
-    drawCtx.strokeStyle = pressed ? "rgba(255, 204, 147, 0.96)" : "rgba(205, 222, 242, 0.72)";
+    drawCtx.strokeStyle = pressed ? "rgba(220, 180, 100, 0.96)" : "rgba(160, 130, 80, 0.72)";
     drawCtx.stroke();
 
     drawCtx.beginPath();
     drawCtx.arc(cx, cy, radius * 0.66, 0, Math.PI * 2);
-    drawCtx.fillStyle = "rgba(8, 13, 21, 0.58)";
+    drawCtx.fillStyle = "rgba(25, 18, 10, 0.58)";
     drawCtx.fill();
 
     if (progress > 0) {
@@ -3257,13 +3309,13 @@ export function createUiOverlay({
       drawCtx.beginPath();
       drawCtx.arc(cx, cy, radius * 0.89, startAngle, endAngle, false);
       drawCtx.lineWidth = Math.max(3, radius * 0.16);
-      drawCtx.strokeStyle = "rgba(120, 255, 176, 0.98)";
+      drawCtx.strokeStyle = "rgba(255, 210, 80, 0.98)";
       drawCtx.lineCap = "round";
       drawCtx.stroke();
       drawCtx.lineCap = "butt";
     }
 
-    drawCtx.fillStyle = "rgba(242, 255, 247, 0.98)";
+    drawCtx.fillStyle = THEME.textMoney;
     drawCtx.textAlign = "center";
     drawCtx.textBaseline = "middle";
     drawCtx.font = `800 ${clamp(radius * 0.72, 15, 26)}px ${FONT_STACK}`;
@@ -3283,11 +3335,11 @@ export function createUiOverlay({
       labelWidth,
       labelHeight,
       clamp(labelHeight * 0.36, 6, 10),
-      "rgba(10, 21, 34, 0.86)",
-      "rgba(174, 255, 213, 0.7)",
+      "rgba(42, 30, 20, 0.9)",
+      "rgba(200, 170, 80, 0.75)",
       1.2
     );
-    drawCtx.fillStyle = "rgba(214, 255, 228, 0.98)";
+    drawCtx.fillStyle = THEME.textMoney;
     drawCtx.fillText(labelText, labelX + labelWidth * 0.5, labelY + labelHeight * 0.55);
 
     if (!state.showTouchControls && prompt.keyHint) {
@@ -3374,29 +3426,20 @@ export function createUiOverlay({
     selected = false,
     primary = false,
   }) {
-    const fill = disabled
-      ? "rgba(28, 38, 54, 0.68)"
-      : (selected
-        ? "rgba(39, 112, 202, 0.96)"
-        : (primary ? "rgba(39, 112, 202, 0.96)" : "rgba(20, 31, 50, 0.94)"));
-    const stroke = disabled
-      ? "rgba(130, 156, 188, 0.28)"
-      : (selected || primary
-        ? "rgba(157, 214, 255, 0.58)"
-        : "rgba(255, 255, 255, 0.18)");
-    drawPanel(
-      drawCtx,
-      x,
-      y,
-      width,
-      height,
-      clamp(height * 0.28, 10, 16),
-      fill,
-      stroke,
-      disabled ? 1 : 1.25
-    );
+    const sprite = disabled
+      ? RPG.buttonLong_grey
+      : ((selected || primary) ? RPG.buttonLong_blue : RPG.buttonLong_brown);
+    if (!draw9Slice(drawCtx, sprite, x, y, width, height, 12)) {
+      const fill = disabled
+        ? THEME.towerDepleted
+        : ((selected || primary) ? THEME.buttonPrimary : THEME.buttonBg);
+      const stroke = disabled
+        ? THEME.towerDepletedBorder
+        : ((selected || primary) ? THEME.buttonPrimaryBorder : THEME.buttonBorder);
+      drawPanel(drawCtx, x, y, width, height, clamp(height * 0.28, 10, 16), fill, stroke, disabled ? 1 : 1.25);
+    }
 
-    drawCtx.fillStyle = disabled ? "rgba(232, 241, 255, 0.58)" : "rgba(244, 248, 255, 0.98)";
+    drawCtx.fillStyle = disabled ? THEME.textDisabled : THEME.textPrimary;
     drawCtx.textAlign = "center";
     drawCtx.textBaseline = "middle";
     const fittedLabel = fitLabelText(
@@ -3408,7 +3451,7 @@ export function createUiOverlay({
       700
     );
     drawCtx.font = `700 ${fittedLabel.fontSize}px ${FONT_STACK}`;
-    drawCtx.fillText(fittedLabel.text, x + width * 0.5, y + height * 0.54);
+    drawCtx.fillText(fittedLabel.text, x + width * 0.5, y + height * 0.52);
 
     if (actionId && !disabled) {
       registerRuntimeActionRect({
@@ -3432,57 +3475,44 @@ export function createUiOverlay({
   }) {
     const safeValue = clamp(value, 0, 1);
     const labelFont = clamp(width * 0.043, 12, 14);
-    const trackHeight = clamp(viewportHeight * 0.012, 8, 11);
-    const knobRadius = clamp(trackHeight * 1.2, 9, 12);
+    const trackHeight = clamp(viewportHeight * 0.014, 10, 14);
+    const knobRadius = clamp(trackHeight * 1.1, 9, 13);
     const trackY = y + labelFont + 12;
     const percentText = formatPercentText(safeValue);
 
     drawCtx.textAlign = "left";
     drawCtx.textBaseline = "middle";
-    drawCtx.fillStyle = "rgba(255, 255, 255, 0.96)";
+    drawCtx.fillStyle = disabled ? THEME.textDisabled : THEME.textPrimary;
     drawCtx.font = `700 ${labelFont}px ${FONT_STACK}`;
     drawCtx.fillText(label, x, y + (labelFont * 0.5));
 
     drawCtx.textAlign = "right";
-    drawCtx.fillStyle = disabled ? "rgba(229, 239, 255, 0.54)" : "rgba(255, 255, 255, 0.9)";
+    drawCtx.fillStyle = disabled ? THEME.textDisabled : THEME.textSecondary;
     drawCtx.fillText(percentText, x + width, y + (labelFont * 0.5));
 
-    drawPanel(
-      drawCtx,
-      x,
-      trackY,
-      width,
-      trackHeight,
-      999,
-      "rgba(8, 15, 25, 0.84)",
-      disabled ? "rgba(130, 156, 188, 0.25)" : "rgba(164, 213, 255, 0.4)",
-      1
-    );
+    if (!draw3SliceH(drawCtx, RPG.barBack_hL, RPG.barBack_hM, RPG.barBack_hR, x, trackY, width, trackHeight)) {
+      drawPanel(drawCtx, x, trackY, width, trackHeight, 999, THEME.sliderTrack, THEME.hudBorder, 1);
+    }
 
     const fillWidth = Math.max(0, width * safeValue);
     if (fillWidth > 0.5) {
-      const gradient = drawCtx.createLinearGradient(x, trackY, x + width, trackY);
-      gradient.addColorStop(0, disabled ? "rgba(93, 128, 163, 0.46)" : "#58f3ff");
-      gradient.addColorStop(1, disabled ? "rgba(112, 156, 194, 0.56)" : "#5fb6ff");
-      drawPanel(
-        drawCtx,
-        x,
-        trackY,
-        fillWidth,
-        trackHeight,
-        999,
-        gradient,
-        null
-      );
+      drawCtx.save();
+      drawCtx.beginPath();
+      drawCtx.rect(x, trackY, fillWidth, trackHeight);
+      drawCtx.clip();
+      if (!draw3SliceH(drawCtx, RPG.barGreen_hL, RPG.barGreen_hM, RPG.barGreen_hR, x, trackY, width, trackHeight)) {
+        drawPanel(drawCtx, x, trackY, fillWidth, trackHeight, 999, THEME.sliderFill, null);
+      }
+      drawCtx.restore();
     }
 
     const knobX = x + (width * safeValue);
     drawCtx.beginPath();
     drawCtx.arc(knobX, trackY + (trackHeight * 0.5), knobRadius, 0, Math.PI * 2);
-    drawCtx.fillStyle = disabled ? "rgba(208, 224, 241, 0.46)" : "rgba(237, 247, 255, 0.96)";
+    drawCtx.fillStyle = disabled ? "rgba(160, 145, 120, 0.5)" : "rgba(255, 245, 220, 0.96)";
     drawCtx.fill();
     drawCtx.lineWidth = 1.6;
-    drawCtx.strokeStyle = disabled ? "rgba(114, 147, 178, 0.3)" : "rgba(112, 186, 255, 0.9)";
+    drawCtx.strokeStyle = disabled ? "rgba(120, 100, 70, 0.35)" : "rgba(180, 145, 80, 0.9)";
     drawCtx.stroke();
 
     if (actionId && !disabled) {
@@ -3507,17 +3537,9 @@ export function createUiOverlay({
   }
 
   function drawShareInputSlot(x, y, width, height) {
-    drawPanel(
-      drawCtx,
-      x,
-      y,
-      width,
-      height,
-      clamp(height * 0.26, 9, 12),
-      "rgba(7, 12, 20, 0.9)",
-      "rgba(255, 255, 255, 0.18)",
-      1.1
-    );
+    if (!draw9Slice(drawCtx, RPG.panelInset_brown, x, y, width, height, 8)) {
+      drawPanel(drawCtx, x, y, width, height, clamp(height * 0.26, 9, 12), THEME.hudBg, THEME.hudBorder, 1.1);
+    }
     shareLinkInputRect = { x, y, width, height };
   }
 
@@ -3569,27 +3591,19 @@ export function createUiOverlay({
     const panelX = (viewportWidth - panelWidth) * 0.5;
     const panelY = clamp((viewportHeight - panelHeight) * 0.5, 8, Math.max(8, viewportHeight - panelHeight - 8));
 
-    drawCtx.fillStyle = "rgba(3, 8, 17, 0.62)";
+    drawCtx.fillStyle = THEME.dimOverlay;
     drawCtx.fillRect(0, 0, viewportWidth, viewportHeight);
-    drawPanel(
-      drawCtx,
-      panelX,
-      panelY,
-      panelWidth,
-      panelHeight,
-      20,
-      "rgba(12, 18, 31, 0.98)",
-      "rgba(162, 203, 255, 0.2)",
-      1.2
-    );
+    if (!draw9Slice(drawCtx, RPG.panel_brown, panelX, panelY, panelWidth, panelHeight, 12)) {
+      drawPanel(drawCtx, panelX, panelY, panelWidth, panelHeight, 20, THEME.panelBg, THEME.panelBorder, 1.2);
+    }
 
     let cursorY = panelY + pad;
 
     drawCtx.textAlign = "center";
     drawCtx.textBaseline = "top";
-    drawCtx.fillStyle = "#ffffff";
+    drawCtx.fillStyle = THEME.textGold;
     drawCtx.font = `800 ${titleFontSize}px ${FONT_STACK}`;
-    drawCtx.fillText(mainMenu.title || "Cube Command", panelX + panelWidth * 0.5, cursorY);
+    drawCtx.fillText(mainMenu.title || "Coop TD", panelX + panelWidth * 0.5, cursorY);
     cursorY += titleBlockHeight;
 
     drawRuntimeButton({
@@ -3716,19 +3730,11 @@ export function createUiOverlay({
     const panelX = (viewportWidth - panelWidth) * 0.5;
     const panelY = clamp((viewportHeight - panelHeight) * 0.5, 8, Math.max(8, viewportHeight - panelHeight - 8));
 
-    drawCtx.fillStyle = "rgba(3, 8, 17, 0.62)";
+    drawCtx.fillStyle = THEME.dimOverlay;
     drawCtx.fillRect(0, 0, viewportWidth, viewportHeight);
-    drawPanel(
-      drawCtx,
-      panelX,
-      panelY,
-      panelWidth,
-      panelHeight,
-      20,
-      "rgba(12, 18, 31, 0.98)",
-      "rgba(162, 203, 255, 0.2)",
-      1.2
-    );
+    if (!draw9Slice(drawCtx, RPG.panel_brown, panelX, panelY, panelWidth, panelHeight, 12)) {
+      drawPanel(drawCtx, panelX, panelY, panelWidth, panelHeight, 20, THEME.panelBg, THEME.panelBorder, 1.2);
+    }
 
     let cursorY = panelY + pad + 6;
 
@@ -3832,19 +3838,11 @@ export function createUiOverlay({
       ? clamp(viewportHeight * 0.035, 8, Math.max(8, viewportHeight - panelHeight - 8))
       : (viewportHeight - panelHeight) * 0.5;
 
-    drawCtx.fillStyle = "rgba(4, 8, 20, 0.85)";
+    drawCtx.fillStyle = THEME.dimOverlay;
     drawCtx.fillRect(0, 0, viewportWidth, viewportHeight);
-    drawPanel(
-      drawCtx,
-      panelX,
-      panelY,
-      panelWidth,
-      panelHeight,
-      clamp(panelWidth * 0.04, 12, 18),
-      "rgba(14, 23, 38, 0.96)",
-      "rgba(80, 133, 200, 0.95)",
-      1.5
-    );
+    if (!draw9Slice(drawCtx, RPG.panel_brown, panelX, panelY, panelWidth, panelHeight, 12)) {
+      drawPanel(drawCtx, panelX, panelY, panelWidth, panelHeight, clamp(panelWidth * 0.04, 12, 18), THEME.panelBg, THEME.panelBorder, 1.5);
+    }
 
     const cardX = panelX + panelPadding;
     const cardWidth = panelWidth - panelPadding * 2;
@@ -3852,37 +3850,21 @@ export function createUiOverlay({
 
     for (let i = 0; i < cardCount; i += 1) {
       const option = options[i];
-      drawPanel(
-        drawCtx,
-        cardX,
-        cardY,
-        cardWidth,
-        cardHeight,
-        clamp(cardHeight * 0.15, 8, 14),
-        "rgba(24, 44, 70, 0.82)",
-        "rgba(93, 161, 245, 0.72)",
-        1.2
-      );
+      if (!draw9Slice(drawCtx, RPG.panelInset_beige, cardX, cardY, cardWidth, cardHeight, 10)) {
+        drawPanel(drawCtx, cardX, cardY, cardWidth, cardHeight, clamp(cardHeight * 0.15, 8, 14), THEME.panelBgLight, THEME.panelBorder, 1.2);
+      }
 
       const iconSize = cardHeight * 0.9;
       const iconX = cardX + clamp(cardWidth * 0.03, 10, 16);
       const iconY = cardY + (cardHeight - iconSize) * 0.5;
-      drawPanel(
-        drawCtx,
-        iconX,
-        iconY,
-        iconSize,
-        iconSize,
-        clamp(iconSize * 0.17, 7, 12),
-        "rgba(8, 18, 30, 0.64)",
-        "rgba(148, 214, 255, 0.72)",
-        1
-      );
+      if (!draw9Slice(drawCtx, RPG.panelInset_brown, iconX, iconY, iconSize, iconSize, 8)) {
+        drawPanel(drawCtx, iconX, iconY, iconSize, iconSize, clamp(iconSize * 0.17, 7, 12), THEME.hudBg, THEME.hudBorder, 1);
+      }
       drawIconById(drawCtx, option.iconId, iconX + 2, iconY + 2, iconSize - 4);
 
       drawCtx.textAlign = "left";
       drawCtx.textBaseline = "middle";
-      drawCtx.fillStyle = "rgba(240, 247, 255, 0.98)";
+      drawCtx.fillStyle = THEME.textPrimary;
       const optionPrefix = state.showKeyboardHints ? `${i + 1}. ` : "";
       const optionText = `${optionPrefix}${option.label}`;
       const textMaxWidth = Math.max(
@@ -3937,18 +3919,10 @@ export function createUiOverlay({
     const height = fontSize + (paddingY * 2);
     const x = 16;
     const y = 16;
-    drawPanel(
-      drawCtx,
-      x,
-      y,
-      width,
-      height,
-      height * 0.5,
-      "rgba(16, 16, 16, 0.82)",
-      "rgba(255, 255, 255, 0.18)",
-      1
-    );
-    drawCtx.fillStyle = "rgba(244, 244, 244, 0.95)";
+    if (!draw9Slice(drawCtx, RPG.panelInset_brown, x, y, width, height, 8)) {
+      drawPanel(drawCtx, x, y, width, height, height * 0.5, THEME.hudBg, THEME.hudBorder, 1);
+    }
+    drawCtx.fillStyle = THEME.textPrimary;
     drawCtx.textAlign = "left";
     drawCtx.textBaseline = "top";
     drawCtx.fillText(message, x + paddingX, y + paddingY);
@@ -3978,7 +3952,7 @@ export function createUiOverlay({
       return;
     }
 
-    drawCtx.fillStyle = "rgba(4, 8, 20, 0.85)";
+    drawCtx.fillStyle = THEME.dimOverlay;
     drawCtx.fillRect(0, 0, viewportWidth, viewportHeight);
 
     const isMobileMenu = state.showTouchControls && state.touchPortrait;
@@ -4029,25 +4003,17 @@ export function createUiOverlay({
       )
       : (viewportHeight - panelHeight) * 0.5;
 
-    drawPanel(
-      drawCtx,
-      panelX,
-      panelY,
-      panelWidth,
-      panelHeight,
-      clamp(panelWidth * 0.04, 12, 18),
-      "rgba(14, 23, 38, 0.96)",
-      "rgba(80, 133, 200, 0.95)",
-      1.5
-    );
+    if (!draw9Slice(drawCtx, RPG.panel_brown, panelX, panelY, panelWidth, panelHeight, 12)) {
+      drawPanel(drawCtx, panelX, panelY, panelWidth, panelHeight, clamp(panelWidth * 0.04, 12, 18), THEME.panelBg, THEME.panelBorder, 1.5);
+    }
 
-    drawCtx.fillStyle = "#ffffff";
+    drawCtx.fillStyle = THEME.textGold;
     drawCtx.textAlign = "center";
     drawCtx.textBaseline = "top";
     drawCtx.font = `700 ${clamp(panelWidth * 0.08, 21, 30)}px ${FONT_STACK}`;
     drawCtx.fillText(state.menuTitle || "Upgrade Ready", panelX + panelWidth * 0.5, panelY + panelPadding);
     drawCtx.font = `500 ${clamp(panelWidth * 0.04, 12, 16)}px ${FONT_STACK}`;
-    drawCtx.fillStyle = "rgba(228, 240, 255, 0.82)";
+    drawCtx.fillStyle = THEME.textSecondary;
     drawCtx.fillText(
       state.menuSubtitle || "Select an upgrade",
       panelX + panelWidth * 0.5,
@@ -4061,37 +4027,25 @@ export function createUiOverlay({
     for (let i = 0; i < cardCount; i += 1) {
       const option = state.menuOptions[i];
       const hovered = i === state.hoveredMenuIndex;
-      drawPanel(
-        drawCtx,
-        cardX,
-        cardY,
-        cardWidth,
-        cardHeight,
-        clamp(cardHeight * 0.15, 8, 14),
-        hovered ? "rgba(44, 80, 120, 0.94)" : "rgba(24, 44, 70, 0.82)",
-        hovered ? "rgba(121, 206, 255, 0.98)" : "rgba(93, 161, 245, 0.72)",
-        hovered ? 1.8 : 1.2
-      );
+      const cardSprite = hovered ? RPG.panelInset_blue : RPG.panelInset_beige;
+      if (!draw9Slice(drawCtx, cardSprite, cardX, cardY, cardWidth, cardHeight, 10)) {
+        drawPanel(drawCtx, cardX, cardY, cardWidth, cardHeight, clamp(cardHeight * 0.15, 8, 14),
+          hovered ? THEME.towerSelected : THEME.panelBgLight,
+          hovered ? THEME.selectedGlow : THEME.panelBorder,
+          hovered ? 1.8 : 1.2);
+      }
 
       const iconSize = cardHeight * 0.9;
       const iconX = cardX + clamp(cardWidth * 0.03, 10, 16);
       const iconY = cardY + (cardHeight - iconSize) * 0.5;
-      drawPanel(
-        drawCtx,
-        iconX,
-        iconY,
-        iconSize,
-        iconSize,
-        clamp(iconSize * 0.17, 7, 12),
-        "rgba(8, 18, 30, 0.64)",
-        "rgba(148, 214, 255, 0.72)",
-        1
-      );
+      if (!draw9Slice(drawCtx, RPG.panelInset_brown, iconX, iconY, iconSize, iconSize, 8)) {
+        drawPanel(drawCtx, iconX, iconY, iconSize, iconSize, clamp(iconSize * 0.17, 7, 12), THEME.hudBg, THEME.hudBorder, 1);
+      }
       drawIconById(drawCtx, option.iconId, iconX + 2, iconY + 2, iconSize - 4);
 
       drawCtx.textAlign = "left";
       drawCtx.textBaseline = "middle";
-      drawCtx.fillStyle = "rgba(240, 247, 255, 0.98)";
+      drawCtx.fillStyle = THEME.textPrimary;
       const optionPrefix = state.showKeyboardHints ? `${i + 1}. ` : "";
       const optionText = `${optionPrefix}${option.label}`;
       const textMaxWidth = Math.max(
@@ -4145,7 +4099,7 @@ export function createUiOverlay({
       return;
     }
 
-    drawCtx.fillStyle = "rgba(4, 8, 20, 0.86)";
+    drawCtx.fillStyle = THEME.dimOverlay;
     drawCtx.fillRect(0, 0, viewportWidth, viewportHeight);
 
     const isPortrait = state.showTouchControls && state.touchPortrait;
@@ -4170,30 +4124,22 @@ export function createUiOverlay({
       height: panelHeight,
     };
 
-    drawPanel(
-      drawCtx,
-      panelX,
-      panelY,
-      panelWidth,
-      panelHeight,
-      clamp(panelWidth * 0.03, 10, 18),
-      "rgba(12, 20, 33, 0.97)",
-      "rgba(108, 168, 236, 0.9)",
-      1.6
-    );
+    if (!draw9Slice(drawCtx, RPG.panel_brown, panelX, panelY, panelWidth, panelHeight, 12)) {
+      drawPanel(drawCtx, panelX, panelY, panelWidth, panelHeight, clamp(panelWidth * 0.03, 10, 18), THEME.panelBg, THEME.panelBorder, 1.6);
+    }
 
     const viewX = panelX + 10;
     const viewY = panelY + headerHeight;
     const viewWidth = panelWidth - 20;
     const viewHeight = panelHeight - headerHeight - 10;
 
-    drawCtx.fillStyle = "rgba(220, 238, 255, 0.98)";
+    drawCtx.fillStyle = THEME.textGold;
     drawCtx.textAlign = "left";
     drawCtx.textBaseline = "middle";
     drawCtx.font = `700 ${clamp(panelHeight * 0.036, 16, 28)}px ${FONT_STACK}`;
     drawCtx.fillText(state.menuTitle || "Research Tree", panelX + 16, panelY + headerHeight * 0.36);
 
-    drawCtx.fillStyle = "rgba(184, 214, 244, 0.95)";
+    drawCtx.fillStyle = THEME.textSecondary;
     drawCtx.font = `600 ${clamp(panelHeight * 0.022, 11, 18)}px ${FONT_STACK}`;
     drawCtx.fillText(state.menuSubtitle || "", panelX + 16, panelY + headerHeight * 0.72);
 
@@ -4204,18 +4150,10 @@ export function createUiOverlay({
     const pointsHeight = clamp(headerHeight * 0.44, 24, 38);
     const pointsX = panelX + panelWidth - pointsWidth - 16;
     const pointsY = panelY + headerHeight * 0.24;
-    drawPanel(
-      drawCtx,
-      pointsX,
-      pointsY,
-      pointsWidth,
-      pointsHeight,
-      clamp(pointsHeight * 0.3, 6, 10),
-      "rgba(17, 43, 29, 0.88)",
-      "rgba(124, 232, 168, 0.9)",
-      1.2
-    );
-    drawCtx.fillStyle = "rgba(168, 255, 198, 0.98)";
+    if (!draw9Slice(drawCtx, RPG.panelInset_beige, pointsX, pointsY, pointsWidth, pointsHeight, 6)) {
+      drawPanel(drawCtx, pointsX, pointsY, pointsWidth, pointsHeight, clamp(pointsHeight * 0.3, 6, 10), THEME.panelBgLight, THEME.panelBorder, 1.2);
+    }
+    drawCtx.fillStyle = THEME.textMoney;
     drawCtx.textAlign = "center";
     drawCtx.fillText(pointsText, pointsX + pointsWidth * 0.5, pointsY + pointsHeight * 0.53);
 
@@ -4272,8 +4210,8 @@ export function createUiOverlay({
       const researched = !!childNode?.researched;
       const unlockable = !!childNode?.unlockable;
       drawCtx.strokeStyle = researched
-        ? "rgba(132, 255, 185, 0.92)"
-        : (unlockable ? "rgba(141, 214, 255, 0.9)" : "rgba(112, 132, 154, 0.52)");
+        ? "rgba(200, 175, 80, 0.92)"
+        : (unlockable ? "rgba(180, 150, 90, 0.9)" : "rgba(100, 85, 60, 0.52)");
       drawCtx.lineWidth = researched ? 2.3 : 1.4;
       drawCtx.beginPath();
       drawCtx.moveTo(pathPoints[0].x, pathPoints[0].y);
@@ -4285,11 +4223,11 @@ export function createUiOverlay({
       if (pathPoints.length > 2) {
         const jointRadius = researched ? 3.5 : 3;
         const jointFill = researched
-          ? "rgba(170, 255, 204, 0.95)"
-          : (unlockable ? "rgba(183, 231, 255, 0.95)" : "rgba(142, 160, 180, 0.72)");
+          ? "rgba(220, 195, 100, 0.95)"
+          : (unlockable ? "rgba(200, 175, 110, 0.95)" : "rgba(130, 115, 85, 0.72)");
         const jointStroke = researched
-          ? "rgba(68, 145, 102, 0.95)"
-          : (unlockable ? "rgba(91, 142, 176, 0.92)" : "rgba(83, 98, 116, 0.86)");
+          ? "rgba(140, 110, 50, 0.95)"
+          : (unlockable ? "rgba(120, 100, 60, 0.92)" : "rgba(85, 75, 55, 0.86)");
         drawCtx.fillStyle = jointFill;
         drawCtx.strokeStyle = jointStroke;
         drawCtx.lineWidth = 1.15;
@@ -4312,26 +4250,15 @@ export function createUiOverlay({
       const researched = !!node.researched;
       const unlockable = !!node.unlockable;
       const revealed = researched || unlockable;
-      const fill = researched
-        ? "rgba(19, 64, 45, 0.96)"
-        : (unlockable ? "rgba(31, 60, 95, 0.95)" : "rgba(36, 44, 56, 0.9)");
-      const stroke = researched
-        ? "rgba(133, 255, 186, 0.95)"
-        : (unlockable ? "rgba(150, 220, 255, 0.92)" : "rgba(124, 139, 160, 0.5)");
-      drawPanel(
-        drawCtx,
-        x,
-        y,
-        nodeWidth,
-        nodeHeight,
-        clamp(nodeHeight * 0.16, 7, 12),
-        fill,
-        stroke,
-        researched || unlockable ? 1.5 : 1.1
-      );
+      const nodeSprite = researched ? RPG.panelInset_beige : (unlockable ? RPG.panelInset_blue : RPG.panelInset_brown);
+      if (!draw9Slice(drawCtx, nodeSprite, x, y, nodeWidth, nodeHeight, 8)) {
+        const fill = researched ? "rgba(60, 48, 25, 0.96)" : (unlockable ? "rgba(40, 55, 80, 0.95)" : THEME.hudBg);
+        const stroke = researched ? "rgba(220, 190, 80, 0.95)" : (unlockable ? THEME.selectedGlow : THEME.hudBorder);
+        drawPanel(drawCtx, x, y, nodeWidth, nodeHeight, clamp(nodeHeight * 0.16, 7, 12), fill, stroke, researched || unlockable ? 1.5 : 1.1);
+      }
 
       if (!revealed) {
-        drawCtx.fillStyle = "rgba(205, 215, 230, 0.9)";
+        drawCtx.fillStyle = THEME.textSecondary;
         drawCtx.textAlign = "center";
         drawCtx.textBaseline = "middle";
         drawCtx.font = `700 ${clamp(nodeHeight * 0.46, 22, 34)}px ${FONT_STACK}`;
@@ -4340,17 +4267,9 @@ export function createUiOverlay({
         const iconSize = Math.max(14, nodeHeight - 12);
         const iconX = x + ((nodeWidth - iconSize) * 0.5);
         const iconY = y + ((nodeHeight - iconSize) * 0.5);
-        drawPanel(
-          drawCtx,
-          iconX,
-          iconY,
-          iconSize,
-          iconSize,
-          clamp(iconSize * 0.2, 6, 9),
-          "rgba(7, 16, 27, 0.7)",
-          "rgba(122, 182, 236, 0.8)",
-          1
-        );
+        if (!draw9Slice(drawCtx, RPG.panelInset_brown, iconX, iconY, iconSize, iconSize, 6)) {
+          drawPanel(drawCtx, iconX, iconY, iconSize, iconSize, clamp(iconSize * 0.2, 6, 9), THEME.hudBg, THEME.hudBorder, 1);
+        }
         drawIconById(drawCtx, node.iconId, iconX + 2, iconY + 2, iconSize - 4);
       }
 
@@ -4410,27 +4329,19 @@ export function createUiOverlay({
       tooltipX = clamp(tooltipX, viewX + 4, viewX + viewWidth - tooltipWidth - 4);
       tooltipY = clamp(tooltipY, viewY + 4, viewY + viewHeight - tooltipHeight - 4);
 
-      drawPanel(
-        drawCtx,
-        tooltipX,
-        tooltipY,
-        tooltipWidth,
-        tooltipHeight,
-        8,
-        "rgba(9, 15, 26, 0.97)",
-        "rgba(139, 195, 244, 0.8)",
-        1.3
-      );
+      if (!draw9Slice(drawCtx, RPG.panel_brown, tooltipX, tooltipY, tooltipWidth, tooltipHeight, 10)) {
+        drawPanel(drawCtx, tooltipX, tooltipY, tooltipWidth, tooltipHeight, 8, THEME.panelBg, THEME.panelBorder, 1.3);
+      }
 
       let lineY = tooltipY + tooltipPaddingY;
-      drawCtx.fillStyle = "rgba(238, 247, 255, 0.98)";
+      drawCtx.fillStyle = THEME.textPrimary;
       drawCtx.font = `700 ${titleFontSize}px ${FONT_STACK}`;
       drawCtx.fillText(title, tooltipX + tooltipPaddingX, lineY);
       lineY += titleFontSize;
 
       if (description.length > 0) {
         lineY += lineGap;
-        drawCtx.fillStyle = "rgba(182, 209, 233, 0.95)";
+        drawCtx.fillStyle = THEME.textSecondary;
         drawCtx.font = `500 ${bodyFontSize}px ${FONT_STACK}`;
         const fittedDescription = fitLabelText(
           drawCtx,
@@ -4446,7 +4357,7 @@ export function createUiOverlay({
 
       if (status.length > 0) {
         lineY += lineGap;
-        drawCtx.fillStyle = "rgba(166, 255, 205, 0.98)";
+        drawCtx.fillStyle = THEME.textGold;
         drawCtx.font = `600 ${bodyFontSize}px ${FONT_STACK}`;
         const fittedStatus = fitLabelText(
           drawCtx,
