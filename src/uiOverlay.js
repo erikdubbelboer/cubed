@@ -1920,6 +1920,7 @@ export function createUiOverlay({
         nativeShareDisabled: false,
         fullscreenLabel: "Enter Fullscreen",
         fullscreenDisabled: false,
+        fullscreenVisible: true,
       },
       pauseMenu: {
         title: "Paused",
@@ -1928,6 +1929,7 @@ export function createUiOverlay({
         resumeDisabled: false,
         fullscreenLabel: "Enter Fullscreen",
         fullscreenDisabled: false,
+        fullscreenVisible: true,
       },
       weaponMenu: {
         title: "Choose Your Weapon",
@@ -2214,6 +2216,7 @@ export function createUiOverlay({
             ? mainMenu.fullscreenLabel
             : "Enter Fullscreen",
           fullscreenDisabled: mainMenu.fullscreenDisabled === true,
+          fullscreenVisible: mainMenu.fullscreenVisible !== false,
         };
       }
 
@@ -2233,6 +2236,7 @@ export function createUiOverlay({
             ? pauseMenu.fullscreenLabel
             : "Enter Fullscreen",
           fullscreenDisabled: pauseMenu.fullscreenDisabled === true,
+          fullscreenVisible: pauseMenu.fullscreenVisible !== false,
         };
       }
 
@@ -3577,10 +3581,10 @@ export function createUiOverlay({
       : 0;
     const sliderBlockHeight = 52;
     const mouseSensitivityVisible = state.runtimeUi.mouseSensitivityVisible === true;
+    const fullscreenVisible = mainMenu.fullscreenVisible !== false;
     const settingsBlockHeight = sliderBlockHeight
       + (mouseSensitivityVisible ? sliderBlockHeight + 10 : 0)
-      + 10
-      + buttonHeight;
+      + (fullscreenVisible ? 10 + buttonHeight : 0);
     const panelHeight = (pad * 2)
       + titleBlockHeight
       + buttonHeight
@@ -3695,15 +3699,17 @@ export function createUiOverlay({
       cursorY += sensitivitySliderLayout.height + 10;
     }
 
-    drawRuntimeButton({
-      x: panelX + pad,
-      y: cursorY,
-      width: panelWidth - (pad * 2),
-      height: buttonHeight,
-      label: mainMenu.fullscreenLabel || "Enter Fullscreen",
-      actionId: "main_fullscreen",
-      disabled: mainMenu.fullscreenDisabled === true,
-    });
+    if (fullscreenVisible) {
+      drawRuntimeButton({
+        x: panelX + pad,
+        y: cursorY,
+        width: panelWidth - (pad * 2),
+        height: buttonHeight,
+        label: mainMenu.fullscreenLabel || "Enter Fullscreen",
+        actionId: "main_fullscreen",
+        disabled: mainMenu.fullscreenDisabled === true,
+      });
+    }
 
     drawCtx.textAlign = "left";
     drawCtx.textBaseline = "alphabetic";
@@ -3720,13 +3726,14 @@ export function createUiOverlay({
     const sectionGap = compact ? 12 : 14;
     const sliderBlockHeight = 52;
     const mouseSensitivityVisible = state.runtimeUi.mouseSensitivityVisible === true;
+    const pauseFullscreenVisible = pauseMenu.fullscreenVisible !== false;
     const settingsBlockHeight = sliderBlockHeight + (mouseSensitivityVisible ? sliderBlockHeight + 10 : 0);
     const panelHeight = (pad * 2) + 6
       + buttonHeight
       + buttonHeight
       + settingsBlockHeight
-      + buttonHeight
-      + (sectionGap * 3);
+      + (pauseFullscreenVisible ? buttonHeight : 0)
+      + (sectionGap * (pauseFullscreenVisible ? 3 : 2));
     const panelX = (viewportWidth - panelWidth) * 0.5;
     const panelY = clamp((viewportHeight - panelHeight) * 0.5, 8, Math.max(8, viewportHeight - panelHeight - 8));
 
@@ -3785,15 +3792,17 @@ export function createUiOverlay({
       cursorY += sensitivitySliderLayout.height + sectionGap;
     }
 
-    drawRuntimeButton({
-      x: panelX + pad,
-      y: cursorY,
-      width: panelWidth - (pad * 2),
-      height: buttonHeight,
-      label: pauseMenu.fullscreenLabel || "Enter Fullscreen",
-      actionId: "pause_fullscreen",
-      disabled: pauseMenu.fullscreenDisabled === true,
-    });
+    if (pauseFullscreenVisible) {
+      drawRuntimeButton({
+        x: panelX + pad,
+        y: cursorY,
+        width: panelWidth - (pad * 2),
+        height: buttonHeight,
+        label: pauseMenu.fullscreenLabel || "Enter Fullscreen",
+        actionId: "pause_fullscreen",
+        disabled: pauseMenu.fullscreenDisabled === true,
+      });
+    }
 
     drawCtx.textAlign = "left";
     drawCtx.textBaseline = "alphabetic";

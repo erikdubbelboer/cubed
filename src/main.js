@@ -880,6 +880,15 @@ function loadErudaConsole() {
 loadErudaConsole();
 
 const initialLobbyQueryCode = (() => {
+  const sdk = window.PokiSDK;
+  if (sdk && typeof sdk.getURLParam === "function") {
+    try {
+      const pokiCode = sdk.getURLParam("lobby");
+      if (typeof pokiCode === "string" && pokiCode.trim().length > 0) {
+        return pokiCode.trim();
+      }
+    } catch (_e) { /* fall through to standard URL params */ }
+  }
   const params = new URLSearchParams(window.location.search);
   const code = params.get("lobby");
   return typeof code === "string" && code.trim().length > 0
@@ -1051,6 +1060,60 @@ function getLobbyShareUrl(lobbyCode) {
     url.searchParams.delete("lobby");
   }
   return url.toString();
+}
+
+let pokiShareUrlCache = new Map();
+let pokiShareUrlPending = new Map();
+
+function getPokiShareUrl(lobbyCode) {
+  if (!lobbyCode || pokiIntegrationDisabled) {
+    return null;
+  }
+  return pokiShareUrlCache.get(lobbyCode) ?? null;
+}
+
+function requestPokiShareUrl(lobbyCode) {
+  if (!lobbyCode || pokiIntegrationDisabled) {
+    return;
+  }
+  if (pokiShareUrlCache.has(lobbyCode) || pokiShareUrlPending.has(lobbyCode)) {
+    return;
+  }
+  const sdk = window.PokiSDK;
+  if (!sdk || typeof sdk.shareableURL !== "function") {
+    return;
+  }
+  pokiShareUrlPending.set(lobbyCode, true);
+  try {
+    const result = sdk.shareableURL({ lobby: lobbyCode });
+    if (result && typeof result.then === "function") {
+      result.then((url) => {
+        pokiShareUrlPending.delete(lobbyCode);
+        if (typeof url === "string" && url.length > 0) {
+          pokiShareUrlCache.set(lobbyCode, url);
+          updateShareOverlayFromLobbyState();
+        }
+      }).catch(() => {
+        pokiShareUrlPending.delete(lobbyCode);
+      });
+    } else {
+      pokiShareUrlPending.delete(lobbyCode);
+    }
+  } catch (_e) {
+    pokiShareUrlPending.delete(lobbyCode);
+  }
+}
+
+function getEffectiveLobbyShareUrl(lobbyCode) {
+  if (!lobbyCode) {
+    return "";
+  }
+  const pokiUrl = getPokiShareUrl(lobbyCode);
+  if (pokiUrl) {
+    return pokiUrl;
+  }
+  requestPokiShareUrl(lobbyCode);
+  return getLobbyShareUrl(lobbyCode);
 }
 
 const shareLinkInput = document.createElement("input");
@@ -2501,7 +2564,7 @@ function updateShareOverlayFromLobbyState() {
     mpLog("Share overlay reset (no lobby code)");
     return;
   }
-  const shareUrl = getLobbyShareUrl(state.lobbyCode);
+  const shareUrl = getEffectiveLobbyShareUrl(state.lobbyCode);
   shareLinkInput.value = shareUrl;
   mpLog("Share overlay updated", { lobbyCode: state.lobbyCode, shareUrl });
 }
@@ -2678,7 +2741,7 @@ function refreshMenuUi() {
   const shareVisible = !autoJoinPending
     && (!multiplayerState.inLobby || (multiplayerState.isHost && Number(multiplayerState.peerCount) <= 0));
   const shareUrl = waitingForPeer && multiplayerState.lobbyCode
-    ? getLobbyShareUrl(multiplayerState.lobbyCode)
+    ? getEffectiveLobbyShareUrl(multiplayerState.lobbyCode)
     : "";
   const pauseTitle = isMultiplayerWithPeer() ? "Menu" : "Paused";
   const pauseSubtitle = isMultiplayerWithPeer()
@@ -2688,6 +2751,7 @@ function refreshMenuUi() {
     ? "Host controls difficulty."
     : "Difficulty changes starting cash and enemy health.";
   const fullscreenLabel = isGameFullscreen() ? "Exit Fullscreen" : "Enter Fullscreen";
+  const fullscreenVisible = isFullscreenDocumentEnabled();
   const fullscreenDisabled = fullscreenRequestPending || !canToggleGameFullscreen();
   const hostToast = getHostLobbyToastViewState();
   const mouseSensitivityVisible = true;
@@ -2722,6 +2786,7 @@ function refreshMenuUi() {
       nativeShareDisabled: false,
       fullscreenLabel,
       fullscreenDisabled,
+      fullscreenVisible,
     },
     pauseMenu: {
       title: pauseTitle,
@@ -2730,6 +2795,7 @@ function refreshMenuUi() {
       resumeDisabled: false,
       fullscreenLabel,
       fullscreenDisabled,
+      fullscreenVisible,
     },
     weaponMenu: {
       title: WEAPON_MENU_TITLE,

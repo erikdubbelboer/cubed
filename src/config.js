@@ -165,8 +165,8 @@ export const GAME_CONFIG = {
     initialWave: 1,
     // Delay after clearing a wave before build phase starts (seconds). Typical range: 0.5-4.
     upgradeDelaySeconds: 2.0,
-    // Build phase duration after each wave clear (seconds). Typical range: 30-600.
-    buildPhaseDurationSeconds: 300,
+    // Build phase duration after each wave clear (seconds). Typical range: 10-600.
+    buildPhaseDurationSeconds: 10,
     // Behavior once the configured rounds are exhausted.
     // "stay_on_last": keep replaying the final configured round.
     afterLastRound: "stay_on_last",
